@@ -1,3 +1,5 @@
+/* Theme tokens. Change the dashboard color system here first; most components
+   below consume these custom properties instead of hard-coded colors. */
 :root {
   --bg: #070a11;
   --panel: #111723;
@@ -14,6 +16,9 @@
   --red: #ff4f67;
   --purple: #b692ff;
 }
+
+/* Global document reset and base typography. Body overflow is hidden on desktop
+   because the dashboard is designed as a fixed cockpit-style layout. */
 * { box-sizing: border-box; }
 body {
   margin: 0;
@@ -24,6 +29,9 @@ body {
 }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
+
+/* Main two-column application layout. Adjust the left column width here when
+   the session/class panels need more or less horizontal space. */
 .dashboard-shell {
   width: 100vw;
   height: 100vh;
@@ -32,9 +40,15 @@ button { cursor: pointer; }
   gap: 12px;
   padding: 14px;
 }
+
+/* Column row sizing. The left column reserves fixed room for session and warning
+   panels while letting the class timing table fill the remaining height. */
 .left-column, .right-column { display: grid; gap: 12px; min-height: 0; }
 .left-column { grid-template-rows: 255px minmax(0, 1fr) 118px; }
 .right-column { grid-template-rows: auto minmax(0, 1fr) auto; }
+
+/* Shared panel shell. Individual panels below override padding/layout but reuse
+   this surface treatment. */
 .panel {
   background: linear-gradient(180deg, rgba(21,28,42,0.94), rgba(10,14,22,0.94));
   border: 1px solid var(--line);
@@ -42,6 +56,8 @@ button { cursor: pointer; }
   box-shadow: 0 18px 45px rgba(0,0,0,.22);
   overflow: hidden;
 }
+
+/* Reusable text helpers and compact headings. */
 .eyebrow {
   margin: 0 0 6px;
   font-size: 12px;
@@ -55,6 +71,9 @@ h1 { font-size: 22px; line-height: 1.08; margin-bottom: 8px; overflow-wrap: anyw
 h2 { font-size: 21px; line-height: 1.1; margin-bottom: 4px; }
 h3 { font-size: 16px; }
 .note, .subtitle, .muted { color: var(--muted); }
+
+/* Session/followed-car summary card. IDs inside this area are updated by
+   updateSession() and renderFollowed() in app.js. */
 .session-panel { padding: 18px; display: grid; grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; min-height:0; }
 .session-grid {
   display: grid;
@@ -71,6 +90,9 @@ h3 { font-size: 16px; }
 }
 .session-grid span, .followed-grid span { display:block; color: var(--muted-2); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; font-weight: 800; }
 .session-grid strong { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display:block; }
+
+/* Same-class timing panel and table styling. Sticky headers keep context while
+   scrolling through larger timing tables. */
 .class-panel { padding: 16px; min-height: 0; display: grid; grid-template-rows: auto 1fr; }
 .section-header { display:flex; align-items:center; justify-content:space-between; gap: 16px; margin-bottom: 12px; }
 .section-header.compact { margin-bottom: 8px; }
@@ -83,6 +105,8 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.025); }
 tr.followed { background: rgba(75,141,255,.25) !important; outline: 1px solid rgba(75,141,255,.45); }
 .catch-cell { white-space: normal; min-width: 210px; max-width: 350px; }
 .mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* Norm-time warning panel. The severity class is selected by renderWarning(). */
 .warning-panel { padding: 16px 20px; display:flex; flex-direction:column; justify-content:center; border-color: #514735; }
 .warning-panel h2 { font-size: 22px; margin-bottom: 6px; }
 .warning-panel.safe { border-color: rgba(39,217,128,.35); background: linear-gradient(180deg, rgba(18,50,37,.85), rgba(9,16,17,.92)); }
@@ -90,6 +114,9 @@ tr.followed { background: rgba(75,141,255,.25) !important; outline: 1px solid rg
 .warning-panel.critical { border-color: rgba(255,140,66,.65); background: linear-gradient(180deg, rgba(70,39,22,.9), rgba(19,12,8,.94)); }
 .warning-panel.bad { border-color: rgba(255,79,103,.7); background: linear-gradient(180deg, rgba(72,23,37,.92), rgba(19,8,13,.95)); }
 .warning-panel p { color: #e9edf5; }
+
+/* Original topbar/control grid styles. The simplified topbar block later in this
+   file overrides parts of these rules while keeping form/button primitives. */
 .topbar { padding: 14px; display: grid; grid-template-columns: 220px minmax(0,1fr); gap: 14px; min-height: 170px; overflow: visible; }
 .status-block { display:flex; flex-direction:column; justify-content:space-between; gap: 10px; }
 .status-block small { display:block; color: var(--muted); margin-top: 3px; }
@@ -112,6 +139,9 @@ button.muted-primary { background: linear-gradient(135deg, #5e4baa, #7b6fe8); }
 .control-buttons { grid-column: 1 / 3; }
 .replay-controls { grid-column: 3 / 6; display:flex; gap: 6px; align-items:center; justify-content:flex-end; color: var(--muted); flex-wrap: wrap; }
 .replay-controls select { width:auto; min-width: 95px; }
+
+/* Graph panel and SVG chart primitives. app.js creates inline SVG using these
+   classes, so update both files if adding new graph color classes. */
 .graph-panel { padding: 18px; display:grid; grid-template-rows:auto auto 1fr; min-height: 0; }
 .graph-picker { min-width: 260px; }
 .graph-meta { color: var(--muted); margin-bottom: 8px; }
@@ -132,6 +162,8 @@ svg { width: 100%; height: 100%; display:block; }
 .graph-line.c6, circle.c6, .legend-dot.c6 { stroke: #4bd6ff; background:#4bd6ff; fill:#4bd6ff; }
 .reference-line { stroke: #ff4f67; stroke-width: 2; stroke-dasharray: 8 8; opacity: .85; }
 .bar.c1 { fill: #4b8dff; } .bar.c2 { fill: #ffc857; } .bar.c3 { fill: #27d980; }
+
+/* Collapsible details/debug area. Tabs are toggled by setupDetailTabs(). */
 .details-panel { min-height:0; padding: 8px 12px; }
 details { height:100%; min-height:0; display:flex; flex-direction:column; }
 summary { cursor:pointer; color: var(--muted); font-weight:800; margin-bottom: 8px; }
@@ -146,11 +178,16 @@ summary { cursor:pointer; color: var(--muted); font-weight:800; margin-bottom: 8
 pre { margin:0; white-space:pre-wrap; overflow:auto; max-height:150px; background:#070b12; border:1px solid var(--line); border-radius:12px; padding:10px; color:#d5dcee; }
 .picker { display:flex; gap: 6px; flex-wrap:wrap; margin-top: 6px; }
 .mini-button { padding: 5px 8px; font-size: 12px; }
+
+/* First-run/setup modal. Keep IDs synchronized with app.js when adding settings. */
 .setup-modal { position: fixed; inset:0; background: rgba(3,6,10,.82); z-index: 50; display:flex; align-items:center; justify-content:center; padding: 20px; }
 .setup-modal.hidden { display:none; }
 .setup-card { width:min(820px, 94vw); background: linear-gradient(180deg, #171f2f, #0d121c); border:1px solid var(--line-strong); border-radius: 22px; padding: 24px; box-shadow:0 25px 80px rgba(0,0,0,.55); }
 .setup-row { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
 .setup-card input { margin-bottom: 12px; }
+
+/* Responsive single-column layout for narrow screens. The app is primarily a
+   desktop dashboard, but this keeps it usable on smaller displays. */
 @media (max-width: 1100px) {
   body { overflow:auto; }
   .dashboard-shell { height:auto; min-height:100vh; grid-template-columns: 1fr; }
@@ -160,7 +197,7 @@ pre { margin:0; white-space:pre-wrap; overflow:auto; max-height:150px; backgroun
   .storage-field, .control-buttons, .replay-controls { grid-column: 1 / -1; justify-content:flex-start; }
 }
 
-
+/* Native details element cleanup when collapsed. */
 details:not([open]) { height: auto; }
 details:not([open]) .tabs, details:not([open]) .detail-tab { display: none !important; }
 

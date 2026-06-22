@@ -1,19 +1,36 @@
+// Short DOM lookup helper used throughout the renderer. All IDs referenced here
+// must exist in index.html, including the hidden settings inputs.
 const $ = (id) => document.getElementById(id);
+
+// currentSettings mirrors the persisted settings from the main process.
+// currentState mirrors collectorState from src/main/main.js.
 let currentSettings = null;
 let currentState = null;
+
+// Caches catch-estimate results when live timing temporarily lacks enough gap
+// data. Clear or change this keying if battle estimates should reset per session.
 const battleCache = new Map();
 
+// Maps collector/replay states to the visual status pill classes in styles.css.
 function statusClass(status) {
   if (['collecting', 'connected', 'replay_finished'].includes(status)) return 'ok';
   if (['waiting', 'loading', 'idle', 'replay_paused'].includes(status)) return 'warn';
   return 'bad';
 }
+
+// Updates the compact status pill. The message is currently shown elsewhere via
+// debug/state data; add a visible message target here if the topbar needs one.
 function setStatus(status, message) {
   const pill = $('status-pill');
   pill.className = `status-pill ${statusClass(status)}`;
   $('status-text').textContent = String(status || 'idle').toUpperCase();
 }
+
+// Displays missing table values consistently.
 function rowValue(value) { return value === null || value === undefined || value === '' ? '—' : value; }
+
+// Renderer-side copy of timing formatting for graphs and warning text. Keep it
+// behaviorally aligned with src/shared/parser.js when changing time formats.
 function formatMs(ms) {
   if (ms === null || ms === undefined || !Number.isFinite(ms)) return '—';
   const sign = ms < 0 ? '-' : '';
@@ -25,18 +42,25 @@ function formatMs(ms) {
   if (hours > 0) return `${sign}${hours}:${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}.${String(milli).padStart(3,'0')}`;
   return `${sign}${minutes}:${String(seconds).padStart(2,'0')}.${String(milli).padStart(3,'0')}`;
 }
+
 function formatSeconds(ms) { return Number.isFinite(ms) ? `${(ms / 1000).toFixed(3)}s` : '—'; }
+
+// Numeric helpers used by graph summaries and driver/stint tables.
 function average(values) {
   const usable = values.filter((value) => Number.isFinite(value));
   if (!usable.length) return null;
   return usable.reduce((sum, value) => sum + value, 0) / usable.length;
 }
+
 function stddev(values) {
   const usable = values.filter((value) => Number.isFinite(value));
   if (usable.length < 2) return null;
   const avg = average(usable);
   return Math.sqrt(average(usable.map((value) => (value - avg) ** 2)));
 }
+
+// Parses lap/gap strings in the renderer so UI calculations do not need another
+// round trip to the main process. Keep supported formats aligned with parser.js.
 function parseLapTimeToMs(text) {
   const raw = String(text || '').trim().replace(',', '.');
   if (!raw || /^(—|-|--|\?|in pit|out lap)$/i.test(raw)) return null;
@@ -62,27 +86,38 @@ function parseLapTimeToMs(text) {
   }
   return seconds === null ? null : Math.round(seconds * 1000);
 }
+
+// Converts a GAP/DIFF cell to milliseconds when possible. Lap-based gaps are
+// intentionally ignored because they cannot be converted to time directly.
 function parseGapToMs(value) {
   const text = String(value || '').trim();
   if (!text || text === '--' || text === '?' || /lap/i.test(text)) return null;
   return parseLapTimeToMs(text.replace(/^\+/, ''));
 }
+
+// Returns completed stored laps for one car in chronological order.
 function lapsForCar(history, carNumber) {
   return (history || [])
     .filter((entry) => String(entry.carNumber) === String(carNumber) && Number.isFinite(entry.lastLapMs))
     .sort((a, b) => (Number(a.lapNumber) - Number(b.lapNumber)) || (new Date(a.recordedAt) - new Date(b.recordedAt)));
 }
+
+// Computes recent race pace for catch estimates. Change n at call sites when a
+// shorter or longer pace window is wanted.
 function recentAverageForCar(history, carNumber, n = 5) {
   const laps = lapsForCar(history, carNumber).slice(-n);
   return average(laps.map((entry) => entry.lastLapMs));
 }
 
+// Updates the session summary card in the left column.
 function updateSession(session = {}) {
   $('session-name').textContent = session.sessionName || session.statusText || session.pageTitle || '—';
   $('session-time').textContent = session.timeToGo || session.pageUpdated || '—';
   $('session-flag').textContent = session.flag || '—';
 }
 
+// Updates the followed-car panel and shows quick-pick buttons when the chosen
+// car number is not currently present in the live table.
 function renderFollowed(rows) {
   const wanted = String($('followed-car').value || '').trim();
   const match = rows.find((row) => String(row.carNumber) === wanted);
@@ -112,6 +147,9 @@ function renderFollowed(rows) {
   $('f-lap').textContent = rowValue(row.lapNumber);
 }
 
+// Builds same-class "battle" rows with catch/being-caught estimates. The logic
+// compares recent average lap pace and relative gaps, so it depends on stored
+// lap history as well as the current timing table.
 function buildBattleItems(rows, history) {
   const wanted = String($('followed-car').value || '').trim();
   const followed = rows.find((row) => String(row.carNumber) === wanted);
@@ -131,6 +169,8 @@ function buildBattleItems(rows, history) {
       relativeGap = relation === 'ahead' ? ourGap - theirGap : theirGap - ourGap;
       if (relativeGap < 0) relativeGap = null;
     }
+    // A positive deltaPerLap means the chasing car is faster by that amount per
+    // lap. The estimate is intentionally conservative when gap data is missing.
     let deltaPerLap = null, lapsToCatch = null, minutesToCatch = null, estimate = 'not enough gap data';
     if (Number.isFinite(relativeGap) && Number.isFinite(ourAvg) && Number.isFinite(theirAvg) && relativeGap > 0) {
       if (relation === 'ahead') {
@@ -157,6 +197,7 @@ function buildBattleItems(rows, history) {
   });
 }
 
+// Renders the same-class timing table and highlights the followed car.
 function renderClassTable(rows, history) {
   const tbody = document.querySelector('#class-table tbody');
   tbody.innerHTML = '';
@@ -193,6 +234,7 @@ function renderClassTable(rows, history) {
   });
 }
 
+// Renders the full parsed timing table in the details/debug area.
 function renderAllRowsTable(rows) {
   const tbody = document.querySelector('#cars-table tbody');
   tbody.innerHTML = '';
@@ -209,6 +251,8 @@ function renderAllRowsTable(rows) {
   });
 }
 
+// Converts our last lap and the configured norm/reference time into a warning
+// level used by the warning panel CSS classes.
 function normStatus(lapMs, referenceMs) {
   if (!Number.isFinite(lapMs) || !Number.isFinite(referenceMs)) return { level: 'unknown', title: 'No reference warning yet', detail: 'Set the reference time in settings. The panel updates when our last lap is close to or below that time.' };
   const margin = lapMs - referenceMs;
@@ -217,6 +261,8 @@ function normStatus(lapMs, referenceMs) {
   if (margin <= 1000) return { level: 'warning', title: 'Warning: close to norm time', detail: `Last lap is ${formatSeconds(margin)} above the norm time ${formatMs(referenceMs)}.` };
   return { level: 'safe', title: 'Safe margin to norm time', detail: `Last lap is ${formatSeconds(margin)} slower than the norm time ${formatMs(referenceMs)}.` };
 }
+
+// Updates the norm-time warning panel for the followed car.
 function renderWarning(rows) {
   const wanted = String($('followed-car').value || '').trim();
   const followed = rows.find((row) => String(row.carNumber) === wanted);
@@ -228,15 +274,21 @@ function renderWarning(rows) {
   $('warning-detail').textContent = info.detail;
 }
 
+// Wraps inline SVG chart bodies. Graphs are generated directly in the renderer
+// so they can update without external chart dependencies.
 function svgBase(width, height, body) {
   return `<svg viewBox="0 0 ${width} ${height}" role="img">${body}</svg>`;
 }
+
+// Draws one or more lap-time series. To add tooltips or axes, extend this
+// helper so all line graphs inherit the behavior.
 function drawLineGraph(container, series, opts = {}) {
   container.innerHTML = '';
   const width = Math.max(760, container.clientWidth || 900);
   const height = Math.max(420, container.clientHeight || 420);
   const padL = 72, padR = 28, padT = 42, padB = 54;
 
+  // Normalize graph points so every series has plot coordinates and lap labels.
   const normalizedSeries = (series || []).map((s) => ({
     ...s,
     points: (s.points || [])
@@ -257,6 +309,7 @@ function drawLineGraph(container, series, opts = {}) {
   const yScale = (y) => maxY === minY ? height / 2 : height - padB - ((y - minY) / (maxY - minY)) * (height - padT - padB);
   const palette = ['c1','c2','c3','c4','c5','c6'];
 
+  // Simple five-line Y grid. Increase this array if denser charts are needed.
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((fraction) => {
     const yValue = minY + (maxY - minY) * fraction;
     const y = yScale(yValue);
@@ -289,6 +342,7 @@ function drawLineGraph(container, series, opts = {}) {
   `);
 }
 
+// Draws grouped sector bars, currently used for driver sector comparisons.
 function drawBarGraph(container, groups, title) {
   container.innerHTML = '';
   const width = Math.max(760, container.clientWidth || 900), height = Math.max(420, container.clientHeight || 420), pad = 58;
@@ -311,6 +365,8 @@ function drawBarGraph(container, groups, title) {
   `);
 }
 
+// Registry for switchable graph views. Add new graph types by appending an
+// object with id, label, description, and render(container, state).
 const graphRegistry = [
   {
     id: 'lapTimeByDriver',
@@ -362,6 +418,8 @@ const graphRegistry = [
     }
   }
 ];
+
+// Populates the graph selector from graphRegistry so the HTML stays generic.
 function setupGraphRegistry() {
   const select = $('graph-select');
   select.innerHTML = '';
@@ -373,6 +431,9 @@ function setupGraphRegistry() {
   });
   select.onchange = () => renderGraph(currentState || { lapHistory: [], rows: [] });
 }
+
+// Selects and renders the active graph. Falls back to the first registry item
+// so the dashboard remains usable if a saved/old graph id disappears.
 function renderGraph(state) {
   const graph = graphRegistry.find((g) => g.id === $('graph-select').value) || graphRegistry[0];
   $('graph-title').textContent = graph.label;
@@ -380,6 +441,7 @@ function renderGraph(state) {
   graph.render($('main-graph'), state || { rows: [], lapHistory: [] });
 }
 
+// Summarizes stored laps by driver/stint for the details panel.
 function renderDriverSummary(laps) {
   const tbody = document.querySelector('#driver-table tbody'); tbody.innerHTML = '';
   const grouped = new Map();
@@ -394,6 +456,8 @@ function renderDriverSummary(laps) {
     tbody.appendChild(tr);
   });
 }
+
+// Shows recent stored laps for the followed car.
 function renderHistoryTable(laps) {
   const tbody = document.querySelector('#history-table tbody'); tbody.innerHTML = '';
   if (!laps.length) { tbody.innerHTML = '<tr><td colspan="6" class="muted">No stored laps yet.</td></tr>'; return; }
@@ -403,6 +467,9 @@ function renderHistoryTable(laps) {
     tbody.appendChild(tr);
   });
 }
+
+// Updates all details/debug tabs. Debug data mirrors parser diagnostics from
+// the main process and is useful when a live timing page changes its markup.
 function renderDetails(state) {
   const wanted = String($('followed-car').value || '').trim();
   const laps = lapsForCar(state.lapHistory || [], wanted);
@@ -413,10 +480,15 @@ function renderDetails(state) {
   $('tables-debug').textContent = JSON.stringify(state.diagnostics?.tableSummaries || state.diagnostics || [], null, 2);
   $('errors-debug').textContent = JSON.stringify(state.errors || [], null, 2);
 }
+
+// Updates replay progress text if the replay controls are present.
 function renderReplay(state) {
   const replay = state.replay || {};
   if ($('replay-status')) $('replay-status').textContent = replay.active ? `${replay.currentLap || 0} / ${replay.maxLap || 0}` : 'not running';
 }
+
+// Central render function called on every collector:update event. Keep new UI
+// panels wired here so they update for both live mode and replay mode.
 function render(state) {
   currentState = state || {};
   const rows = currentState.rows || [], history = currentState.lapHistory || [];
@@ -434,6 +506,8 @@ function render(state) {
   renderDetails(currentState);
 }
 
+// Opens the native folder picker through the preload bridge and synchronizes
+// both hidden main inputs and visible setup-modal inputs.
 async function chooseAndSetFolder(targetInputId = 'storage-folder') {
   const folder = await window.liveTiming.chooseFolder();
   if (folder) {
@@ -443,6 +517,9 @@ async function chooseAndSetFolder(targetInputId = 'storage-folder') {
   }
   return folder;
 }
+
+// Reads settings from hidden inputs and persists them in the main process.
+// Add new user settings to this patch and to main.js loadSettings/settings:set.
 async function saveSettingsFromInputs(setupComplete = false) {
   const patch = {
     timingUrl: $('timing-url').value.trim(),
@@ -457,22 +534,31 @@ async function saveSettingsFromInputs(setupComplete = false) {
   currentSettings = await window.liveTiming.setSettings(patch);
   return currentSettings;
 }
+
+// Copies hidden dashboard settings into the visible setup modal.
 function syncSetupFromMain() {
   $('setup-url').value = $('timing-url').value;
   $('setup-car').value = $('followed-car').value;
   $('setup-reference').value = $('reference-time').value;
   $('setup-folder').value = $('storage-folder').value;
 }
+
+// Copies visible setup modal values back into the hidden dashboard inputs used
+// by the rest of app.js.
 function syncMainFromSetup() {
   $('timing-url').value = $('setup-url').value;
   $('followed-car').value = $('setup-car').value;
   $('reference-time').value = $('setup-reference').value;
   $('storage-folder').value = $('setup-folder').value;
 }
+
+// Opens or closes the first-run/setup modal.
 function showSetup(show = true) {
   syncSetupFromMain();
   $('setup-modal').classList.toggle('hidden', !show);
 }
+
+// Enables the All rows / Stored laps / Parser debug tab buttons.
 function setupDetailTabs() {
   document.querySelectorAll('.tab').forEach((button) => {
     button.addEventListener('click', () => {
@@ -484,6 +570,8 @@ function setupDetailTabs() {
   });
 }
 
+// Renderer entry point. It loads persisted settings, wires UI events to the
+// preload API, subscribes to collector updates, and opens setup when required.
 async function init() {
   currentSettings = await window.liveTiming.getSettings();
   $('timing-url').value = currentSettings.timingUrl || 'https://livetiming.getraceresults.com/demo#screen-results';
@@ -497,6 +585,8 @@ async function init() {
   setupGraphRegistry();
   setupDetailTabs();
 
+  // Race-day controls: each button calls a small preload API method, which then
+  // invokes the matching ipcMain handler in main.js.
   $('start')?.addEventListener('click', async () => { await saveSettingsFromInputs(true); await window.liveTiming.startCollector(currentSettings.timingUrl); });
   $('stop')?.addEventListener('click', () => window.liveTiming.stopCollector());
   $('show-live')?.addEventListener('click', () => window.liveTiming.openLiveWindow());
@@ -510,6 +600,8 @@ async function init() {
   $('open-setup')?.addEventListener('click', () => showSetup(true));
   $('export')?.addEventListener('click', async () => { const result = await window.liveTiming.exportCurrent(); alert(`Exported:\n${result.csvPath}\n${result.jsonPath}\n${result.historyPath || ''}`); });
 
+  // Persist settings immediately when hidden inputs change. If new settings are
+  // added to the modal, include their hidden input IDs here.
   ['timing-url','followed-car','poll-interval','replay-interval','replay-laps','reference-time'].forEach((id) => $(id)?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); }));
   window.liveTiming.onCollectorUpdate(render);
   render(await window.liveTiming.getCollectorState());

@@ -7,6 +7,8 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <!-- First-run/settings modal. app.js keeps these visible inputs synchronized
+      with the hidden dashboard inputs used by the normal render/update flow. -->
     <div id="setup-modal" class="setup-modal hidden">
       <div class="setup-card">
         <p class="eyebrow">First setup</p>
@@ -35,8 +37,12 @@
       </div>
     </div>
 
+    <!-- Main dashboard shell. The left column focuses on race-engineer decisions;
+      the right column contains controls, graphs, and deeper debug/detail views. -->
     <div id="app" class="dashboard-shell">
       <section class="left-column">
+        <!-- Session and followed-car card. Values are filled by renderFollowed()
+          and updateSession() in app.js. -->
         <section class="session-panel panel">
           <div>
             <p class="eyebrow">Session</p>
@@ -58,6 +64,8 @@
           <div id="car-picker" class="picker"></div>
         </section>
 
+        <!-- Same-class timing table. renderClassTable() fills the body and catch
+          estimate text from current rows plus stored lap history. -->
         <section class="panel class-panel">
           <div class="section-header compact">
             <div>
@@ -85,6 +93,8 @@
           </div>
         </section>
 
+        <!-- Norm/reference-time warning. renderWarning() changes both text and
+          panel severity class. -->
         <section class="panel warning-panel" id="warning-panel">
           <p class="eyebrow">Norm time warning</p>
           <h2 id="warning-title">No reference warning yet</h2>
@@ -93,6 +103,7 @@
       </section>
 
       <section class="right-column">
+        <!-- Top control/status bar. Buttons call preload APIs wired in app.js. -->
         <section class="topbar panel">
           <div class="status-block">
             <div class="status-pill" id="status-pill"><span></span><strong id="status-text">Idle</strong></div>
@@ -103,7 +114,8 @@
             </div>
           </div>
 
-          <!-- Settings are edited through the setup modal, but these hidden fields keep app.js/state sync simple. -->
+          <!-- Settings are edited through the setup modal, but these hidden fields keep app.js/state sync simple.
+            Add a hidden field here when a new setting must participate in saveSettingsFromInputs(). -->
           <div class="hidden-settings" aria-hidden="true">
             <input id="timing-url" type="text" value="https://livetiming.getraceresults.com/demo#screen-results" />
             <input id="followed-car" type="text" value="33" />
@@ -130,6 +142,8 @@
           </div>
         </section>
 
+        <!-- Graph area. The select options are generated from graphRegistry in
+          app.js, so new graph renderers usually do not require HTML changes. -->
         <section class="panel graph-panel">
           <div class="section-header">
             <div>
@@ -145,6 +159,8 @@
           <div id="main-graph" class="main-graph"><span class="muted">No stored laps yet.</span></div>
         </section>
 
+        <!-- Collapsible diagnostics/details area. Parser debug mirrors the
+          diagnostics object produced by main.js normalization. -->
         <section class="panel details-panel">
           <details>
             <summary>Detailed timing table / debug</summary>

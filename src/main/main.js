@@ -10,6 +10,8 @@ const {
   formatMs
 } = require('../shared/parser');
 
+// Main-process references. Electron keeps UI windows and timers alive through
+// these variables, so every start/stop function below updates them carefully.
 let mainWindow;
 let liveWindow;
 let pollTimer;
@@ -17,8 +19,14 @@ let replayTimer;
 let replayData = null;
 let replayStep = 0;
 let replayLapsPerTick = 1;
+
+// Stores unique lap identifiers that have already been written to disk.
+// Change the key format in updateLapHistory/loadExistingHistory if duplicate
+// detection ever needs to include extra fields such as driver or class.
 const knownLapKeys = new Set();
 
+// Single source of truth for the collector UI. The renderer receives this
+// object through the "collector:update" IPC event whenever something changes.
 let collectorState = {
   status: 'idle',
   mode: 'idle',
@@ -39,9 +47,14 @@ let collectorState = {
   replay: { active: false, paused: false, currentLap: 0, maxLap: 0, source: '' }
 };
 
+// Electron chooses a safe OS-specific folder for app settings. Race data is
+// stored in Documents by default so users can easily find CSV/JSON exports.
 const settingsPath = () => path.join(app.getPath('userData'), 'settings.json');
 const defaultStorageFolder = () => path.join(app.getPath('documents'), 'ZolderLiveTimingReader');
 
+// Loads saved user settings. If the settings file does not exist or cannot be
+// parsed, the app falls back to defaults. Adjust default URLs, intervals, or
+// reference values here when changing the initial app configuration.
 function loadSettings() {
   try {
     const file = settingsPath();
@@ -61,11 +74,15 @@ function loadSettings() {
   };
 }
 
+// Persists settings as formatted JSON. Any new setting added to loadSettings()
+// can be saved here automatically because the whole settings object is written.
 function saveSettings(settings) {
   fs.mkdirSync(app.getPath('userData'), { recursive: true });
   fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 2));
 }
 
+// Creates the visible application window. Size, minimum size, theme background,
+// and the renderer entry point can be changed here.
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -77,12 +94,17 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // sandbox is disabled because the preload/main bridge is trusted in this
+      // local Electron app. Revisit this if the renderer starts loading remote UI.
       sandbox: false
     }
   });
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
 
+// Creates the hidden browser window used to load the live timing website.
+// show:false keeps it invisible during normal collection; the debug button can
+// reveal it through collector:openLiveWindow.
 function createLiveWindow() {
   if (liveWindow && !liveWindow.isDestroyed()) return liveWindow;
   liveWindow = new BrowserWindow({
@@ -95,15 +117,23 @@ function createLiveWindow() {
   return liveWindow;
 }
 
+// Pushes the latest collector state to the renderer. Add new state fields to
+// collectorState first; the whole object is sent as-is.
 function broadcastState() {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('collector:update', collectorState);
 }
 
+// Adds a compact error entry for the Debug panel. Only the latest 20 errors are
+// kept to prevent the state object from growing forever during long sessions.
 function addError(error, context = '') {
   const entry = { at: new Date().toISOString(), context, message: error?.message || String(error) };
   collectorState.errors = [entry, ...collectorState.errors].slice(0, 20);
 }
 
+// This script runs inside the hidden live timing page, not inside this Node
+// process. Keep it dependency-free because it executes in the website context.
+// If the provider changes their HTML, update the table/header extraction logic
+// here before changing the parser.
 const pageExtractionScript = String.raw`(() => {
   const clean = (value) => String(value || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const tables = Array.from(document.querySelectorAll('table')).map((table, tableIndex) => {
@@ -127,10 +157,15 @@ const pageExtractionScript = String.raw`(() => {
   return { location: window.location.href, title: document.title || '', bodyText: allText.slice(0, 12000), tables, inputs, collectedAt: new Date().toISOString() };
 })()`;
 
+// Creates a checksum for snapshot rows. The UI/debug view can use this to see
+// whether table contents changed between polls.
 function hashObject(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+// Extracts race/session metadata from the page text. These regexes are tuned to
+// common GetRaceResults wording; add patterns here when supporting new timing
+// providers or different language/page layouts.
 function parseSessionInfo(snapshot) {
   const text = cleanText(snapshot.bodyText || '');
   const session = { pageTitle: snapshot.title, url: snapshot.location, statusText: '', timeToGo: '', flag: '', sessionName: '', circuit: '', pageUpdated: '' };
@@ -161,6 +196,9 @@ function parseSessionInfo(snapshot) {
   return session;
 }
 
+// Converts a raw page snapshot into the normalized shape used by the UI,
+// storage, and replay code. The parser module owns column-name interpretation;
+// this function chooses the best table and attaches diagnostics.
 function normalizeSnapshot(snapshot) {
   const timingTable = snapshot.tables.find((table) => looksLikeTimingHeaders(table.headers));
   const diagnostics = {
@@ -187,27 +225,38 @@ function normalizeSnapshot(snapshot) {
   };
 }
 
+// Makes sure the selected storage folder exists before writing exports/history.
+// Change defaultStorageFolder() instead of this function when only the default
+// location needs to move.
 function ensureStorage(settings) {
   const folder = settings.storageFolder || defaultStorageFolder();
   fs.mkdirSync(folder, { recursive: true });
   return folder;
 }
 
+// Escapes one value for CSV output. Keep this centralized so all CSV files use
+// the same quoting rules.
 function csvEscape(value) {
   const s = String(value ?? '');
   if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
 
+// Serializes the current live timing table. Add/remove columns here when the
+// latest_live_rows.csv export should change.
 function toCsv(rows) {
   const columns = ['position','carNumber','team','car','driver','className','classPosition','gap','diff','lastLap','bestLap','inValue','lapNumber','sector1','sector2','sector3','pit'];
   return [columns.join(','), ...rows.map((row) => columns.map((col) => csvEscape(row[col])).join(','))].join('\n');
 }
 
+// Defines the persistent lap-history CSV schema. When adding columns, also add
+// matching fields in historyEntryFromRow().
 function lapHistoryColumns() {
   return ['recordedAt','sourceMode','sessionName','carNumber','team','car','driver','className','position','classPosition','gap','diff','lapNumber','lastLap','lastLapSeconds','bestLap','bestLapSeconds','sector1','sector1Seconds','sector2','sector2Seconds','sector3','sector3Seconds','pit'];
 }
 
+// Builds one durable history record from a parsed timing row. Millisecond values
+// are kept for code, while "*Seconds" fields make spreadsheets easier to use.
 function historyEntryFromRow(row, session, recordedAt, sourceMode = collectorState.mode || 'live') {
   return {
     recordedAt,
@@ -242,10 +291,13 @@ function historyEntryFromRow(row, session, recordedAt, sourceMode = collectorSta
   };
 }
 
+// Converts a history entry into one CSV row using the schema above.
 function entryToCsvRow(entry) {
   return lapHistoryColumns().map((col) => csvEscape(entry[col])).join(',');
 }
 
+// Appends one completed lap to both JSONL and CSV history files. JSONL is useful
+// for robust incremental writes; CSV is useful for spreadsheets.
 function appendHistoryEntry(settings, entry) {
   const folder = ensureStorage(settings);
   const jsonlPath = path.join(folder, 'lap_history.jsonl');
@@ -255,6 +307,8 @@ function appendHistoryEntry(settings, entry) {
   fs.appendFileSync(csvPath, `${entryToCsvRow(entry)}\n`);
 }
 
+// Loads already-recorded lap history at startup and rebuilds knownLapKeys so
+// the app does not duplicate old laps after restarting.
 function loadExistingHistory(settings) {
   knownLapKeys.clear();
   const folder = ensureStorage(settings);
@@ -274,6 +328,9 @@ function loadExistingHistory(settings) {
   }
 }
 
+// Stores newly completed laps from normalized rows. A row is considered complete
+// only when it has a car number, lap number, last lap text, and parsed last-lap
+// milliseconds. Adjust this guard if incomplete laps should also be recorded.
 function updateLapHistory(settings, normalized, sourceMode = collectorState.mode || 'live') {
   const recordedAt = new Date().toISOString();
   const newEntries = [];
@@ -291,6 +348,9 @@ function updateLapHistory(settings, normalized, sourceMode = collectorState.mode
   return newEntries.length;
 }
 
+// Writes the latest table/session snapshot to predictable filenames. These files
+// are overwritten on every successful poll/tick so external tools can read the
+// current state without searching for timestamps.
 function saveLatestSnapshot(settings, normalized) {
   try {
     const folder = ensureStorage(settings);
@@ -300,6 +360,8 @@ function saveLatestSnapshot(settings, normalized) {
   } catch (error) { addError(error, 'saveLatestSnapshot'); }
 }
 
+// Reads the hidden live timing page once, normalizes the data, updates history,
+// writes latest exports, and broadcasts state to the renderer.
 async function pollLivePage() {
   if (!liveWindow || liveWindow.isDestroyed()) return;
   collectorState.lastPollAt = new Date().toISOString();
@@ -324,11 +386,16 @@ async function pollLivePage() {
   broadcastState();
 }
 
+// Returns user-facing paths for the Debug/Storage UI. Add new exported files
+// here if the renderer should display their locations.
 function storageInfo(settings) {
   const folder = settings.storageFolder || defaultStorageFolder();
   return { folder, latestRowsCsv: path.join(folder, 'latest_live_rows.csv'), lapHistoryCsv: path.join(folder, 'lap_history.csv'), lapHistoryJsonl: path.join(folder, 'lap_history.jsonl') };
 }
 
+// Starts live collection for a URL. It stops replay first, opens/loads the
+// hidden live window, does an immediate poll, then schedules repeated polls.
+// Poll frequency is controlled by settings.pollIntervalMs.
 async function startCollector(url) {
   stopReplay(false);
   stopCollector(false);
@@ -345,6 +412,9 @@ async function startCollector(url) {
   } catch (error) { collectorState.status = 'error'; collectorState.message = 'Failed to start live collector.'; addError(error, 'startCollector'); broadcastState(); }
 }
 
+// Stops the live collector and optionally closes the hidden live window. Use
+// closeLiveWindow=false when switching modes but keeping the window lifecycle
+// under control elsewhere.
 function stopCollector(closeLiveWindow = true) {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = null;
@@ -353,15 +423,21 @@ function stopCollector(closeLiveWindow = true) {
   broadcastState();
 }
 
+// Loads built-in replay data once and caches it. Change the JSON file path here
+// if a different built-in replay should be shipped with the app.
 function loadReplayData() {
   if (replayData) return replayData;
   replayData = JSON.parse(fs.readFileSync(path.join(__dirname, '../data/belcar_race_replay.json'), 'utf8'));
   return replayData;
 }
 
+// Small wrappers keep replay math readable and reuse the shared timing parser.
 function msFromLapTime(text) { return parseLapTimeToMs(text); }
 function sectorEstimate(lapMs, factor) { return lapMs == null ? '' : formatMs(Math.round(lapMs * factor)); }
 
+// Builds timing-table-like rows for the replay at a given lap number. The
+// resulting objects intentionally match live parsed rows so the renderer and
+// storage code do not need separate replay handling.
 function buildReplayRows(data, currentLap) {
   const carStates = data.cars.map((car) => {
     const done = car.laps.filter((lap) => lap.lapNumber <= currentLap);
@@ -374,7 +450,10 @@ function buildReplayRows(data, currentLap) {
     return { car, done, last, best, elapsed, completed: done.length };
   }).filter((state) => state.completed > 0);
 
+  // Race order: more completed laps wins; ties are sorted by lower elapsed time.
   const overall = [...carStates].sort((a, b) => (b.completed - a.completed) || (a.elapsed - b.elapsed));
+
+  // Calculate position within each class separately from the overall position.
   const classGroups = new Map();
   for (const st of overall) {
     if (!classGroups.has(st.car.className)) classGroups.set(st.car.className, []);
@@ -390,6 +469,7 @@ function buildReplayRows(data, currentLap) {
     const lastMs = msFromLapTime(st.last.lapTime);
     const driver = st.last.driver || st.car.drivers?.[0] || '';
     const gapMs = leader ? st.elapsed - leader.elapsed : 0;
+    // Gap is shown as laps behind when a car has completed fewer laps than the leader.
     const gap = idx === 0 ? '-- leader --' : st.completed < leader.completed ? `-- ${leader.completed - st.completed} lap${leader.completed - st.completed === 1 ? '' : 's'} --` : formatMs(gapMs);
     const diffMs = idx === 0 ? null : st.elapsed - overall[idx - 1].elapsed;
     const diff = idx === 0 ? '' : st.completed < overall[idx - 1].completed ? `-- ${overall[idx - 1].completed - st.completed} lap --` : formatMs(diffMs);
@@ -408,6 +488,9 @@ function buildReplayRows(data, currentLap) {
       bestLap: formatMs(st.best),
       inValue: '',
       lapNumber: st.last.lapNumber,
+      // Replay data does not contain real sectors, so these percentages estimate
+      // plausible sector splits. Adjust factors if a replay dataset includes a
+      // different track profile, keeping the total close to 1.0.
       sector1: sectorEstimate(lastMs, 0.305),
       sector2: sectorEstimate(lastMs, 0.395),
       sector3: sectorEstimate(lastMs, 0.300),
@@ -422,10 +505,13 @@ function buildReplayRows(data, currentLap) {
   });
 }
 
+// Creates session metadata for replay mode using the same fields as live mode.
 function replaySessionInfo(data, currentLap) {
   return { pageTitle: `${data.series} - ${data.session}`, url: 'built-in Belcar race replay', sessionName: `${data.series} - ${data.session} replay`, circuit: data.circuit, timeToGo: `Replay lap ${currentLap}`, flag: 'Replay mode', pageUpdated: new Date().toLocaleTimeString() };
 }
 
+// Advances replay by one or more laps, updates the same state/files as live
+// polling, and stops the replay timer when the final lap is reached.
 function replayTick() {
   const settings = loadSettings();
   const data = loadReplayData();
@@ -440,6 +526,8 @@ function replayTick() {
   if (collectorState.status === 'replay_finished') stopReplay(false, true);
 }
 
+// Starts the built-in replay. It stops live collection first so only one data
+// source controls collectorState at a time.
 function startReplay() {
   stopCollector(true);
   stopReplay(false);
@@ -454,6 +542,8 @@ function startReplay() {
   replayTimer = setInterval(replayTick, Number(settings.replayIntervalMs || 350));
 }
 
+// Stops the replay timer. keepFinished=true preserves the final
+// "replay_finished" state after the last tick.
 function stopReplay(broadcast = true, keepFinished = false) {
   if (replayTimer) clearInterval(replayTimer);
   replayTimer = null;
@@ -461,6 +551,7 @@ function stopReplay(broadcast = true, keepFinished = false) {
   if (broadcast) broadcastState();
 }
 
+// Pauses replay by clearing the timer but keeping replay state active.
 function pauseReplay() {
   if (replayTimer) clearInterval(replayTimer);
   replayTimer = null;
@@ -468,6 +559,7 @@ function pauseReplay() {
   broadcastState();
 }
 
+// Restarts replay ticking from the current replayStep.
 function resumeReplay() {
   if (collectorState.mode !== 'replay') return;
   if (replayTimer) clearInterval(replayTimer);
@@ -476,15 +568,22 @@ function resumeReplay() {
   broadcastState();
 }
 
+// IPC handlers are the public API used by preload.js and the renderer. When
+// adding a UI action, add its handler here and expose a matching function in
+// preload.js.
 ipcMain.handle('settings:get', () => loadSettings());
 ipcMain.handle('settings:set', (_event, settings) => {
   const merged = { ...loadSettings(), ...settings };
+  // Clamp user-editable timing values so accidental input cannot create an
+  // unusably fast/slow collector or replay.
   merged.pollIntervalMs = Math.max(1000, Math.min(10000, Number(merged.pollIntervalMs || 3000)));
   merged.replayIntervalMs = Math.max(50, Math.min(5000, Number(merged.replayIntervalMs || 350)));
   merged.replayLapsPerTick = Math.max(1, Math.min(10, Number(merged.replayLapsPerTick || 1)));
   saveSettings(merged);
   return merged;
 });
+
+// Opens a native folder picker and stores the chosen export/history directory.
 ipcMain.handle('storage:chooseFolder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'] });
   if (result.canceled || !result.filePaths[0]) return null;
@@ -492,6 +591,7 @@ ipcMain.handle('storage:chooseFolder', async () => {
   saveSettings(settings);
   return settings.storageFolder;
 });
+
 ipcMain.handle('collector:start', (_event, url) => startCollector(url));
 ipcMain.handle('collector:stop', () => { stopCollector(true); stopReplay(true); });
 ipcMain.handle('collector:getState', () => collectorState);
@@ -500,6 +600,9 @@ ipcMain.handle('replay:start', () => startReplay());
 ipcMain.handle('replay:pause', () => pauseReplay());
 ipcMain.handle('replay:resume', () => resumeReplay());
 ipcMain.handle('replay:stop', () => stopReplay(true));
+
+// Creates timestamped exports of the current rows and in-memory lap history.
+// The always-overwritten "latest_*" files are written by saveLatestSnapshot().
 ipcMain.handle('export:current', async () => {
   const settings = loadSettings();
   const folder = ensureStorage(settings);
@@ -513,5 +616,7 @@ ipcMain.handle('export:current', async () => {
   return { jsonPath, csvPath, historyPath };
 });
 
+// Electron app lifecycle. On macOS the app remains open after all windows close,
+// matching normal platform behavior; other platforms quit immediately.
 app.whenReady().then(() => { createMainWindow(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createMainWindow(); }); });
 app.on('window-all-closed', () => { stopCollector(true); stopReplay(false); if (process.platform !== 'darwin') app.quit(); });

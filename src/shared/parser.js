@@ -1,3 +1,10 @@
+// Parser utilities shared by the Electron main process and tests. This file is
+// intentionally dependency-free so timing formats and table headers can be
+// validated without launching Electron.
+
+// Normalizes text extracted from timing pages. Live timing HTML often contains
+// non-breaking spaces and inconsistent whitespace, so all parser entry points
+// should pass user/page text through this helper first.
 function cleanText(value) {
   return String(value ?? '')
     .replace(/\u00a0/g, ' ')
@@ -5,11 +12,16 @@ function cleanText(value) {
     .trim();
 }
 
+// Converts provider-specific column labels into stable internal field names.
+// Add aliases here when a timing provider uses a new header spelling for an
+// existing concept, for example "START NO" for carNumber.
 function canonicalHeader(header) {
   const h = cleanText(header).toUpperCase();
   if (!h) return '';
   const compact = h.replace(/[^A-Z0-9]/g, '');
 
+  // Direct aliases cover known compact header names from GetRaceResults and
+  // similar motorsport timing tables.
   const direct = {
     POS: 'position',
     POSITION: 'position',
@@ -48,6 +60,9 @@ function canonicalHeader(header) {
   };
 
   if (direct[compact]) return direct[compact];
+
+  // Sector headers vary a lot between providers, so these regexes accept common
+  // spellings like SECT-1, SECTOR 1, SECT1, and S1.
   if (/^SECT?OR?1$/.test(compact) || compact === 'SECT1' || compact === 'S1') return 'sector1';
   if (/^SECT?OR?2$/.test(compact) || compact === 'SECT2' || compact === 'S2') return 'sector2';
   if (/^SECT?OR?3$/.test(compact) || compact === 'SECT3' || compact === 'S3') return 'sector3';
@@ -56,6 +71,8 @@ function canonicalHeader(header) {
   return compact.toLowerCase();
 }
 
+// Builds a lookup from canonical field name to cell index. Duplicate headers are
+// kept with suffixes, so raw/debug data can still show both NAT columns, etc.
 function buildHeaderMap(headers) {
   const map = {};
   const seen = {};
@@ -72,6 +89,7 @@ function buildHeaderMap(headers) {
   return map;
 }
 
+// Parses integer-like table cells while treating placeholders as missing data.
 function parseInteger(value) {
   const text = cleanText(value);
   if (!text || text === '?' || text === '--') return null;
@@ -79,6 +97,9 @@ function parseInteger(value) {
   return match ? Number(match[0]) : null;
 }
 
+// Parses race timing text into milliseconds. Supported forms include seconds
+// ("102.112"), minutes/seconds ("1:42.112"), and the common engineer notation
+// m:ss:mmm ("2:04:00"). Add new formats here when tests reveal provider drift.
 function parseLapTimeToMs(value) {
   const text = cleanText(value);
   if (!text) return null;
@@ -117,6 +138,8 @@ function parseLapTimeToMs(value) {
   return Math.round(seconds * 1000);
 }
 
+// Formats milliseconds back into a race timing string. This is used by replay
+// calculations and tests, so keep it aligned with parseLapTimeToMs().
 function formatMs(ms) {
   if (ms === null || ms === undefined || !Number.isFinite(ms)) return '';
   const sign = ms < 0 ? '-' : '';
@@ -133,13 +156,19 @@ function formatMs(ms) {
   return `${sign}${minutes}:${String(seconds).padStart(2, '0')}.${String(milli).padStart(3, '0')}`;
 }
 
+// Safely reads a cell by canonical field name and returns an empty string when
+// the column is not available in the current provider table.
 function valueAt(cells, headerMap, key) {
   const index = headerMap[key];
   return index === undefined ? '' : cleanText(cells[index]);
 }
 
+// Converts one raw HTML table row into the normalized shape consumed by the app.
+// If the UI needs a new column, add the canonical header above and map it here.
 function parseTimingRow(headers, cells) {
   const headerMap = buildHeaderMap(headers);
+  // Preserve original header/cell data for parser debugging. This makes it
+  // easier to inspect provider changes without losing the normalized fields.
   const raw = {};
   headers.forEach((header, index) => {
     const key = cleanText(header) || `column_${index}`;
@@ -181,12 +210,16 @@ function parseTimingRow(headers, cells) {
   };
 }
 
+// Scores a table's headers to decide whether it is likely to be the live timing
+// table. Tune the required fields if supporting a provider with fewer columns.
 function looksLikeTimingHeaders(headers) {
   const map = buildHeaderMap(headers);
   const score = ['carNumber', 'team', 'driver', 'className', 'lastLap', 'bestLap'].filter((k) => map[k] !== undefined).length;
   return score >= 3 && map.carNumber !== undefined;
 }
 
+// Export each parser primitive separately so tests can cover small pieces and
+// the main process can compose them into higher-level collection logic.
 module.exports = {
   cleanText,
   canonicalHeader,
