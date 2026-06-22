@@ -39,10 +39,9 @@ The app stores readable data in the folder you select:
 
 Only new completed laps are appended to the lap history, so polling every few seconds does not create duplicate rows.
 
-## Live and replay mode
+## Live mode
 
-- **Start live** reads the chosen GetRaceResults timing URL.
-- **Replay** plays the built-in Belcar replay data so graphs and catch estimates can be tested quickly.
+**Start live** reads the chosen GetRaceResults timing URL. The dashboard uses live timing data only.
 
 ## Graphs
 

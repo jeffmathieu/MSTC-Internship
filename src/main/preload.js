@@ -15,13 +15,6 @@ contextBridge.exposeInMainWorld('liveTiming', {
   getCollectorState: () => ipcRenderer.invoke('collector:getState'),
   openLiveWindow: () => ipcRenderer.invoke('collector:openLiveWindow'),
 
-  // Built-in replay controls. Add matching ipcMain handlers before exposing new
-  // replay actions here.
-  startReplay: () => ipcRenderer.invoke('replay:start'),
-  pauseReplay: () => ipcRenderer.invoke('replay:pause'),
-  resumeReplay: () => ipcRenderer.invoke('replay:resume'),
-  stopReplay: () => ipcRenderer.invoke('replay:stop'),
-
   // Creates timestamped export files from the current main-process state.
   exportCurrent: () => ipcRenderer.invoke('export:current'),
 

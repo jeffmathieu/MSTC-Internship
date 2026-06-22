@@ -11,10 +11,10 @@ let currentState = null;
 // data. Clear or change this keying if battle estimates should reset per session.
 const battleCache = new Map();
 
-// Maps collector/replay states to the visual status pill classes in styles.css.
+// Maps collector states to the visual status pill classes in styles.css.
 function statusClass(status) {
-  if (['collecting', 'connected', 'replay_finished'].includes(status)) return 'ok';
-  if (['waiting', 'loading', 'idle', 'replay_paused'].includes(status)) return 'warn';
+  if (['collecting', 'connected'].includes(status)) return 'ok';
+  if (['waiting', 'loading', 'idle'].includes(status)) return 'warn';
   return 'bad';
 }
 
@@ -481,14 +481,8 @@ function renderDetails(state) {
   $('errors-debug').textContent = JSON.stringify(state.errors || [], null, 2);
 }
 
-// Updates replay progress text if the replay controls are present.
-function renderReplay(state) {
-  const replay = state.replay || {};
-  if ($('replay-status')) $('replay-status').textContent = replay.active ? `${replay.currentLap || 0} / ${replay.maxLap || 0}` : 'not running';
-}
-
 // Central render function called on every collector:update event. Keep new UI
-// panels wired here so they update for both live mode and replay mode.
+// panels wired here so they update whenever live data changes.
 function render(state) {
   currentState = state || {};
   const rows = currentState.rows || [], history = currentState.lapHistory || [];
@@ -497,7 +491,6 @@ function render(state) {
   $('row-count').textContent = String(rows.length);
   $('history-count').textContent = String(history.length);
   $('last-update').textContent = currentState.lastSuccessAt ? new Date(currentState.lastSuccessAt).toLocaleTimeString() : '—';
-  renderReplay(currentState);
   renderFollowed(rows);
   renderClassTable(rows, history);
   renderWarning(rows);
@@ -526,8 +519,6 @@ async function saveSettingsFromInputs(setupComplete = false) {
     followedCar: $('followed-car').value.trim(),
     storageFolder: $('storage-folder').value.trim(),
     pollIntervalMs: Number($('poll-interval').value || 3000),
-    replayIntervalMs: Number($('replay-interval').value || 350),
-    replayLapsPerTick: Number($('replay-laps').value || 1),
     referenceTime: $('reference-time').value.trim()
   };
   if (setupComplete) patch.setupComplete = true;
@@ -578,8 +569,6 @@ async function init() {
   $('followed-car').value = currentSettings.followedCar || '33';
   $('storage-folder').value = currentSettings.storageFolder || '';
   $('poll-interval').value = String(currentSettings.pollIntervalMs || 3000);
-  $('replay-interval').value = String(currentSettings.replayIntervalMs || 350);
-  $('replay-laps').value = String(currentSettings.replayLapsPerTick || 1);
   $('reference-time').value = currentSettings.referenceTime || '1:42.000';
   syncSetupFromMain();
   setupGraphRegistry();
@@ -590,10 +579,6 @@ async function init() {
   $('start')?.addEventListener('click', async () => { await saveSettingsFromInputs(true); await window.liveTiming.startCollector(currentSettings.timingUrl); });
   $('stop')?.addEventListener('click', () => window.liveTiming.stopCollector());
   $('show-live')?.addEventListener('click', () => window.liveTiming.openLiveWindow());
-  $('start-replay')?.addEventListener('click', async () => { await saveSettingsFromInputs(true); await window.liveTiming.startReplay(); });
-  $('pause-replay')?.addEventListener('click', () => window.liveTiming.pauseReplay());
-  $('resume-replay')?.addEventListener('click', () => window.liveTiming.resumeReplay());
-  $('stop-replay')?.addEventListener('click', () => window.liveTiming.stopReplay());
   $('choose-folder')?.addEventListener('click', async () => { await chooseAndSetFolder('storage-folder'); await saveSettingsFromInputs(); });
   $('setup-choose-folder')?.addEventListener('click', async () => { await chooseAndSetFolder('setup-folder'); });
   $('setup-save')?.addEventListener('click', async () => { syncMainFromSetup(); await saveSettingsFromInputs(true); showSetup(false); render(currentState || await window.liveTiming.getCollectorState()); });
@@ -602,7 +587,7 @@ async function init() {
 
   // Persist settings immediately when hidden inputs change. If new settings are
   // added to the modal, include their hidden input IDs here.
-  ['timing-url','followed-car','poll-interval','replay-interval','replay-laps','reference-time'].forEach((id) => $(id)?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); }));
+  ['timing-url','followed-car','poll-interval','reference-time'].forEach((id) => $(id)?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); }));
   window.liveTiming.onCollectorUpdate(render);
   render(await window.liveTiming.getCollectorState());
   if (!currentSettings.setupComplete || !currentSettings.storageFolder) showSetup(true);

@@ -5,9 +5,7 @@ const crypto = require('crypto');
 const {
   cleanText,
   parseTimingRow,
-  looksLikeTimingHeaders,
-  parseLapTimeToMs,
-  formatMs
+  looksLikeTimingHeaders
 } = require('../shared/parser');
 
 // Main-process references. Electron keeps UI windows and timers alive through
@@ -15,10 +13,6 @@ const {
 let mainWindow;
 let liveWindow;
 let pollTimer;
-let replayTimer;
-let replayData = null;
-let replayStep = 0;
-let replayLapsPerTick = 1;
 
 // Stores unique lap identifiers that have already been written to disk.
 // Change the key format in updateLapHistory/loadExistingHistory if duplicate
@@ -43,8 +37,7 @@ let collectorState = {
   errors: [],
   snapshots: [],
   storage: {},
-  pollIntervalMs: 3000,
-  replay: { active: false, paused: false, currentLap: 0, maxLap: 0, source: '' }
+  pollIntervalMs: 3000
 };
 
 // Electron chooses a safe OS-specific folder for app settings. Race data is
@@ -67,8 +60,6 @@ function loadSettings() {
     followedCar: '33',
     storageFolder: defaultStorageFolder(),
     pollIntervalMs: 3000,
-    replayIntervalMs: 350,
-    replayLapsPerTick: 1,
     referenceTime: '1:42.000',
     setupComplete: false
   };
@@ -196,9 +187,9 @@ function parseSessionInfo(snapshot) {
   return session;
 }
 
-// Converts a raw page snapshot into the normalized shape used by the UI,
-// storage, and replay code. The parser module owns column-name interpretation;
-// this function chooses the best table and attaches diagnostics.
+// Converts a raw page snapshot into the normalized shape used by the UI and
+// storage. The parser module owns column-name interpretation; this function
+// chooses the best table and attaches diagnostics.
 function normalizeSnapshot(snapshot) {
   const timingTable = snapshot.tables.find((table) => looksLikeTimingHeaders(table.headers));
   const diagnostics = {
@@ -393,14 +384,13 @@ function storageInfo(settings) {
   return { folder, latestRowsCsv: path.join(folder, 'latest_live_rows.csv'), lapHistoryCsv: path.join(folder, 'lap_history.csv'), lapHistoryJsonl: path.join(folder, 'lap_history.jsonl') };
 }
 
-// Starts live collection for a URL. It stops replay first, opens/loads the
-// hidden live window, does an immediate poll, then schedules repeated polls.
+// Starts live collection for a URL. It opens/loads the hidden live window, does
+// an immediate poll, then schedules repeated polls.
 // Poll frequency is controlled by settings.pollIntervalMs.
 async function startCollector(url) {
-  stopReplay(false);
   stopCollector(false);
   const settings = loadSettings();
-  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt: new Date().toISOString(), lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: loadExistingHistory(settings), session: {}, diagnostics: {}, errors: [], snapshots: [], storage: storageInfo(settings), pollIntervalMs: Number(settings.pollIntervalMs || 3000), replay: { active: false, paused: false, currentLap: 0, maxLap: 0, source: '' } };
+  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt: new Date().toISOString(), lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: loadExistingHistory(settings), session: {}, diagnostics: {}, errors: [], snapshots: [], storage: storageInfo(settings), pollIntervalMs: Number(settings.pollIntervalMs || 3000) };
   broadcastState();
   try {
     const win = createLiveWindow();
@@ -423,151 +413,6 @@ function stopCollector(closeLiveWindow = true) {
   broadcastState();
 }
 
-// Loads built-in replay data once and caches it. Change the JSON file path here
-// if a different built-in replay should be shipped with the app.
-function loadReplayData() {
-  if (replayData) return replayData;
-  replayData = JSON.parse(fs.readFileSync(path.join(__dirname, '../data/belcar_race_replay.json'), 'utf8'));
-  return replayData;
-}
-
-// Small wrappers keep replay math readable and reuse the shared timing parser.
-function msFromLapTime(text) { return parseLapTimeToMs(text); }
-function sectorEstimate(lapMs, factor) { return lapMs == null ? '' : formatMs(Math.round(lapMs * factor)); }
-
-// Builds timing-table-like rows for the replay at a given lap number. The
-// resulting objects intentionally match live parsed rows so the renderer and
-// storage code do not need separate replay handling.
-function buildReplayRows(data, currentLap) {
-  const carStates = data.cars.map((car) => {
-    const done = car.laps.filter((lap) => lap.lapNumber <= currentLap);
-    const last = done.at(-1);
-    const best = done.reduce((best, lap) => {
-      const ms = msFromLapTime(lap.lapTime);
-      return best == null || ms < best ? ms : best;
-    }, null);
-    const elapsed = done.reduce((sum, lap) => sum + (msFromLapTime(lap.lapTime) || 0), 0);
-    return { car, done, last, best, elapsed, completed: done.length };
-  }).filter((state) => state.completed > 0);
-
-  // Race order: more completed laps wins; ties are sorted by lower elapsed time.
-  const overall = [...carStates].sort((a, b) => (b.completed - a.completed) || (a.elapsed - b.elapsed));
-
-  // Calculate position within each class separately from the overall position.
-  const classGroups = new Map();
-  for (const st of overall) {
-    if (!classGroups.has(st.car.className)) classGroups.set(st.car.className, []);
-    classGroups.get(st.car.className).push(st);
-  }
-  const classPos = new Map();
-  for (const [cls, group] of classGroups.entries()) {
-    group.forEach((st, idx) => classPos.set(st.car.carNumber, idx + 1));
-  }
-  const leader = overall[0];
-
-  return overall.map((st, idx) => {
-    const lastMs = msFromLapTime(st.last.lapTime);
-    const driver = st.last.driver || st.car.drivers?.[0] || '';
-    const gapMs = leader ? st.elapsed - leader.elapsed : 0;
-    // Gap is shown as laps behind when a car has completed fewer laps than the leader.
-    const gap = idx === 0 ? '-- leader --' : st.completed < leader.completed ? `-- ${leader.completed - st.completed} lap${leader.completed - st.completed === 1 ? '' : 's'} --` : formatMs(gapMs);
-    const diffMs = idx === 0 ? null : st.elapsed - overall[idx - 1].elapsed;
-    const diff = idx === 0 ? '' : st.completed < overall[idx - 1].completed ? `-- ${overall[idx - 1].completed - st.completed} lap --` : formatMs(diffMs);
-    return {
-      position: idx + 1,
-      movement: '',
-      carNumber: st.car.carNumber,
-      team: st.car.team,
-      car: st.car.car,
-      driver,
-      className: st.car.className,
-      classPosition: classPos.get(st.car.carNumber),
-      gap,
-      diff,
-      lastLap: st.last.lapTime,
-      bestLap: formatMs(st.best),
-      inValue: '',
-      lapNumber: st.last.lapNumber,
-      // Replay data does not contain real sectors, so these percentages estimate
-      // plausible sector splits. Adjust factors if a replay dataset includes a
-      // different track profile, keeping the total close to 1.0.
-      sector1: sectorEstimate(lastMs, 0.305),
-      sector2: sectorEstimate(lastMs, 0.395),
-      sector3: sectorEstimate(lastMs, 0.300),
-      pit: lastMs > 180000 ? 'slow/pit' : '',
-      lastLapMs: lastMs,
-      bestLapMs: st.best,
-      sector1Ms: lastMs ? Math.round(lastMs * 0.305) : null,
-      sector2Ms: lastMs ? Math.round(lastMs * 0.395) : null,
-      sector3Ms: lastMs ? Math.round(lastMs * 0.300) : null,
-      replayElapsedMs: st.elapsed
-    };
-  });
-}
-
-// Creates session metadata for replay mode using the same fields as live mode.
-function replaySessionInfo(data, currentLap) {
-  return { pageTitle: `${data.series} - ${data.session}`, url: 'built-in Belcar race replay', sessionName: `${data.series} - ${data.session} replay`, circuit: data.circuit, timeToGo: `Replay lap ${currentLap}`, flag: 'Replay mode', pageUpdated: new Date().toLocaleTimeString() };
-}
-
-// Advances replay by one or more laps, updates the same state/files as live
-// polling, and stops the replay timer when the final lap is reached.
-function replayTick() {
-  const settings = loadSettings();
-  const data = loadReplayData();
-  replayStep = Math.min(replayStep + replayLapsPerTick, Math.max(...data.cars.map((c) => c.laps.length)));
-  const rows = buildReplayRows(data, replayStep);
-  const session = replaySessionInfo(data, replayStep);
-  const normalized = { status: 'collecting', message: `Replaying Belcar race lap ${replayStep}.`, headers: ['POS','NR','TEAM','CAR','DRIVER IN CAR','CLS','PIC','GAP','DIFF','LAST','BEST','LAP','SECT-1','SECT-2','SECT-3','PIT'], rows, session, diagnostics: { replaySource: data.source, replayCars: data.cars.length, currentLap: replayStep } };
-  const newLapCount = updateLapHistory(settings, normalized, 'replay');
-  collectorState = { ...collectorState, mode: 'replay', status: replayStep >= Math.max(...data.cars.map((c) => c.laps.length)) ? 'replay_finished' : 'collecting', message: `${normalized.message} Stored ${newLapCount} new lap(s).`, lastSuccessAt: new Date().toISOString(), headers: normalized.headers, rows: normalized.rows, session, diagnostics: normalized.diagnostics, storage: storageInfo(settings), replay: { active: true, paused: false, currentLap: replayStep, maxLap: Math.max(...data.cars.map((c) => c.laps.length)), source: data.source }, snapshots: [{ at: new Date().toISOString(), rowCount: rows.length, newLapCount, replayStep }, ...collectorState.snapshots].slice(0, 20) };
-  saveLatestSnapshot(settings, normalized);
-  broadcastState();
-  if (collectorState.status === 'replay_finished') stopReplay(false, true);
-}
-
-// Starts the built-in replay. It stops live collection first so only one data
-// source controls collectorState at a time.
-function startReplay() {
-  stopCollector(true);
-  stopReplay(false);
-  const settings = loadSettings();
-  const data = loadReplayData();
-  replayStep = 0;
-  replayLapsPerTick = Number(settings.replayLapsPerTick || 1);
-  knownLapKeys.clear();
-  collectorState = { ...collectorState, mode: 'replay', status: 'loading', message: 'Starting built-in Belcar race replay...', url: 'built-in replay', startedAt: new Date().toISOString(), lastPollAt: null, lastSuccessAt: null, rows: [], lapHistory: loadExistingHistory(settings), session: replaySessionInfo(data, 0), diagnostics: { replaySource: data.source }, errors: [], snapshots: [], storage: storageInfo(settings), replay: { active: true, paused: false, currentLap: 0, maxLap: Math.max(...data.cars.map((c) => c.laps.length)), source: data.source } };
-  broadcastState();
-  replayTick();
-  replayTimer = setInterval(replayTick, Number(settings.replayIntervalMs || 350));
-}
-
-// Stops the replay timer. keepFinished=true preserves the final
-// "replay_finished" state after the last tick.
-function stopReplay(broadcast = true, keepFinished = false) {
-  if (replayTimer) clearInterval(replayTimer);
-  replayTimer = null;
-  if (collectorState.mode === 'replay' && !keepFinished) { collectorState.status = 'idle'; collectorState.message = 'Replay stopped'; collectorState.replay = { ...collectorState.replay, active: false, paused: false }; }
-  if (broadcast) broadcastState();
-}
-
-// Pauses replay by clearing the timer but keeping replay state active.
-function pauseReplay() {
-  if (replayTimer) clearInterval(replayTimer);
-  replayTimer = null;
-  collectorState.status = 'replay_paused'; collectorState.message = 'Replay paused'; collectorState.replay = { ...collectorState.replay, paused: true };
-  broadcastState();
-}
-
-// Restarts replay ticking from the current replayStep.
-function resumeReplay() {
-  if (collectorState.mode !== 'replay') return;
-  if (replayTimer) clearInterval(replayTimer);
-  collectorState.status = 'collecting'; collectorState.message = 'Replay resumed'; collectorState.replay = { ...collectorState.replay, paused: false };
-  replayTimer = setInterval(replayTick, Number(loadSettings().replayIntervalMs || 350));
-  broadcastState();
-}
-
 // IPC handlers are the public API used by preload.js and the renderer. When
 // adding a UI action, add its handler here and expose a matching function in
 // preload.js.
@@ -575,10 +420,8 @@ ipcMain.handle('settings:get', () => loadSettings());
 ipcMain.handle('settings:set', (_event, settings) => {
   const merged = { ...loadSettings(), ...settings };
   // Clamp user-editable timing values so accidental input cannot create an
-  // unusably fast/slow collector or replay.
+  // unusably fast/slow collector.
   merged.pollIntervalMs = Math.max(1000, Math.min(10000, Number(merged.pollIntervalMs || 3000)));
-  merged.replayIntervalMs = Math.max(50, Math.min(5000, Number(merged.replayIntervalMs || 350)));
-  merged.replayLapsPerTick = Math.max(1, Math.min(10, Number(merged.replayLapsPerTick || 1)));
   saveSettings(merged);
   return merged;
 });
@@ -593,13 +436,9 @@ ipcMain.handle('storage:chooseFolder', async () => {
 });
 
 ipcMain.handle('collector:start', (_event, url) => startCollector(url));
-ipcMain.handle('collector:stop', () => { stopCollector(true); stopReplay(true); });
+ipcMain.handle('collector:stop', () => stopCollector(true));
 ipcMain.handle('collector:getState', () => collectorState);
 ipcMain.handle('collector:openLiveWindow', () => { if (liveWindow && !liveWindow.isDestroyed()) { liveWindow.show(); liveWindow.focus(); return true; } return false; });
-ipcMain.handle('replay:start', () => startReplay());
-ipcMain.handle('replay:pause', () => pauseReplay());
-ipcMain.handle('replay:resume', () => resumeReplay());
-ipcMain.handle('replay:stop', () => stopReplay(true));
 
 // Creates timestamped exports of the current rows and in-memory lap history.
 // The always-overwritten "latest_*" files are written by saveLatestSnapshot().
@@ -619,4 +458,4 @@ ipcMain.handle('export:current', async () => {
 // Electron app lifecycle. On macOS the app remains open after all windows close,
 // matching normal platform behavior; other platforms quit immediately.
 app.whenReady().then(() => { createMainWindow(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createMainWindow(); }); });
-app.on('window-all-closed', () => { stopCollector(true); stopReplay(false); if (process.platform !== 'darwin') app.quit(); });
+app.on('window-all-closed', () => { stopCollector(true); if (process.platform !== 'darwin') app.quit(); });

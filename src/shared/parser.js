@@ -138,8 +138,8 @@ function parseLapTimeToMs(value) {
   return Math.round(seconds * 1000);
 }
 
-// Formats milliseconds back into a race timing string. This is used by replay
-// calculations and tests, so keep it aligned with parseLapTimeToMs().
+// Formats milliseconds back into a race timing string. Keep it aligned with
+// parseLapTimeToMs() so parsed and displayed times round-trip consistently.
 function formatMs(ms) {
   if (ms === null || ms === undefined || !Number.isFinite(ms)) return '';
   const sign = ms < 0 ? '-' : '';
