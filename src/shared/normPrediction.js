@@ -16,9 +16,9 @@
     // pattern. Lower values react faster; higher values are calmer.
     recentLaps: 12,
     // Prefer a driver-specific model once this many complete sector laps exist.
-    minDriverLaps: 3,
+    minDriverLaps: 2,
     // Fallback to all followed-car laps once this many complete sector laps exist.
-    minCarLaps: 3
+    minCarLaps: 2
   };
 
   function average(values) {
@@ -77,6 +77,31 @@
     return null;
   }
 
+  // Gives the UI enough detail to explain why a prediction is or is not
+  // available. This keeps the warning text useful during demos where old history,
+  // missing sector columns, or repeated lap numbers can otherwise look the same.
+  function predictionReadiness(row, history, options = config) {
+    if (!row || row.carNumber == null) {
+      return { ready: false, reason: 'no-car', driverLapCount: 0, carLapCount: 0, hasS1: false, hasS2: false, hasS3: false, profile: null };
+    }
+
+    const driverLaps = row.driver ? completeSectorLaps(history, row.carNumber, row.driver, options) : [];
+    const carLaps = completeSectorLaps(history, row.carNumber, null, options);
+    const profile = predictionProfileForRow(row, history, options);
+    const hasS1 = Number.isFinite(row.sector1Ms);
+    const hasS2 = Number.isFinite(row.sector2Ms);
+    const hasS3 = Number.isFinite(row.sector3Ms);
+
+    if (!profile) {
+      return { ready: false, reason: 'not-enough-history', driverLapCount: driverLaps.length, carLapCount: carLaps.length, hasS1, hasS2, hasS3, profile: null };
+    }
+    if (!hasS1) {
+      return { ready: false, reason: 'waiting-for-s1', driverLapCount: driverLaps.length, carLapCount: carLaps.length, hasS1, hasS2, hasS3, profile };
+    }
+
+    return { ready: true, reason: 'ready', driverLapCount: driverLaps.length, carLapCount: carLaps.length, hasS1, hasS2, hasS3, profile };
+  }
+
   // Predicts the current lap time from the latest visible sector data. Once S1
   // or S2 appears, the app estimates the final lap by adding the learned
   // remaining sectors from the selected profile.
@@ -104,6 +129,7 @@
     config,
     completeSectorLaps,
     predictionProfileForRow,
+    predictionReadiness,
     predictCurrentLap
   };
 });

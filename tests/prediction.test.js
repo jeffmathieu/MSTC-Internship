@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { predictCurrentLap, predictionProfileForRow } = require('../src/shared/normPrediction');
+const { predictCurrentLap, predictionProfileForRow, predictionReadiness } = require('../src/shared/normPrediction');
 
 function lap(carNumber, driver, lapNumber, sector1Ms, sector2Ms, sector3Ms) {
   return {
@@ -23,6 +23,11 @@ const history = [
   lap(33, 'Bob', 6, 33900, 41900, 32900)
 ];
 
+const twoLapHistory = [
+  lap(77, 'Dana', 1, 33000, 40000, 31000),
+  lap(77, 'Dana', 2, 33100, 40100, 31100)
+];
+
 // Contract: prediction should not start until enough completed sector laps exist
 // for either the current driver or the car fallback.
 assert.strictEqual(
@@ -36,6 +41,14 @@ const aliceProfile = predictionProfileForRow({ carNumber: 33, driver: 'Alice' },
 assert.ok(aliceProfile);
 assert.strictEqual(aliceProfile.source, 'driver Alice');
 assert.strictEqual(aliceProfile.sampleSize, 3);
+
+// Contract: two complete sector laps are enough to start predicting. This keeps
+// the dashboard useful early in a session while still avoiding one-lap noise.
+const twoLapPrediction = predictCurrentLap({ carNumber: 77, driver: 'Dana', sector1Ms: 32900 }, twoLapHistory);
+assert.ok(twoLapPrediction);
+assert.strictEqual(twoLapPrediction.profile.source, 'driver Dana');
+assert.strictEqual(twoLapPrediction.profile.sampleSize, 2);
+assert.strictEqual(twoLapPrediction.stage, 'S1');
 
 // Contract: a driver without enough own laps can still use the followed car's
 // completed sector history as a fallback.
@@ -64,6 +77,12 @@ const afterS3 = predictCurrentLap({ carNumber: 33, driver: 'Alice', sector1Ms: 3
 assert.ok(afterS3);
 assert.strictEqual(afterS3.stage, 'S3');
 assert.strictEqual(afterS3.predictedMs, 98000);
+
+const noHistoryReadiness = predictionReadiness({ carNumber: 44, driver: 'New Driver', sector1Ms: 32000 }, history);
+assert.strictEqual(noHistoryReadiness.reason, 'not-enough-history');
+
+const waitingForS1Readiness = predictionReadiness({ carNumber: 33, driver: 'Alice' }, history);
+assert.strictEqual(waitingForS1Readiness.reason, 'waiting-for-s1');
 
 // Contract: callers can compare predictedMs with the configured norm time to
 // decide whether the warning screen should go red. This avoids baking the exact

@@ -247,17 +247,20 @@ function renderAllRowsTable(rows) {
 // warning level used by the panel CSS classes.
 function normStatus(row, history, referenceMs) {
   if (!row || !Number.isFinite(referenceMs)) {
-    return { level: 'unknown', title: 'No reference warning yet', detail: 'Set the reference time and wait until our car is detected.' };
+    return { level: 'unknown', title: 'No reference warning yet', predictionText: 'Waiting for car/reference', detail: 'Set the reference time and wait until our car is detected.' };
   }
 
+  const readiness = normPrediction.predictionReadiness(row, history);
   const prediction = normPrediction.predictCurrentLap(row, history);
   if (prediction && Number.isFinite(prediction.predictedMs)) {
     const margin = prediction.predictedMs - referenceMs;
     const modelText = `${prediction.profile.source}, ${prediction.profile.sampleSize} lap sample`;
+    const predictionText = `After ${prediction.stage}: ${formatMs(prediction.predictedMs)}`;
     if (margin < 0) {
       return {
         level: 'bad',
         title: 'PREDICTED TOO FAST',
+        predictionText,
         detail: `After ${prediction.stage}, predicted lap is ${formatMs(prediction.predictedMs)} (${formatSeconds(Math.abs(margin))} below norm ${formatMs(referenceMs)}). Model: ${modelText}.`
       };
     }
@@ -265,6 +268,7 @@ function normStatus(row, history, referenceMs) {
       return {
         level: 'critical',
         title: 'Critical: predicted close to norm',
+        predictionText,
         detail: `After ${prediction.stage}, predicted lap is ${formatMs(prediction.predictedMs)} (${formatSeconds(margin)} above norm ${formatMs(referenceMs)}). Model: ${modelText}.`
       };
     }
@@ -272,29 +276,42 @@ function normStatus(row, history, referenceMs) {
       return {
         level: 'warning',
         title: 'Warning: predicted near norm',
+        predictionText,
         detail: `After ${prediction.stage}, predicted lap is ${formatMs(prediction.predictedMs)} (${formatSeconds(margin)} above norm ${formatMs(referenceMs)}). Model: ${modelText}.`
       };
     }
     return {
       level: 'safe',
       title: 'Predicted safe margin',
+      predictionText,
       detail: `After ${prediction.stage}, predicted lap is ${formatMs(prediction.predictedMs)} (${formatSeconds(margin)} above norm ${formatMs(referenceMs)}). Model: ${modelText}.`
     };
+  }
+
+  let predictionText = 'Waiting for S1';
+  let predictionDetail = 'Prediction starts after S1/S2 sector data is available.';
+  if (readiness.reason === 'not-enough-history') {
+    predictionText = `Need 2 sector laps (${readiness.driverLapCount} driver / ${readiness.carLapCount} car)`;
+    predictionDetail = 'Prediction needs two completed laps with valid S1, S2 and S3 values. If this is a restarted demo with old stored laps, emptying the data folder is a good test.';
+  } else if (readiness.reason === 'waiting-for-s1') {
+    predictionText = 'Waiting for S1 from timing page';
+    predictionDetail = `Prediction model is ready (${readiness.profile.source}, ${readiness.profile.sampleSize} lap sample), but the current live row does not contain a parsed S1 yet.`;
   }
 
   if (!Number.isFinite(row.lastLapMs)) {
     return {
       level: 'unknown',
       title: 'Waiting for sector prediction',
-      detail: 'Prediction starts after S1 or S2 once enough completed sector laps exist for this driver or car.'
+      predictionText,
+      detail: predictionDetail
     };
   }
 
   const margin = row.lastLapMs - referenceMs;
-  if (margin < 0) return { level: 'bad', title: 'LAST LAP TOO FAST', detail: `Last completed lap was ${formatMs(row.lastLapMs)} (${formatSeconds(Math.abs(margin))} below norm ${formatMs(referenceMs)}).` };
-  if (margin <= normWarningConfig.criticalMarginMs) return { level: 'critical', title: 'Critical: last lap close to norm', detail: `Last completed lap was ${formatMs(row.lastLapMs)} (${formatSeconds(margin)} above norm ${formatMs(referenceMs)}). Waiting for current sector prediction.` };
-  if (margin <= normWarningConfig.warningMarginMs) return { level: 'warning', title: 'Warning: last lap near norm', detail: `Last completed lap was ${formatMs(row.lastLapMs)} (${formatSeconds(margin)} above norm ${formatMs(referenceMs)}). Waiting for current sector prediction.` };
-  return { level: 'safe', title: 'Safe margin to norm time', detail: `Last completed lap was ${formatMs(row.lastLapMs)} (${formatSeconds(margin)} above norm ${formatMs(referenceMs)}). Prediction starts after S1/S2 sector data is available.` };
+  if (margin < 0) return { level: 'bad', title: 'LAST LAP TOO FAST', predictionText, detail: `Last completed lap was ${formatMs(row.lastLapMs)} (${formatSeconds(Math.abs(margin))} below norm ${formatMs(referenceMs)}). ${predictionDetail}` };
+  if (margin <= normWarningConfig.criticalMarginMs) return { level: 'critical', title: 'Critical: last lap close to norm', predictionText, detail: `Last completed lap was ${formatMs(row.lastLapMs)} (${formatSeconds(margin)} above norm ${formatMs(referenceMs)}). ${predictionDetail}` };
+  if (margin <= normWarningConfig.warningMarginMs) return { level: 'warning', title: 'Warning: last lap near norm', predictionText, detail: `Last completed lap was ${formatMs(row.lastLapMs)} (${formatSeconds(margin)} above norm ${formatMs(referenceMs)}). ${predictionDetail}` };
+  return { level: 'safe', title: 'Safe margin to norm time', predictionText, detail: `Last completed lap was ${formatMs(row.lastLapMs)} (${formatSeconds(margin)} above norm ${formatMs(referenceMs)}). ${predictionDetail}` };
 }
 
 // Updates the norm-time warning panel for the followed car.
@@ -305,8 +322,8 @@ function renderWarning(rows, history) {
   const info = normStatus(followed, history || [], referenceMs);
   const panel = $('warning-panel');
   panel.className = `panel warning-panel ${info.level}`;
-  document.body.classList.toggle('norm-danger', info.level === 'bad');
   $('warning-title').textContent = info.title;
+  $('warning-prediction').textContent = info.predictionText || 'Waiting for S1';
   $('warning-detail').textContent = info.detail;
 }
 
