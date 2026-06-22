@@ -11,6 +11,18 @@ let currentState = null;
 // data. Clear or change this keying if battle estimates should reset per session.
 const battleCache = new Map();
 
+// Shared norm-time prediction module loaded from src/shared/normPrediction.js.
+// Tests use the same module through require(), so prediction behavior is covered
+// without needing to launch the Electron renderer.
+const normPrediction = window.normPrediction;
+
+// UI warning thresholds. Prediction math lives in normPrediction.js; these
+// margins only decide how the dashboard colors the warning panel.
+const normWarningConfig = {
+  warningMarginMs: 1000,
+  criticalMarginMs: 500
+};
+
 // Maps collector states to the visual status pill classes in styles.css.
 function statusClass(status) {
   if (['collecting', 'connected'].includes(status)) return 'ok';
@@ -231,25 +243,69 @@ function renderAllRowsTable(rows) {
   });
 }
 
-// Converts our last lap and the configured norm/reference time into a warning
-// level used by the warning panel CSS classes.
-function normStatus(lapMs, referenceMs) {
-  if (!Number.isFinite(lapMs) || !Number.isFinite(referenceMs)) return { level: 'unknown', title: 'No reference warning yet', detail: 'Set the reference time in settings. The panel updates when our last lap is close to or below that time.' };
-  const margin = lapMs - referenceMs;
-  if (margin < 0) return { level: 'bad', title: 'TOO FAST', detail: `Last lap is ${formatSeconds(Math.abs(margin))} below the norm time ${formatMs(referenceMs)}.` };
-  if (margin <= 500) return { level: 'critical', title: 'Critical: very close to norm time', detail: `Last lap is only ${formatSeconds(margin)} above the norm time ${formatMs(referenceMs)}.` };
-  if (margin <= 1000) return { level: 'warning', title: 'Warning: close to norm time', detail: `Last lap is ${formatSeconds(margin)} above the norm time ${formatMs(referenceMs)}.` };
-  return { level: 'safe', title: 'Safe margin to norm time', detail: `Last lap is ${formatSeconds(margin)} slower than the norm time ${formatMs(referenceMs)}.` };
+// Converts prediction/current-lap context and the configured norm time into the
+// warning level used by the panel CSS classes.
+function normStatus(row, history, referenceMs) {
+  if (!row || !Number.isFinite(referenceMs)) {
+    return { level: 'unknown', title: 'No reference warning yet', detail: 'Set the reference time and wait until our car is detected.' };
+  }
+
+  const prediction = normPrediction.predictCurrentLap(row, history);
+  if (prediction && Number.isFinite(prediction.predictedMs)) {
+    const margin = prediction.predictedMs - referenceMs;
+    const modelText = `${prediction.profile.source}, ${prediction.profile.sampleSize} lap sample`;
+    if (margin < 0) {
+      return {
+        level: 'bad',
+        title: 'PREDICTED TOO FAST',
+        detail: `After ${prediction.stage}, predicted lap is ${formatMs(prediction.predictedMs)} (${formatSeconds(Math.abs(margin))} below norm ${formatMs(referenceMs)}). Model: ${modelText}.`
+      };
+    }
+    if (margin <= normWarningConfig.criticalMarginMs) {
+      return {
+        level: 'critical',
+        title: 'Critical: predicted close to norm',
+        detail: `After ${prediction.stage}, predicted lap is ${formatMs(prediction.predictedMs)} (${formatSeconds(margin)} above norm ${formatMs(referenceMs)}). Model: ${modelText}.`
+      };
+    }
+    if (margin <= normWarningConfig.warningMarginMs) {
+      return {
+        level: 'warning',
+        title: 'Warning: predicted near norm',
+        detail: `After ${prediction.stage}, predicted lap is ${formatMs(prediction.predictedMs)} (${formatSeconds(margin)} above norm ${formatMs(referenceMs)}). Model: ${modelText}.`
+      };
+    }
+    return {
+      level: 'safe',
+      title: 'Predicted safe margin',
+      detail: `After ${prediction.stage}, predicted lap is ${formatMs(prediction.predictedMs)} (${formatSeconds(margin)} above norm ${formatMs(referenceMs)}). Model: ${modelText}.`
+    };
+  }
+
+  if (!Number.isFinite(row.lastLapMs)) {
+    return {
+      level: 'unknown',
+      title: 'Waiting for sector prediction',
+      detail: 'Prediction starts after S1 or S2 once enough completed sector laps exist for this driver or car.'
+    };
+  }
+
+  const margin = row.lastLapMs - referenceMs;
+  if (margin < 0) return { level: 'bad', title: 'LAST LAP TOO FAST', detail: `Last completed lap was ${formatMs(row.lastLapMs)} (${formatSeconds(Math.abs(margin))} below norm ${formatMs(referenceMs)}).` };
+  if (margin <= normWarningConfig.criticalMarginMs) return { level: 'critical', title: 'Critical: last lap close to norm', detail: `Last completed lap was ${formatMs(row.lastLapMs)} (${formatSeconds(margin)} above norm ${formatMs(referenceMs)}). Waiting for current sector prediction.` };
+  if (margin <= normWarningConfig.warningMarginMs) return { level: 'warning', title: 'Warning: last lap near norm', detail: `Last completed lap was ${formatMs(row.lastLapMs)} (${formatSeconds(margin)} above norm ${formatMs(referenceMs)}). Waiting for current sector prediction.` };
+  return { level: 'safe', title: 'Safe margin to norm time', detail: `Last completed lap was ${formatMs(row.lastLapMs)} (${formatSeconds(margin)} above norm ${formatMs(referenceMs)}). Prediction starts after S1/S2 sector data is available.` };
 }
 
 // Updates the norm-time warning panel for the followed car.
-function renderWarning(rows) {
+function renderWarning(rows, history) {
   const wanted = String($('followed-car').value || '').trim();
   const followed = rows.find((row) => String(row.carNumber) === wanted);
   const referenceMs = parseLapTimeToMs($('reference-time').value);
-  const info = normStatus(followed?.lastLapMs, referenceMs);
+  const info = normStatus(followed, history || [], referenceMs);
   const panel = $('warning-panel');
   panel.className = `panel warning-panel ${info.level}`;
+  document.body.classList.toggle('norm-danger', info.level === 'bad');
   $('warning-title').textContent = info.title;
   $('warning-detail').textContent = info.detail;
 }
@@ -473,7 +529,7 @@ function render(state) {
   $('last-update').textContent = currentState.lastSuccessAt ? new Date(currentState.lastSuccessAt).toLocaleTimeString() : '—';
   renderFollowed(rows);
   renderClassTable(rows, history);
-  renderWarning(rows);
+  renderWarning(rows, history);
   renderGraph(currentState);
   renderAllRowsTable(rows);
   renderDetails(currentState);
