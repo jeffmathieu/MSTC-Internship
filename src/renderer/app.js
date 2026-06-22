@@ -111,40 +111,20 @@ function recentAverageForCar(history, carNumber, n = 5) {
 
 // Updates the session summary card in the left column.
 function updateSession(session = {}) {
-  $('session-name').textContent = session.sessionName || session.statusText || session.pageTitle || '—';
   $('session-time').textContent = session.timeToGo || session.pageUpdated || '—';
-  $('session-flag').textContent = session.flag || '—';
 }
 
-// Updates the followed-car panel and shows quick-pick buttons when the chosen
-// car number is not currently present in the live table.
+// Updates the followed-car values shown in the compact session panel.
 function renderFollowed(rows) {
   const wanted = String($('followed-car').value || '').trim();
   const match = rows.find((row) => String(row.carNumber) === wanted);
-  const picker = $('car-picker');
-  picker.innerHTML = '';
-  if (!wanted) $('followed-note').textContent = 'Enter a car number to follow.';
-  else if (!match) {
-    $('followed-note').textContent = `Car #${wanted} is not currently detected. Pick one of the detected cars.`;
-    rows.slice(0, 15).forEach((row) => {
-      const button = document.createElement('button');
-      button.className = 'mini-button';
-      button.textContent = `#${row.carNumber} ${row.className || ''}`;
-      button.onclick = () => { $('followed-car').value = String(row.carNumber); $('setup-car').value = String(row.carNumber); saveSettingsFromInputs(); render(currentState); };
-      picker.appendChild(button);
-    });
-  } else $('followed-note').textContent = `${match.car || ''}`.trim() || 'Detected.';
-
   const row = match || {};
-  $('f-car').textContent = match ? `#${row.carNumber}` : `#${wanted || '—'}`;
-  $('f-team').textContent = rowValue(row.team);
   $('f-driver').textContent = rowValue(row.driver);
   $('f-class').textContent = rowValue(row.className);
   $('f-pic').textContent = rowValue(row.classPosition);
   $('f-pos').textContent = rowValue(row.position);
   $('f-last').textContent = rowValue(row.lastLap);
   $('f-best').textContent = rowValue(row.bestLap);
-  $('f-lap').textContent = rowValue(row.lapNumber);
 }
 
 // Builds same-class "battle" rows with catch/being-caught estimates. The logic

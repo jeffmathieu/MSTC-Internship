@@ -42,26 +42,20 @@
     <div id="app" class="dashboard-shell">
       <section class="left-column">
         <!-- Session and followed-car card. Values are filled by renderFollowed()
-          and updateSession() in app.js. -->
+          and updateSession() in app.js. Keep this panel limited to the key
+          race-day fields requested for the top-left summary. -->
         <section class="session-panel panel">
           <div>
             <p class="eyebrow">Session</p>
-            <h1 id="session-name">—</h1>
           </div>
           <div class="session-grid">
             <div><span>Time left</span><strong id="session-time">—</strong></div>
-            <div><span>Flag</span><strong id="session-flag">—</strong></div>
-            <div><span>Our car</span><strong id="f-car">#—</strong></div>
             <div><span>Driver</span><strong id="f-driver">—</strong></div>
-            <div><span>Team</span><strong id="f-team">—</strong></div>
-            <div><span>Class / PIC</span><strong><span id="f-class">—</span> / <span id="f-pic">—</span></strong></div>
+            <div><span>Class / PIC</span><strong class="class-pic"><span id="f-class">—</span> / <span id="f-pic">—</span></strong></div>
             <div><span>Position</span><strong id="f-pos">—</strong></div>
-            <div><span>Current lap</span><strong id="f-lap">—</strong></div>
-            <div><span>Last lap</span><strong id="f-last">—</strong></div>
-            <div><span>Best lap</span><strong id="f-best">—</strong></div>
+            <div><span>Last lap time</span><strong id="f-last">—</strong></div>
+            <div><span>Best lap time</span><strong id="f-best">—</strong></div>
           </div>
-          <p id="followed-note" class="note">Waiting for data...</p>
-          <div id="car-picker" class="picker"></div>
         </section>
 
         <!-- Same-class timing table. renderClassTable() fills the body and catch

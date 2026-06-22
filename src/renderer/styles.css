@@ -44,7 +44,7 @@ button { cursor: pointer; }
 /* Column row sizing. The left column reserves fixed room for session and warning
    panels while letting the class timing table fill the remaining height. */
 .left-column, .right-column { display: grid; gap: 12px; min-height: 0; }
-.left-column { grid-template-rows: 255px minmax(0, 1fr) 118px; }
+.left-column { grid-template-rows: 160px minmax(0, 1fr) 118px; }
 .right-column { grid-template-rows: auto minmax(0, 1fr) auto; }
 
 /* Shared panel shell. Individual panels below override padding/layout but reuse
@@ -74,22 +74,23 @@ h3 { font-size: 16px; }
 
 /* Session/followed-car summary card. IDs inside this area are updated by
    updateSession() and renderFollowed() in app.js. */
-.session-panel { padding: 18px; display: grid; grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; min-height:0; }
+.session-panel { padding: 14px; display: grid; grid-template-columns: 1fr; grid-template-rows: auto 1fr; min-height:0; }
 .session-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0,1fr));
-  gap: 8px;
+  gap: 6px;
   align-content: center;
 }
 .session-grid div {
   background: rgba(255,255,255,.035);
   border: 1px solid rgba(255,255,255,.06);
-  border-radius: 12px;
-  padding: 8px;
+  border-radius: 10px;
+  padding: 7px 8px;
   min-width: 0;
 }
-.session-grid span, .followed-grid span { display:block; color: var(--muted-2); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; font-weight: 800; }
-.session-grid strong { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display:block; }
+.session-grid div > span, .followed-grid span { display:block; color: var(--muted-2); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; font-weight: 800; }
+.session-grid strong { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display:block; }
+.session-grid .class-pic span { display: inline; }
 
 /* Same-class timing panel and table styling. Sticky headers keep context while
    scrolling through larger timing tables. */
