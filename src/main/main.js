@@ -13,6 +13,7 @@ const {
 let mainWindow;
 let liveWindow;
 let pollTimer;
+let shouldCloseLiveWindow = false;
 
 // Stores unique lap identifiers that have already been written to disk.
 // Change the key format in updateLapHistory/loadExistingHistory if duplicate
@@ -95,7 +96,8 @@ function createMainWindow() {
 
 // Creates the hidden browser window used to load the live timing website.
 // show:false keeps it invisible during normal collection; the debug button can
-// reveal it through collector:openLiveWindow.
+// reveal it through collector:openLiveWindow. Closing the debug window only
+// hides it, because the collector still needs this BrowserWindow to keep polling.
 function createLiveWindow() {
   if (liveWindow && !liveWindow.isDestroyed()) return liveWindow;
   liveWindow = new BrowserWindow({
@@ -104,7 +106,15 @@ function createLiveWindow() {
     show: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: false }
   });
-  liveWindow.on('closed', () => { liveWindow = null; });
+  liveWindow.on('close', (event) => {
+    if (shouldCloseLiveWindow) return;
+    event.preventDefault();
+    liveWindow.hide();
+  });
+  liveWindow.on('closed', () => {
+    liveWindow = null;
+    shouldCloseLiveWindow = false;
+  });
   return liveWindow;
 }
 
@@ -394,6 +404,7 @@ async function startCollector(url) {
   broadcastState();
   try {
     const win = createLiveWindow();
+    win.webContents.removeAllListeners('did-fail-load');
     win.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => { collectorState.status = 'error'; collectorState.message = `Live timing page failed to load: ${errorDescription} (${errorCode})`; addError(new Error(errorDescription), 'did-fail-load'); broadcastState(); });
     await win.loadURL(url);
     collectorState.status = 'connected'; collectorState.message = 'Live timing page loaded. Waiting for timing table...'; broadcastState();
@@ -408,7 +419,10 @@ async function startCollector(url) {
 function stopCollector(closeLiveWindow = true) {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = null;
-  if (closeLiveWindow && liveWindow && !liveWindow.isDestroyed()) liveWindow.close();
+  if (closeLiveWindow && liveWindow && !liveWindow.isDestroyed()) {
+    shouldCloseLiveWindow = true;
+    liveWindow.close();
+  }
   if (collectorState.mode === 'live') { collectorState.status = 'idle'; collectorState.message = 'Live collector stopped'; }
   broadcastState();
 }
