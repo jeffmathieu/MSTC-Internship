@@ -1,0 +1,46 @@
+{
+  "name": "zolder-live-timing-reader",
+  "version": "0.1.0",
+  "description": "Small Electron app that reads and displays GetRaceResults live timing table data.",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "test": "node tests/parser.test.js",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win portable nsis"
+  },
+  "keywords": [
+    "livetiming",
+    "motorsport",
+    "electron",
+    "zolder"
+  ],
+  "author": "Jeff Mathieu",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^41.7.0",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "be.jeffmathieu.zolderlivetimingreader",
+    "productName": "Zolder Live Timing Reader",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

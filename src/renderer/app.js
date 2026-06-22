@@ -1,0 +1,518 @@
+const $ = (id) => document.getElementById(id);
+let currentSettings = null;
+let currentState = null;
+const battleCache = new Map();
+
+function statusClass(status) {
+  if (['collecting', 'connected', 'replay_finished'].includes(status)) return 'ok';
+  if (['waiting', 'loading', 'idle', 'replay_paused'].includes(status)) return 'warn';
+  return 'bad';
+}
+function setStatus(status, message) {
+  const pill = $('status-pill');
+  pill.className = `status-pill ${statusClass(status)}`;
+  $('status-text').textContent = String(status || 'idle').toUpperCase();
+}
+function rowValue(value) { return value === null || value === undefined || value === '' ? '—' : value; }
+function formatMs(ms) {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return '—';
+  const sign = ms < 0 ? '-' : '';
+  let remaining = Math.abs(Math.round(ms));
+  const hours = Math.floor(remaining / 3600000); remaining %= 3600000;
+  const minutes = Math.floor(remaining / 60000); remaining %= 60000;
+  const seconds = Math.floor(remaining / 1000);
+  const milli = remaining % 1000;
+  if (hours > 0) return `${sign}${hours}:${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}.${String(milli).padStart(3,'0')}`;
+  return `${sign}${minutes}:${String(seconds).padStart(2,'0')}.${String(milli).padStart(3,'0')}`;
+}
+function formatSeconds(ms) { return Number.isFinite(ms) ? `${(ms / 1000).toFixed(3)}s` : '—'; }
+function average(values) {
+  const usable = values.filter((value) => Number.isFinite(value));
+  if (!usable.length) return null;
+  return usable.reduce((sum, value) => sum + value, 0) / usable.length;
+}
+function stddev(values) {
+  const usable = values.filter((value) => Number.isFinite(value));
+  if (usable.length < 2) return null;
+  const avg = average(usable);
+  return Math.sqrt(average(usable.map((value) => (value - avg) ** 2)));
+}
+function parseLapTimeToMs(text) {
+  const raw = String(text || '').trim().replace(',', '.');
+  if (!raw || /^(—|-|--|\?|in pit|out lap)$/i.test(raw)) return null;
+  const parts = raw.split(':');
+  let seconds = null;
+  if (parts.length === 1) {
+    const n = Number(parts[0]);
+    if (Number.isFinite(n)) seconds = n;
+  } else if (parts.length === 2) {
+    const m = Number(parts[0]), s = Number(parts[1]);
+    if (Number.isFinite(m) && Number.isFinite(s)) seconds = m * 60 + s;
+  } else if (parts.length === 3) {
+    const first = Number(parts[0]), middle = Number(parts[1]), last = parts[2];
+    if (Number.isFinite(first) && Number.isFinite(middle)) {
+      if (!last.includes('.') && first < 10 && middle < 60) {
+        const milli = Number(String(last).padEnd(3, '0').slice(0, 3));
+        if (Number.isFinite(milli)) seconds = first * 60 + middle + milli / 1000;
+      } else {
+        const sec = Number(last);
+        if (Number.isFinite(sec)) seconds = first * 3600 + middle * 60 + sec;
+      }
+    }
+  }
+  return seconds === null ? null : Math.round(seconds * 1000);
+}
+function parseGapToMs(value) {
+  const text = String(value || '').trim();
+  if (!text || text === '--' || text === '?' || /lap/i.test(text)) return null;
+  return parseLapTimeToMs(text.replace(/^\+/, ''));
+}
+function lapsForCar(history, carNumber) {
+  return (history || [])
+    .filter((entry) => String(entry.carNumber) === String(carNumber) && Number.isFinite(entry.lastLapMs))
+    .sort((a, b) => (Number(a.lapNumber) - Number(b.lapNumber)) || (new Date(a.recordedAt) - new Date(b.recordedAt)));
+}
+function recentAverageForCar(history, carNumber, n = 5) {
+  const laps = lapsForCar(history, carNumber).slice(-n);
+  return average(laps.map((entry) => entry.lastLapMs));
+}
+
+function updateSession(session = {}) {
+  $('session-name').textContent = session.sessionName || session.statusText || session.pageTitle || '—';
+  $('session-time').textContent = session.timeToGo || session.pageUpdated || '—';
+  $('session-flag').textContent = session.flag || '—';
+}
+
+function renderFollowed(rows) {
+  const wanted = String($('followed-car').value || '').trim();
+  const match = rows.find((row) => String(row.carNumber) === wanted);
+  const picker = $('car-picker');
+  picker.innerHTML = '';
+  if (!wanted) $('followed-note').textContent = 'Enter a car number to follow.';
+  else if (!match) {
+    $('followed-note').textContent = `Car #${wanted} is not currently detected. Pick one of the detected cars.`;
+    rows.slice(0, 15).forEach((row) => {
+      const button = document.createElement('button');
+      button.className = 'mini-button';
+      button.textContent = `#${row.carNumber} ${row.className || ''}`;
+      button.onclick = () => { $('followed-car').value = String(row.carNumber); $('setup-car').value = String(row.carNumber); saveSettingsFromInputs(); render(currentState); };
+      picker.appendChild(button);
+    });
+  } else $('followed-note').textContent = `${match.car || ''}`.trim() || 'Detected.';
+
+  const row = match || {};
+  $('f-car').textContent = match ? `#${row.carNumber}` : `#${wanted || '—'}`;
+  $('f-team').textContent = rowValue(row.team);
+  $('f-driver').textContent = rowValue(row.driver);
+  $('f-class').textContent = rowValue(row.className);
+  $('f-pic').textContent = rowValue(row.classPosition);
+  $('f-pos').textContent = rowValue(row.position);
+  $('f-last').textContent = rowValue(row.lastLap);
+  $('f-best').textContent = rowValue(row.bestLap);
+  $('f-lap').textContent = rowValue(row.lapNumber);
+}
+
+function buildBattleItems(rows, history) {
+  const wanted = String($('followed-car').value || '').trim();
+  const followed = rows.find((row) => String(row.carNumber) === wanted);
+  if (!followed || !followed.className) return [];
+  const sameClass = rows
+    .filter((row) => row.className === followed.className)
+    .sort((a,b) => (Number(a.classPosition || 999) - Number(b.classPosition || 999)) || (Number(a.position || 999) - Number(b.position || 999)));
+  const ourAvg = recentAverageForCar(history, followed.carNumber, 5) || followed.lastLapMs;
+  const ourGap = parseGapToMs(followed.gap);
+
+  return sameClass.filter((row) => String(row.carNumber) !== wanted).map((row) => {
+    const theirAvg = recentAverageForCar(history, row.carNumber, 5) || row.lastLapMs;
+    const theirGap = parseGapToMs(row.gap);
+    const relation = Number(row.classPosition || 999) < Number(followed.classPosition || 999) ? 'ahead' : 'behind';
+    let relativeGap = null;
+    if (Number.isFinite(ourGap) && Number.isFinite(theirGap)) {
+      relativeGap = relation === 'ahead' ? ourGap - theirGap : theirGap - ourGap;
+      if (relativeGap < 0) relativeGap = null;
+    }
+    let deltaPerLap = null, lapsToCatch = null, minutesToCatch = null, estimate = 'not enough gap data';
+    if (Number.isFinite(relativeGap) && Number.isFinite(ourAvg) && Number.isFinite(theirAvg) && relativeGap > 0) {
+      if (relation === 'ahead') {
+        deltaPerLap = theirAvg - ourAvg;
+        if (deltaPerLap > 0) {
+          lapsToCatch = relativeGap / deltaPerLap;
+          minutesToCatch = (lapsToCatch * ourAvg) / 60000;
+          estimate = `we catch #${row.carNumber}`;
+        } else estimate = 'we are not catching';
+      } else {
+        deltaPerLap = ourAvg - theirAvg;
+        if (deltaPerLap > 0) {
+          lapsToCatch = relativeGap / deltaPerLap;
+          minutesToCatch = (lapsToCatch * ourAvg) / 60000;
+          estimate = `#${row.carNumber} catches us`;
+        } else estimate = 'they are not catching';
+      }
+    }
+    const key = `${followed.carNumber}|${row.carNumber}`;
+    const item = { key, relation, row, gapRaw: row.gap, relativeGap, ourAvg, theirAvg, deltaPerLap, lapsToCatch, minutesToCatch, estimate, stale: false };
+    if (Number.isFinite(lapsToCatch) || /not catching|not enough/.test(estimate)) battleCache.set(key, item);
+    else if (battleCache.has(key)) return { ...battleCache.get(key), row: { ...battleCache.get(key).row, ...row }, relation, gapRaw: row.gap, stale: true };
+    return item;
+  });
+}
+
+function renderClassTable(rows, history) {
+  const tbody = document.querySelector('#class-table tbody');
+  tbody.innerHTML = '';
+  const wanted = String($('followed-car').value || '').trim();
+  const followed = rows.find((row) => String(row.carNumber) === wanted);
+  if (!followed || !followed.className) {
+    $('class-summary').textContent = 'No class detected yet';
+    tbody.innerHTML = '<tr><td colspan="8" class="muted">Waiting until our car and class are detected.</td></tr>';
+    return;
+  }
+  const battle = new Map(buildBattleItems(rows, history).map((item) => [String(item.row.carNumber), item]));
+  const sameClass = rows
+    .filter((row) => row.className === followed.className)
+    .sort((a,b) => (Number(a.classPosition || 999) - Number(b.classPosition || 999)) || (Number(a.position || 999) - Number(b.position || 999)));
+  $('class-summary').textContent = `${followed.className} · ${sameClass.length} cars · our PIC ${rowValue(followed.classPosition)}`;
+  sameClass.forEach((row) => {
+    const tr = document.createElement('tr');
+    if (String(row.carNumber) === wanted) tr.classList.add('followed');
+    const item = battle.get(String(row.carNumber));
+    let catchInfo = 'our car';
+    if (item) {
+      const laps = Number.isFinite(item.lapsToCatch) ? `${item.lapsToCatch.toFixed(1)} laps` : '—';
+      const mins = Number.isFinite(item.minutesToCatch) ? `${item.minutesToCatch.toFixed(1)} min` : '';
+      catchInfo = `${item.estimate}${laps !== '—' ? ` · ${laps} ${mins}` : ''}${item.stale ? ' · last known' : ''}`;
+    }
+    [row.classPosition, row.carNumber, row.team, row.driver, row.lastLap, row.bestLap, row.gap, catchInfo].forEach((value, index) => {
+      const td = document.createElement('td');
+      td.textContent = rowValue(value);
+      if ([1,4,5].includes(index)) td.classList.add('mono');
+      if (index === 7) td.classList.add('catch-cell');
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+}
+
+function renderAllRowsTable(rows) {
+  const tbody = document.querySelector('#cars-table tbody');
+  tbody.innerHTML = '';
+  const wanted = String($('followed-car').value || '').trim();
+  rows.forEach((row) => {
+    const tr = document.createElement('tr');
+    if (String(row.carNumber) === wanted) tr.classList.add('followed');
+    [row.position,row.carNumber,row.team,row.car,row.driver,row.className,row.classPosition,row.gap,row.diff,row.lastLap,row.bestLap,row.lapNumber,row.sector1,row.sector2,row.sector3,row.pit].forEach((value) => {
+      const td = document.createElement('td');
+      td.textContent = rowValue(value);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+}
+
+function normStatus(lapMs, referenceMs) {
+  if (!Number.isFinite(lapMs) || !Number.isFinite(referenceMs)) return { level: 'unknown', title: 'No reference warning yet', detail: 'Set the reference time in settings. The panel updates when our last lap is close to or below that time.' };
+  const margin = lapMs - referenceMs;
+  if (margin < 0) return { level: 'bad', title: 'TOO FAST', detail: `Last lap is ${formatSeconds(Math.abs(margin))} below the norm time ${formatMs(referenceMs)}.` };
+  if (margin <= 500) return { level: 'critical', title: 'Critical: very close to norm time', detail: `Last lap is only ${formatSeconds(margin)} above the norm time ${formatMs(referenceMs)}.` };
+  if (margin <= 1000) return { level: 'warning', title: 'Warning: close to norm time', detail: `Last lap is ${formatSeconds(margin)} above the norm time ${formatMs(referenceMs)}.` };
+  return { level: 'safe', title: 'Safe margin to norm time', detail: `Last lap is ${formatSeconds(margin)} slower than the norm time ${formatMs(referenceMs)}.` };
+}
+function renderWarning(rows) {
+  const wanted = String($('followed-car').value || '').trim();
+  const followed = rows.find((row) => String(row.carNumber) === wanted);
+  const referenceMs = parseLapTimeToMs($('reference-time').value);
+  const info = normStatus(followed?.lastLapMs, referenceMs);
+  const panel = $('warning-panel');
+  panel.className = `panel warning-panel ${info.level}`;
+  $('warning-title').textContent = info.title;
+  $('warning-detail').textContent = info.detail;
+}
+
+function svgBase(width, height, body) {
+  return `<svg viewBox="0 0 ${width} ${height}" role="img">${body}</svg>`;
+}
+function drawLineGraph(container, series, opts = {}) {
+  container.innerHTML = '';
+  const width = Math.max(760, container.clientWidth || 900);
+  const height = Math.max(420, container.clientHeight || 420);
+  const padL = 72, padR = 28, padT = 42, padB = 54;
+
+  const normalizedSeries = (series || []).map((s) => ({
+    ...s,
+    points: (s.points || [])
+      .filter((p) => Number.isFinite(p.y))
+      .map((p, index) => ({ ...p, xPlot: Number.isFinite(p.xPlot) ? p.xPlot : index + 1, lapLabel: p.lapLabel ?? p.x }))
+  })).filter((s) => s.points.length);
+  const allPoints = normalizedSeries.flatMap((s) => s.points);
+  if (!allPoints.length) { container.innerHTML = '<span class="muted">No stored laps yet for this graph.</span>'; return; }
+
+  const minX = Math.min(...allPoints.map((p) => p.xPlot));
+  const maxX = Math.max(...allPoints.map((p) => p.xPlot));
+  const minYReal = Math.min(...allPoints.map((p) => p.y));
+  const maxYReal = Math.max(...allPoints.map((p) => p.y));
+  const marginY = Math.max(250, (maxYReal - minYReal) * 0.18);
+  const minY = minYReal - marginY;
+  const maxY = maxYReal + marginY;
+  const xScale = (x) => minX === maxX ? width / 2 : padL + ((x - minX) / (maxX - minX)) * (width - padL - padR);
+  const yScale = (y) => maxY === minY ? height / 2 : height - padB - ((y - minY) / (maxY - minY)) * (height - padT - padB);
+  const palette = ['c1','c2','c3','c4','c5','c6'];
+
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((fraction) => {
+    const yValue = minY + (maxY - minY) * fraction;
+    const y = yScale(yValue);
+    return `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${width - padR}" y2="${y.toFixed(1)}" class="grid-line" />
+      <text x="${padL - 10}" y="${(y + 4).toFixed(1)}" class="chart-label" text-anchor="end">${formatMs(yValue)}</text>`;
+  }).join('');
+
+  const lines = normalizedSeries.map((s, i) => {
+    const cls = palette[i % palette.length];
+    const points = s.points.map((p) => `${xScale(p.xPlot).toFixed(1)},${yScale(p.y).toFixed(1)}`).join(' ');
+    const circles = s.points.map((p) => `<circle class="${cls}" cx="${xScale(p.xPlot).toFixed(1)}" cy="${yScale(p.y).toFixed(1)}" r="3.8"><title>${s.label} · lap ${p.lapLabel}: ${formatMs(p.y)}</title></circle>`).join('');
+    return s.points.length > 1 ? `<polyline class="graph-line ${cls}" points="${points}" />${circles}` : circles;
+  }).join('');
+
+  const xLabels = allPoints.length === 1
+    ? `<text x="${xScale(allPoints[0].xPlot)}" y="${height - 18}" class="chart-label" text-anchor="middle">Lap ${allPoints[0].lapLabel}</text>`
+    : [minX, Math.round((minX + maxX) / 2), maxX].filter((v, i, a) => a.indexOf(v) === i).map((x) => {
+        const closest = allPoints.reduce((best, p) => Math.abs(p.xPlot - x) < Math.abs(best.xPlot - x) ? p : best, allPoints[0]);
+        return `<text x="${xScale(x)}" y="${height - 18}" class="chart-label" text-anchor="middle">Lap ${closest.lapLabel}</text>`;
+      }).join('');
+
+  const legend = normalizedSeries.slice(0, 8).map((s, i) => `<span><i class="legend-dot ${palette[i % palette.length]}"></i>${s.label}</span>`).join('');
+  container.innerHTML = `<div class="legend">${legend}</div>` + svgBase(width, height, `
+    ${yTicks}
+    <line x1="${padL}" y1="${height - padB}" x2="${width - padR}" y2="${height - padB}" class="axis" />
+    <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${height - padB}" class="axis" />
+    ${opts.referenceMs ? `<line x1="${padL}" y1="${yScale(opts.referenceMs).toFixed(1)}" x2="${width - padR}" y2="${yScale(opts.referenceMs).toFixed(1)}" class="reference-line" />` : ''}
+    ${lines}${xLabels}
+    <text x="${padL}" y="25" class="chart-label">Fastest ${formatMs(minYReal)} · slowest ${formatMs(maxYReal)}</text>
+  `);
+}
+
+function drawBarGraph(container, groups, title) {
+  container.innerHTML = '';
+  const width = Math.max(760, container.clientWidth || 900), height = Math.max(420, container.clientHeight || 420), pad = 58;
+  const values = groups.flatMap((g) => g.values).filter((v) => Number.isFinite(v.value));
+  if (!values.length) { container.innerHTML = '<span class="muted">Not enough sector data yet.</span>'; return; }
+  const max = Math.max(...values.map((v) => v.value)) * 1.12;
+  const barArea = width - pad * 2;
+  const groupWidth = barArea / groups.length;
+  const colors = ['c1','c2','c3'];
+  const bars = groups.map((group, gi) => group.values.map((v, vi) => {
+    const bw = Math.min(46, groupWidth / 4);
+    const x = pad + gi * groupWidth + 10 + vi * (bw + 6);
+    const h = (v.value / max) * (height - pad * 2);
+    const y = height - pad - h;
+    return `<rect class="bar ${colors[vi % colors.length]}" x="${x}" y="${y}" width="${bw}" height="${h}"><title>${group.label} ${v.label}: ${formatMs(v.value)}</title></rect>`;
+  }).join('') + `<text x="${pad + gi * groupWidth + groupWidth/2}" y="${height-14}" class="chart-label" text-anchor="middle">${group.label.slice(0,16)}</text>`).join('');
+  container.innerHTML = `<div class="legend"><span>${title}</span><span><i class="legend-dot c1"></i>S1</span><span><i class="legend-dot c2"></i>S2</span><span><i class="legend-dot c3"></i>S3</span></div>` + svgBase(width, height, `
+    <line x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}" class="axis" />
+    <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}" class="axis" />${bars}
+  `);
+}
+
+const graphRegistry = [
+  {
+    id: 'lapTimeByDriver',
+    label: 'Our lap time over race',
+    description: 'Followed-car lap time by completed lap. Points are colored by driver/stint. The dashed line is the configurable norm time.',
+    render(container, state) {
+      const car = $('followed-car').value.trim();
+      const laps = lapsForCar(state.lapHistory || [], car);
+      const byDriver = new Map();
+      laps.forEach((lap, index) => { const d = lap.driver || 'Unknown driver'; if (!byDriver.has(d)) byDriver.set(d, []); byDriver.get(d).push({ xPlot: index + 1, x: Number(lap.lapNumber), lapLabel: lap.lapNumber, y: lap.lastLapMs }); });
+      const referenceMs = parseLapTimeToMs($('reference-time').value);
+      drawLineGraph(container, [...byDriver.entries()].map(([label, points]) => ({ label, points })), { referenceMs });
+    }
+  },
+  {
+    id: 'classComparison',
+    label: 'Same-class lap comparison',
+    description: 'Recent average lap time for our car and same-class competitors. Useful for seeing if we are gaining or losing pace.',
+    render(container, state) {
+      const rows = state.rows || [];
+      const followed = rows.find((row) => String(row.carNumber) === String($('followed-car').value.trim()));
+      if (!followed) { container.innerHTML = '<span class="muted">Followed car not detected yet.</span>'; return; }
+      const sameClass = rows.filter((row) => row.className === followed.className).slice(0, 10);
+      const series = sameClass.map((row) => ({
+        label: `#${row.carNumber} ${row.team || ''}`.trim(),
+        points: lapsForCar(state.lapHistory || [], row.carNumber).slice(-25).map((lap, index) => ({ xPlot: index + 1, x: Number(lap.lapNumber), lapLabel: lap.lapNumber, y: lap.lastLapMs }))
+      })).filter((s) => s.points.length >= 2);
+      drawLineGraph(container, series);
+    }
+  },
+  {
+    id: 'sectorByDriver',
+    label: 'Driver sector comparison',
+    description: 'Average sector times for each detected driver in our car. This is built as a separate graph renderer so new graph types can be added later.',
+    render(container, state) {
+      const car = $('followed-car').value.trim();
+      const laps = lapsForCar(state.lapHistory || [], car);
+      const grouped = new Map();
+      laps.forEach((lap) => { const d = lap.driver || 'Unknown'; if (!grouped.has(d)) grouped.set(d, []); grouped.get(d).push(lap); });
+      const groups = [...grouped.entries()].map(([driver, entries]) => ({
+        label: driver,
+        values: [
+          { label: 'S1', value: average(entries.map((e) => e.sector1Ms)) },
+          { label: 'S2', value: average(entries.map((e) => e.sector2Ms)) },
+          { label: 'S3', value: average(entries.map((e) => e.sector3Ms)) }
+        ]
+      }));
+      drawBarGraph(container, groups, 'Average sector by driver');
+    }
+  }
+];
+function setupGraphRegistry() {
+  const select = $('graph-select');
+  select.innerHTML = '';
+  graphRegistry.forEach((graph) => {
+    const option = document.createElement('option');
+    option.value = graph.id;
+    option.textContent = graph.label;
+    select.appendChild(option);
+  });
+  select.onchange = () => renderGraph(currentState || { lapHistory: [], rows: [] });
+}
+function renderGraph(state) {
+  const graph = graphRegistry.find((g) => g.id === $('graph-select').value) || graphRegistry[0];
+  $('graph-title').textContent = graph.label;
+  $('graph-meta').textContent = graph.description;
+  graph.render($('main-graph'), state || { rows: [], lapHistory: [] });
+}
+
+function renderDriverSummary(laps) {
+  const tbody = document.querySelector('#driver-table tbody'); tbody.innerHTML = '';
+  const grouped = new Map();
+  laps.forEach((lap) => { const name = lap.driver || 'Unknown'; if (!grouped.has(name)) grouped.set(name, []); grouped.get(name).push(lap); });
+  if (!grouped.size) { tbody.innerHTML = '<tr><td colspan="6" class="muted">No stored driver laps yet.</td></tr>'; return; }
+  [...grouped.entries()].forEach(([driver, entries]) => {
+    const times = entries.map((entry) => entry.lastLapMs).filter(Number.isFinite);
+    const tr = document.createElement('tr');
+    [driver, entries.length, formatMs(average(times)), formatMs(times.length ? Math.min(...times) : null), entries[0]?.lapNumber ?? '—', entries.at(-1)?.lapNumber ?? '—'].forEach((value) => {
+      const td = document.createElement('td'); td.textContent = value; tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+}
+function renderHistoryTable(laps) {
+  const tbody = document.querySelector('#history-table tbody'); tbody.innerHTML = '';
+  if (!laps.length) { tbody.innerHTML = '<tr><td colspan="6" class="muted">No stored laps yet.</td></tr>'; return; }
+  laps.forEach((lap) => {
+    const tr = document.createElement('tr');
+    [lap.lapNumber, lap.driver, lap.lastLap, lap.sector1, lap.sector2, lap.sector3].forEach((value) => { const td = document.createElement('td'); td.textContent = rowValue(value); tr.appendChild(td); });
+    tbody.appendChild(tr);
+  });
+}
+function renderDetails(state) {
+  const wanted = String($('followed-car').value || '').trim();
+  const laps = lapsForCar(state.lapHistory || [], wanted);
+  renderDriverSummary(laps);
+  renderHistoryTable(laps.slice(-25).reverse());
+  $('headers-debug').textContent = JSON.stringify(state.headers || [], null, 2);
+  $('rows-debug').textContent = JSON.stringify((state.rows || []).slice(0, 6), null, 2);
+  $('tables-debug').textContent = JSON.stringify(state.diagnostics?.tableSummaries || state.diagnostics || [], null, 2);
+  $('errors-debug').textContent = JSON.stringify(state.errors || [], null, 2);
+}
+function renderReplay(state) {
+  const replay = state.replay || {};
+  if ($('replay-status')) $('replay-status').textContent = replay.active ? `${replay.currentLap || 0} / ${replay.maxLap || 0}` : 'not running';
+}
+function render(state) {
+  currentState = state || {};
+  const rows = currentState.rows || [], history = currentState.lapHistory || [];
+  setStatus(currentState.status, currentState.message);
+  updateSession(currentState.session || {});
+  $('row-count').textContent = String(rows.length);
+  $('history-count').textContent = String(history.length);
+  $('last-update').textContent = currentState.lastSuccessAt ? new Date(currentState.lastSuccessAt).toLocaleTimeString() : '—';
+  renderReplay(currentState);
+  renderFollowed(rows);
+  renderClassTable(rows, history);
+  renderWarning(rows);
+  renderGraph(currentState);
+  renderAllRowsTable(rows);
+  renderDetails(currentState);
+}
+
+async function chooseAndSetFolder(targetInputId = 'storage-folder') {
+  const folder = await window.liveTiming.chooseFolder();
+  if (folder) {
+    $(targetInputId).value = folder;
+    $('storage-folder').value = folder;
+    $('setup-folder').value = folder;
+  }
+  return folder;
+}
+async function saveSettingsFromInputs(setupComplete = false) {
+  const patch = {
+    timingUrl: $('timing-url').value.trim(),
+    followedCar: $('followed-car').value.trim(),
+    storageFolder: $('storage-folder').value.trim(),
+    pollIntervalMs: Number($('poll-interval').value || 3000),
+    replayIntervalMs: Number($('replay-interval').value || 350),
+    replayLapsPerTick: Number($('replay-laps').value || 1),
+    referenceTime: $('reference-time').value.trim()
+  };
+  if (setupComplete) patch.setupComplete = true;
+  currentSettings = await window.liveTiming.setSettings(patch);
+  return currentSettings;
+}
+function syncSetupFromMain() {
+  $('setup-url').value = $('timing-url').value;
+  $('setup-car').value = $('followed-car').value;
+  $('setup-reference').value = $('reference-time').value;
+  $('setup-folder').value = $('storage-folder').value;
+}
+function syncMainFromSetup() {
+  $('timing-url').value = $('setup-url').value;
+  $('followed-car').value = $('setup-car').value;
+  $('reference-time').value = $('setup-reference').value;
+  $('storage-folder').value = $('setup-folder').value;
+}
+function showSetup(show = true) {
+  syncSetupFromMain();
+  $('setup-modal').classList.toggle('hidden', !show);
+}
+function setupDetailTabs() {
+  document.querySelectorAll('.tab').forEach((button) => {
+    button.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach((tab) => tab.classList.remove('active'));
+      document.querySelectorAll('.detail-tab').forEach((content) => content.classList.remove('active'));
+      button.classList.add('active');
+      $(`detail-${button.dataset.tab}`).classList.add('active');
+    });
+  });
+}
+
+async function init() {
+  currentSettings = await window.liveTiming.getSettings();
+  $('timing-url').value = currentSettings.timingUrl || 'https://livetiming.getraceresults.com/demo#screen-results';
+  $('followed-car').value = currentSettings.followedCar || '33';
+  $('storage-folder').value = currentSettings.storageFolder || '';
+  $('poll-interval').value = String(currentSettings.pollIntervalMs || 3000);
+  $('replay-interval').value = String(currentSettings.replayIntervalMs || 350);
+  $('replay-laps').value = String(currentSettings.replayLapsPerTick || 1);
+  $('reference-time').value = currentSettings.referenceTime || '1:42.000';
+  syncSetupFromMain();
+  setupGraphRegistry();
+  setupDetailTabs();
+
+  $('start')?.addEventListener('click', async () => { await saveSettingsFromInputs(true); await window.liveTiming.startCollector(currentSettings.timingUrl); });
+  $('stop')?.addEventListener('click', () => window.liveTiming.stopCollector());
+  $('show-live')?.addEventListener('click', () => window.liveTiming.openLiveWindow());
+  $('start-replay')?.addEventListener('click', async () => { await saveSettingsFromInputs(true); await window.liveTiming.startReplay(); });
+  $('pause-replay')?.addEventListener('click', () => window.liveTiming.pauseReplay());
+  $('resume-replay')?.addEventListener('click', () => window.liveTiming.resumeReplay());
+  $('stop-replay')?.addEventListener('click', () => window.liveTiming.stopReplay());
+  $('choose-folder')?.addEventListener('click', async () => { await chooseAndSetFolder('storage-folder'); await saveSettingsFromInputs(); });
+  $('setup-choose-folder')?.addEventListener('click', async () => { await chooseAndSetFolder('setup-folder'); });
+  $('setup-save')?.addEventListener('click', async () => { syncMainFromSetup(); await saveSettingsFromInputs(true); showSetup(false); render(currentState || await window.liveTiming.getCollectorState()); });
+  $('open-setup')?.addEventListener('click', () => showSetup(true));
+  $('export')?.addEventListener('click', async () => { const result = await window.liveTiming.exportCurrent(); alert(`Exported:\n${result.csvPath}\n${result.jsonPath}\n${result.historyPath || ''}`); });
+
+  ['timing-url','followed-car','poll-interval','replay-interval','replay-laps','reference-time'].forEach((id) => $(id)?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); }));
+  window.liveTiming.onCollectorUpdate(render);
+  render(await window.liveTiming.getCollectorState());
+  if (!currentSettings.setupComplete || !currentSettings.storageFolder) showSetup(true);
+}
+init();
