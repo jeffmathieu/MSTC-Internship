@@ -16,16 +16,8 @@
         <p class="subtitle">Choose the timing page, followed car and data folder before starting. These settings are remembered.</p>
         <label>GetRaceResults live timing URL</label>
         <input id="setup-url" type="text" value="https://livetiming.getraceresults.com/demo#screen-results" />
-        <div class="setup-row">
-          <div>
-            <label>Our car number</label>
-            <input id="setup-car" type="text" value="33" />
-          </div>
-          <div>
-            <label>Reference / norm time</label>
-            <input id="setup-reference" type="text" value="1:42.000" />
-          </div>
-        </div>
+        <label>Our car number</label>
+        <input id="setup-car" type="text" value="33" />
         <label>Data storage folder</label>
         <div class="folder-row">
           <input id="setup-folder" type="text" readonly />
@@ -38,7 +30,7 @@
     </div>
 
     <!-- Main dashboard shell. The left column focuses on race-engineer decisions;
-      the right column contains controls, graphs, and deeper debug/detail views. -->
+      the right column contains controls and deeper debug/detail views. -->
     <div id="app" class="dashboard-shell">
       <section class="left-column">
         <!-- Session and followed-car card. Values are filled by renderFollowed()
@@ -87,17 +79,6 @@
           </div>
         </section>
 
-        <!-- Norm/reference-time warning. renderWarning() changes both text and
-          panel severity class. -->
-        <section class="panel warning-panel" id="warning-panel">
-          <p class="eyebrow">Norm time warning</p>
-          <h2 id="warning-title">No reference warning yet</h2>
-          <div class="prediction-row">
-            <span>Prediction</span>
-            <strong id="warning-prediction">Waiting for S1</strong>
-          </div>
-          <p id="warning-detail">Set the reference time in settings. The panel updates when our last lap is close to or below that time.</p>
-        </section>
       </section>
 
       <section class="right-column">
@@ -117,7 +98,6 @@
           <div class="hidden-settings" aria-hidden="true">
             <input id="timing-url" type="text" value="https://livetiming.getraceresults.com/demo#screen-results" />
             <input id="followed-car" type="text" value="33" />
-            <input id="reference-time" type="text" value="1:42.000" />
             <input id="storage-folder" type="text" readonly />
             <select id="poll-interval">
               <option value="1000">1s</option>
@@ -135,23 +115,6 @@
             <button id="export" class="secondary">Export</button>
             <button id="open-setup" class="secondary">Setup</button>
           </div>
-        </section>
-
-        <!-- Graph area. The select options are generated from graphRegistry in
-          app.js, so new graph renderers usually do not require HTML changes. -->
-        <section class="panel graph-panel">
-          <div class="section-header">
-            <div>
-              <p class="eyebrow">Analysis</p>
-              <h2 id="graph-title">Lap time over race</h2>
-            </div>
-            <div class="graph-picker">
-              <label for="graph-select">Displayed graph</label>
-              <select id="graph-select"></select>
-            </div>
-          </div>
-          <div id="graph-meta" class="graph-meta">Select a graph type. New graph renderers can be added in the graph registry in app.js.</div>
-          <div id="main-graph" class="main-graph"><span class="muted">No stored laps yet.</span></div>
         </section>
 
         <!-- Collapsible diagnostics/details area. Parser debug mirrors the
@@ -186,7 +149,6 @@
         </section>
       </section>
     </div>
-    <script src="../shared/normPrediction.js"></script>
     <script src="../shared/lapAnalytics.js"></script>
     <script src="../shared/classBattle.js"></script>
     <script src="app.js"></script>

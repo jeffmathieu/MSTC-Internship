@@ -10,9 +10,9 @@ const {
   looksLikeTimingHeaders
 } = require('../src/shared/parser');
 
-// Lap-time parsing protects the formats seen in live timing tables and manual
-// reference/norm-time inputs. Add new assertions here before expanding parser.js
-// to support another provider-specific time format.
+// Lap-time parsing protects the formats seen in live timing tables. Add new
+// assertions here before expanding parser.js to support another provider-specific
+// time format.
 assert.strictEqual(parseLapTimeToMs('1:42.112'), 102112);
 assert.strictEqual(parseLapTimeToMs('01:42.112'), 102112);
 assert.strictEqual(parseLapTimeToMs('4:02.899'), 242899);

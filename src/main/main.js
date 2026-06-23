@@ -83,7 +83,6 @@ function loadSettings() {
     followedCar: '33',
     storageFolder: defaultStorageFolder(),
     pollIntervalMs: 3000,
-    referenceTime: '1:42.000',
     setupComplete: false
   };
 }

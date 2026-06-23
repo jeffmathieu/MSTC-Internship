@@ -41,11 +41,11 @@ button { cursor: pointer; }
   padding: 14px;
 }
 
-/* Column row sizing. The left column reserves fixed room for session and warning
-   panels while letting the class timing table fill the remaining height. */
+/* Column row sizing. The left column keeps session compact while letting the
+   class timing table fill the remaining height. */
 .left-column, .right-column { display: grid; gap: 12px; min-height: 0; }
-.left-column { grid-template-rows: 160px minmax(0, 1fr) 118px; }
-.right-column { grid-template-rows: auto minmax(0, 1fr) auto; }
+.left-column { grid-template-rows: 160px minmax(0, 1fr); }
+.right-column { grid-template-rows: auto minmax(0, 1fr); }
 
 /* Shared panel shell. Individual panels below override padding/layout but reuse
    this surface treatment. */
@@ -107,18 +107,6 @@ tr.followed { background: rgba(75,141,255,.25) !important; outline: 1px solid rg
 .catch-cell { white-space: normal; min-width: 210px; max-width: 350px; }
 .mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
-/* Norm-time warning panel. The severity class is selected by renderWarning(). */
-.warning-panel { padding: 16px 20px; display:flex; flex-direction:column; justify-content:center; border-color: #514735; }
-.warning-panel h2 { font-size: 22px; margin-bottom: 6px; }
-.prediction-row { display:flex; align-items:baseline; gap: 10px; margin-bottom: 6px; }
-.prediction-row span { color: var(--muted-2); font-size: 11px; text-transform: uppercase; letter-spacing: .12em; font-weight: 800; }
-.prediction-row strong { font-size: 18px; font-variant-numeric: tabular-nums; }
-.warning-panel.safe { border-color: rgba(39,217,128,.35); background: linear-gradient(180deg, rgba(18,50,37,.85), rgba(9,16,17,.92)); }
-.warning-panel.warning { border-color: rgba(255,200,87,.55); background: linear-gradient(180deg, rgba(67,52,18,.85), rgba(18,15,8,.92)); }
-.warning-panel.critical { border-color: rgba(255,140,66,.65); background: linear-gradient(180deg, rgba(70,39,22,.9), rgba(19,12,8,.94)); }
-.warning-panel.bad { border-color: rgba(255,79,103,.7); background: linear-gradient(180deg, rgba(72,23,37,.92), rgba(19,8,13,.95)); }
-.warning-panel p { color: #e9edf5; }
-
 /* Original topbar/control grid styles. The simplified topbar block later in this
    file overrides parts of these rules while keeping form/button primitives. */
 .topbar { padding: 14px; display: grid; grid-template-columns: 220px minmax(0,1fr); gap: 14px; min-height: 170px; overflow: visible; }
@@ -130,7 +118,7 @@ tr.followed { background: rgba(75,141,255,.25) !important; outline: 1px solid rg
 .status-pill.warn span { background: var(--yellow); color: var(--yellow); }
 .status-pill.bad span { background: var(--red); color: var(--red); }
 .controls-grid { display:grid; grid-template-columns: minmax(260px, 1.4fr) 80px 110px 88px minmax(220px, 1fr); gap: 10px; align-items:end; min-width:0; }
-.field label, .graph-picker label, .setup-card label { display:block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .12em; font-weight: 800; margin-bottom: 4px; }
+.field label, .setup-card label { display:block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .12em; font-weight: 800; margin-bottom: 4px; }
 input, select { width:100%; min-width:0; color: var(--text); background: #090e17; border: 1px solid var(--line-strong); border-radius: 10px; padding: 8px 10px; outline:none; }
 input:focus, select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(75,141,255,.16); }
 .folder-row { display:grid; grid-template-columns: 1fr auto; gap: 6px; }
@@ -142,31 +130,8 @@ button.muted-primary { background: linear-gradient(135deg, #5e4baa, #7b6fe8); }
 .button-row.end { justify-content:flex-end; }
 .control-buttons { grid-column: 1 / 3; }
 
-/* Graph panel and SVG chart primitives. app.js creates inline SVG using these
-   classes, so update both files if adding new graph color classes. */
-.graph-panel { padding: 18px; display:grid; grid-template-rows:auto auto 1fr; min-height: 0; }
-.graph-picker { min-width: 260px; }
-.graph-meta { color: var(--muted); margin-bottom: 8px; }
-.main-graph { min-height: 360px; width: 100%; height: 100%; border: 1px solid var(--line); border-radius: 16px; background: rgba(0,0,0,.18); display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative; }
-.legend { position:absolute; top: 12px; right: 18px; display:flex; gap: 12px; flex-wrap:wrap; z-index: 2; background: rgba(7,10,17,.7); border: 1px solid rgba(255,255,255,.08); border-radius: 999px; padding: 7px 10px; color: var(--muted); font-size: 12px; }
-.legend span { display:flex; gap: 6px; align-items:center; }
-.legend-dot { width: 10px; height: 10px; display:inline-block; border-radius:99px; }
-svg { width: 100%; height: 100%; display:block; }
-.axis { stroke: #516078; stroke-width: 1; }
-.grid-line { stroke: rgba(81,96,120,.18); stroke-width: 1; }
-.chart-label { fill: #cbd4e3; font-size: 12px; font-weight: 700; }
-.graph-line { fill:none; stroke-width: 2.5; opacity: .92; }
-.graph-line.c1, circle.c1, .legend-dot.c1 { stroke: #4b8dff; background:#4b8dff; fill:#4b8dff; }
-.graph-line.c2, circle.c2, .legend-dot.c2 { stroke: #ffc857; background:#ffc857; fill:#ffc857; }
-.graph-line.c3, circle.c3, .legend-dot.c3 { stroke: #27d980; background:#27d980; fill:#27d980; }
-.graph-line.c4, circle.c4, .legend-dot.c4 { stroke: #ff4f67; background:#ff4f67; fill:#ff4f67; }
-.graph-line.c5, circle.c5, .legend-dot.c5 { stroke: #b692ff; background:#b692ff; fill:#b692ff; }
-.graph-line.c6, circle.c6, .legend-dot.c6 { stroke: #4bd6ff; background:#4bd6ff; fill:#4bd6ff; }
-.reference-line { stroke: #ff4f67; stroke-width: 2; stroke-dasharray: 8 8; opacity: .85; }
-.bar.c1 { fill: #4b8dff; } .bar.c2 { fill: #ffc857; } .bar.c3 { fill: #27d980; }
-
 /* Collapsible details/debug area. Tabs are toggled by setupDetailTabs(). */
-.details-panel { min-height:0; padding: 8px 12px; }
+.details-panel { min-height:0; padding: 12px; }
 details { height:100%; min-height:0; display:flex; flex-direction:column; }
 summary { cursor:pointer; color: var(--muted); font-weight:800; margin-bottom: 8px; }
 .tabs { display:flex; gap: 8px; margin-bottom: 8px; }
@@ -174,7 +139,7 @@ summary { cursor:pointer; color: var(--muted); font-weight:800; margin-bottom: 8
 .tab.active { background: rgba(75,141,255,.22); border-color: var(--blue); }
 .detail-tab { display:none; height: calc(100% - 44px); min-height:0; }
 .detail-tab.active { display:block; }
-.all-rows-wrap { max-height: 180px; }
+.all-rows-wrap { max-height: 420px; }
 .two-col-details { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .debug-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 pre { margin:0; white-space:pre-wrap; overflow:auto; max-height:150px; background:#070b12; border:1px solid var(--line); border-radius:12px; padding:10px; color:#d5dcee; }

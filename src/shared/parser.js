@@ -110,7 +110,7 @@ function parseInteger(value) {
 }
 
 // Parses race timing text into milliseconds. Supported forms include seconds
-// ("102.112"), minutes/seconds ("1:42.112"), and the common engineer notation
+// ("102.112"), minutes/seconds ("1:42.112"), and compact engineer notation
 // m:ss:mmm ("2:04:00"). Add new formats here when tests reveal provider drift.
 function parseLapTimeToMs(value) {
   const text = cleanText(value);
@@ -129,8 +129,8 @@ function parseLapTimeToMs(value) {
     const sec = Number(parts[1]);
     if (Number.isFinite(min) && Number.isFinite(sec)) seconds = min * 60 + sec;
   } else if (parts.length === 3) {
-    // Most race engineers type norm times as m:ss:mmm or m:ss:cc, e.g. 2:04:00.
-    // Treat that as 2:04.000 instead of 2 hours 4 minutes. True hour-format
+    // Treat m:ss:mmm or m:ss:cc, e.g. 2:04:00, as 2:04.000 instead of
+    // 2 hours 4 minutes. True hour-format
     // still works when the first part is >= 10 or the third part contains decimals.
     const first = Number(parts[0]);
     const middle = Number(parts[1]);
