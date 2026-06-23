@@ -50,6 +50,29 @@ assert.strictEqual(oldShapeLap.driverName, 'Old Driver');
 assert.strictEqual(oldShapeLap.lapTimeMs, 101234);
 assert.strictEqual(lapPaceEligible(oldShapeLap), true);
 
+const explicitFalseLap = normalizeLap({
+  carNumber: null,
+  className: null,
+  teamName: null,
+  driverName: null,
+  lapTimeMs: '100000',
+  lapNumber: '',
+  flagState: 'Safety car',
+  paceEligible: 'false',
+  sector1Eligible: 'false',
+  sector2Flag: 'Yellow flag',
+  sector3Flag: 'Green flag'
+});
+assert.strictEqual(explicitFalseLap.carNumber, '');
+assert.strictEqual(explicitFalseLap.className, '');
+assert.strictEqual(explicitFalseLap.teamName, '');
+assert.strictEqual(explicitFalseLap.driverName, '');
+assert.strictEqual(explicitFalseLap.lapTimeMs, 100000);
+assert.strictEqual(lapPaceEligible(explicitFalseLap), false);
+assert.strictEqual(sectorPaceEligible(explicitFalseLap, 1), false);
+assert.strictEqual(sectorPaceEligible(explicitFalseLap, 2), false);
+assert.strictEqual(sectorPaceEligible(explicitFalseLap, 3), true);
+
 const noisyHistory = [
   { carNumber: '', lapTimeMs: '100000', lapNumber: '1' },
   { carNumber: '33', lapTimeMs: '--', lapNumber: '2' },

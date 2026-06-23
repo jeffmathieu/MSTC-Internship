@@ -15,3 +15,5 @@ for (const file of testFiles) {
   console.log(`\nRunning ${file}`);
   require(path.join(testDir, file));
 }
+
+console.log("\nAll tests passed.");

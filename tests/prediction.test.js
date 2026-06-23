@@ -1,5 +1,11 @@
 const assert = require('assert');
-const { predictCurrentLap, predictionProfileForRow, predictionReadiness } = require('../src/shared/normPrediction');
+const {
+  config,
+  completeSectorLaps,
+  predictCurrentLap,
+  predictionProfileForRow,
+  predictionReadiness
+} = require('../src/shared/normPrediction');
 
 function lap(carNumber, driver, lapNumber, sector1Ms, sector2Ms, sector3Ms) {
   return {
@@ -28,6 +34,22 @@ const twoLapHistory = [
   lap(77, 'Dana', 2, 33100, 40100, 31100)
 ];
 
+const incompleteHistory = [
+  lap(88, 'Eve', 1, 33000, 40000, 31000),
+  { carNumber: 88, driver: 'Eve', lapNumber: 2, lastLapMs: 104000, sector1Ms: 33000, sector2Ms: 40000 },
+  { carNumber: 88, driverName: 'Eve', lapNumber: 3, lapTimeMs: 104200, sector1Ms: 33100, sector2Ms: 40100, sector3Ms: 31000 }
+];
+
+assert.strictEqual(config.minDriverLaps, 2);
+assert.deepStrictEqual(completeSectorLaps(null, 33), []);
+assert.strictEqual(completeSectorLaps(incompleteHistory, 88, 'Eve').length, 2);
+assert.strictEqual(completeSectorLaps(incompleteHistory, 88, 'Other').length, 0);
+
+const noCarReadiness = predictionReadiness(null, history);
+assert.strictEqual(noCarReadiness.reason, 'no-car');
+assert.strictEqual(noCarReadiness.ready, false);
+assert.strictEqual(predictionProfileForRow(null, history), null);
+
 // Contract: prediction should not start until enough completed sector laps exist
 // for either the current driver or the car fallback.
 assert.strictEqual(
@@ -41,6 +63,14 @@ const aliceProfile = predictionProfileForRow({ carNumber: 33, driver: 'Alice' },
 assert.ok(aliceProfile);
 assert.strictEqual(aliceProfile.source, 'driver Alice');
 assert.strictEqual(aliceProfile.sampleSize, 3);
+
+const stricterAliceProfile = predictionProfileForRow(
+  { carNumber: 33, driver: 'Alice' },
+  history,
+  { recentLaps: 12, minDriverLaps: 4, minCarLaps: 2 }
+);
+assert.ok(stricterAliceProfile);
+assert.strictEqual(stricterAliceProfile.source, 'car average');
 
 // Contract: two complete sector laps are enough to start predicting. This keeps
 // the dashboard useful early in a session while still avoiding one-lap noise.
@@ -56,6 +86,13 @@ const carProfile = predictionProfileForRow({ carNumber: 33, driver: 'Charlie' },
 assert.ok(carProfile);
 assert.strictEqual(carProfile.source, 'car average');
 assert.strictEqual(carProfile.sampleSize, history.length);
+
+const limitedProfile = predictionProfileForRow(
+  { carNumber: 33, driver: 'Charlie' },
+  history,
+  { recentLaps: 2, minDriverLaps: 2, minCarLaps: 2 }
+);
+assert.strictEqual(limitedProfile.sampleSize, 2);
 
 // Contract: after S1 and S2, predictions expose the stage and produce a finite
 // predicted time that is ahead of the elapsed sectors.
@@ -80,9 +117,21 @@ assert.strictEqual(afterS3.predictedMs, 98000);
 
 const noHistoryReadiness = predictionReadiness({ carNumber: 44, driver: 'New Driver', sector1Ms: 32000 }, history);
 assert.strictEqual(noHistoryReadiness.reason, 'not-enough-history');
+assert.strictEqual(noHistoryReadiness.driverLapCount, 0);
+assert.strictEqual(noHistoryReadiness.carLapCount, 0);
 
 const waitingForS1Readiness = predictionReadiness({ carNumber: 33, driver: 'Alice' }, history);
 assert.strictEqual(waitingForS1Readiness.reason, 'waiting-for-s1');
+assert.strictEqual(waitingForS1Readiness.ready, false);
+assert.strictEqual(waitingForS1Readiness.hasS1, false);
+
+const readyWithOnlyS1 = predictionReadiness({ carNumber: 33, driver: 'Alice', sector1Ms: 31000 }, history);
+assert.strictEqual(readyWithOnlyS1.reason, 'ready');
+assert.strictEqual(readyWithOnlyS1.ready, true);
+assert.strictEqual(readyWithOnlyS1.hasS1, true);
+assert.strictEqual(readyWithOnlyS1.hasS2, false);
+
+assert.strictEqual(predictCurrentLap({ carNumber: 33, driver: 'Alice' }, history), null);
 
 // Contract: callers can compare predictedMs with the configured norm time to
 // decide whether the warning screen should go red. This avoids baking the exact

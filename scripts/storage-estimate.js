@@ -171,5 +171,6 @@ module.exports = {
   latestSnapshotBytes,
   analyticsSummarySizeBytes,
   analyticsSummaryBreakdown,
-  formatBytes
+  formatBytes,
+  main
 };
