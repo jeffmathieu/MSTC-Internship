@@ -11,7 +11,7 @@ const {
 const context = {
   collectedAt: '2026-06-23T10:00:00.000Z',
   timingUrl: 'https://livetiming.getraceresults.com/demo#screen-results',
-  session: { sessionName: 'Demo Race' }
+  session: { sessionName: 'Demo Race', flag: 'Full Course Yellow' }
 };
 
 const getRaceResultsRow = normalizeForStorage({
@@ -64,6 +64,9 @@ assert.deepStrictEqual(toCsvRows([getRaceResultsLap], LAP_HISTORY_COLUMNS).split
 assert.deepStrictEqual(toCsvRows([risLap], LAP_HISTORY_COLUMNS).split('\n')[0].split(','), LAP_HISTORY_COLUMNS);
 assert.strictEqual(getRaceResultsLap.lapTimeMs, '102123');
 assert.strictEqual(risLap.sector1Ms, '32100');
+assert.strictEqual(getRaceResultsLap.sessionFlag, 'Full Course Yellow');
+assert.ok(LAP_HISTORY_COLUMNS.includes('sessionFlag'));
+assert.ok(LAP_HISTORY_COLUMNS.includes('sector1Eligible'));
 assert.strictEqual(lapIdentity(getRaceResultsLap), lapIdentity(lapRecordFromNormalizedRow(getRaceResultsRow)));
 
 console.log('Storage schema tests passed.');

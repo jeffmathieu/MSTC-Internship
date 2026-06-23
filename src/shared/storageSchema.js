@@ -38,7 +38,16 @@ const LAP_HISTORY_COLUMNS = [
   'sector1Ms',
   'sector2Ms',
   'sector3Ms',
-  'bestLapMs'
+  'bestLapMs',
+  'sessionFlag',
+  'lapFlag',
+  'sector1Flag',
+  'sector2Flag',
+  'sector3Flag',
+  'paceEligible',
+  'sector1Eligible',
+  'sector2Eligible',
+  'sector3Eligible'
 ];
 
 function normalizeStorageField(value) {
@@ -115,6 +124,15 @@ function normalizeForStorage(row, context = {}) {
     stint: normalizeStorageField(valueAt(row, 'stint')),
     raw
   };
+  normalized.sessionFlag = normalizeStorageField(valueAt(row, 'sessionFlag') || context.session?.flag || context.sessionFlag);
+  normalized.lapFlag = normalizeStorageField(valueAt(row, 'lapFlag') || normalized.sessionFlag);
+  normalized.sector1Flag = normalizeStorageField(valueAt(row, 'sector1Flag'));
+  normalized.sector2Flag = normalizeStorageField(valueAt(row, 'sector2Flag'));
+  normalized.sector3Flag = normalizeStorageField(valueAt(row, 'sector3Flag'));
+  normalized.paceEligible = normalizeStorageField(valueAt(row, 'paceEligible'));
+  normalized.sector1Eligible = normalizeStorageField(valueAt(row, 'sector1Eligible'));
+  normalized.sector2Eligible = normalizeStorageField(valueAt(row, 'sector2Eligible'));
+  normalized.sector3Eligible = normalizeStorageField(valueAt(row, 'sector3Eligible'));
 
   // Ensure all storage columns exist as strings, even when a provider does not
   // expose that field. The raw object remains available in JSON/JSONL only.
@@ -131,7 +149,16 @@ function lapRecordFromNormalizedRow(row) {
     sector1Ms: normalizeMsField(row.sector1),
     sector2Ms: normalizeMsField(row.sector2),
     sector3Ms: normalizeMsField(row.sector3),
-    bestLapMs: normalizeMsField(row.bestLap)
+    bestLapMs: normalizeMsField(row.bestLap),
+    sessionFlag: normalizeStorageField(row.sessionFlag),
+    lapFlag: normalizeStorageField(row.lapFlag || row.sessionFlag),
+    sector1Flag: normalizeStorageField(row.sector1Flag),
+    sector2Flag: normalizeStorageField(row.sector2Flag),
+    sector3Flag: normalizeStorageField(row.sector3Flag),
+    paceEligible: normalizeStorageField(row.paceEligible),
+    sector1Eligible: normalizeStorageField(row.sector1Eligible),
+    sector2Eligible: normalizeStorageField(row.sector2Eligible),
+    sector3Eligible: normalizeStorageField(row.sector3Eligible)
   };
 }
 

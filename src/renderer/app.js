@@ -6,6 +6,7 @@ const $ = (id) => document.getElementById(id);
 // currentState mirrors collectorState from src/main/main.js.
 let currentSettings = null;
 let currentState = null;
+let currentAnalysis = null;
 
 // Caches catch-estimate results when live timing temporarily lacks enough gap
 // data. Clear or change this keying if battle estimates should reset per session.
@@ -15,6 +16,7 @@ const battleCache = new Map();
 // Tests use the same module through require(), so prediction behavior is covered
 // without needing to launch the Electron renderer.
 const normPrediction = window.normPrediction;
+const lapAnalytics = window.lapAnalytics;
 
 // UI warning thresholds. Prediction math lives in normPrediction.js; these
 // margins only decide how the dashboard colors the warning panel.
@@ -555,6 +557,12 @@ function renderDetails(state) {
 function render(state) {
   currentState = state || {};
   const rows = currentState.rows || [], history = currentState.lapHistory || [];
+  currentAnalysis = lapAnalytics.buildDashboardAnalysis(history, {
+    ourCarNumber: $('followed-car').value.trim()
+  });
+  // Kept as a debug/extension hook for the future UI that will display driver
+  // and class deltas without recalculating them in the DOM layer.
+  window.currentLapAnalysis = currentAnalysis;
   setStatus(currentState.status, currentState.message);
   updateSession(currentState.session || {});
   $('row-count').textContent = String(rows.length);
