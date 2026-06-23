@@ -29,6 +29,14 @@
 
   function lapsForCar(history, carNumber) {
     return (history || [])
+      .map((entry) => ({
+        ...entry,
+        driver: entry.driver ?? entry.driverName ?? '',
+        lastLapMs: Number(entry.lastLapMs ?? entry.lapTimeMs),
+        sector1Ms: Number(entry.sector1Ms),
+        sector2Ms: Number(entry.sector2Ms),
+        sector3Ms: Number(entry.sector3Ms)
+      }))
       .filter((entry) => String(entry.carNumber) === String(carNumber) && Number.isFinite(entry.lastLapMs))
       .sort((a, b) => (Number(a.lapNumber) - Number(b.lapNumber)) || (new Date(a.recordedAt) - new Date(b.recordedAt)));
   }

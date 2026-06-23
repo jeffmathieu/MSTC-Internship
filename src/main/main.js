@@ -7,6 +7,14 @@ const {
   parseTimingRow,
   looksLikeTimingHeaders
 } = require('../shared/parser');
+const {
+  LAP_HISTORY_COLUMNS,
+  normalizeForStorage,
+  lapRecordFromNormalizedRow,
+  lapIdentity,
+  toCsvRows,
+  detectSourceProvider
+} = require('../shared/storageSchema');
 
 // Main-process references. Electron keeps UI windows and timers alive through
 // these variables, so every start/stop function below updates them carefully.
@@ -235,77 +243,84 @@ function ensureStorage(settings) {
   return folder;
 }
 
-// Escapes one value for CSV output. Keep this centralized so all CSV files use
-// the same quoting rules.
-function csvEscape(value) {
-  const s = String(value ?? '');
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
-
-// Serializes the current live timing table. Add/remove columns here when the
-// latest_live_rows.csv export should change.
-function toCsv(rows) {
-  const columns = ['position','carNumber','team','car','driver','className','classPosition','gap','diff','lastLap','bestLap','inValue','lapNumber','sector1','sector2','sector3','pit'];
-  return [columns.join(','), ...rows.map((row) => columns.map((col) => csvEscape(row[col])).join(','))].join('\n');
-}
-
-// Defines the persistent lap-history CSV schema. When adding columns, also add
-// matching fields in historyEntryFromRow().
-function lapHistoryColumns() {
-  return ['recordedAt','sourceMode','sessionName','carNumber','team','car','driver','className','position','classPosition','gap','diff','lapNumber','lastLap','lastLapSeconds','bestLap','bestLapSeconds','sector1','sector1Seconds','sector2','sector2Seconds','sector3','sector3Seconds','pit'];
-}
-
-// Builds one durable history record from a parsed timing row. Millisecond values
-// are kept for code, while "*Seconds" fields make spreadsheets easier to use.
-function historyEntryFromRow(row, session, recordedAt, sourceMode = collectorState.mode || 'live') {
+function storageContext(settings, normalized, collectedAt = new Date().toISOString()) {
+  const timingUrl = normalized.session?.url || collectorState.url || loadSettings().timingUrl || '';
   return {
-    recordedAt,
-    sourceMode,
-    sessionName: session.sessionName || session.statusText || session.pageTitle || '',
-    carNumber: row.carNumber,
-    team: row.team || '',
-    car: row.car || '',
-    driver: row.driver || '',
-    className: row.className || '',
-    position: row.position,
-    classPosition: row.classPosition,
-    gap: row.gap || '',
-    diff: row.diff || '',
-    lapNumber: row.lapNumber,
-    lastLap: row.lastLap || '',
-    lastLapMs: row.lastLapMs,
-    lastLapSeconds: row.lastLapMs == null ? '' : (row.lastLapMs / 1000).toFixed(3),
-    bestLap: row.bestLap || '',
-    bestLapMs: row.bestLapMs,
-    bestLapSeconds: row.bestLapMs == null ? '' : (row.bestLapMs / 1000).toFixed(3),
-    sector1: row.sector1 || '',
-    sector1Ms: row.sector1Ms,
-    sector1Seconds: row.sector1Ms == null ? '' : (row.sector1Ms / 1000).toFixed(3),
-    sector2: row.sector2 || '',
-    sector2Ms: row.sector2Ms,
-    sector2Seconds: row.sector2Ms == null ? '' : (row.sector2Ms / 1000).toFixed(3),
-    sector3: row.sector3 || '',
-    sector3Ms: row.sector3Ms,
-    sector3Seconds: row.sector3Ms == null ? '' : (row.sector3Ms / 1000).toFixed(3),
-    pit: row.pit || ''
+    collectedAt,
+    timingUrl,
+    sourceProvider: detectSourceProvider({ timingUrl }),
+    session: normalized.session || {},
+    startedAt: collectorState.startedAt,
+    followedCar: settings.followedCar || ''
   };
 }
 
-// Converts a history entry into one CSV row using the schema above.
-function entryToCsvRow(entry) {
-  return lapHistoryColumns().map((col) => csvEscape(entry[col])).join(',');
+// Provider adapters produce app rows with canonical fields; the storage layer is
+// intentionally provider-agnostic and only writes normalized storage rows.
+function normalizeRowsForStorage(rows, context) {
+  return rows.map((row) => normalizeForStorage(row, context));
 }
 
-// Appends one completed lap to both JSONL and CSV history files. JSONL is useful
-// for robust incremental writes; CSV is useful for spreadsheets.
-function appendHistoryEntry(settings, entry) {
+function writeLatestRows(settings, normalizedRows) {
+  const folder = ensureStorage(settings);
+  fs.writeFileSync(path.join(folder, 'latest_live_rows.json'), JSON.stringify(normalizedRows, null, 2));
+  fs.writeFileSync(path.join(folder, 'latest_live_rows.csv'), toCsvRows(normalizedRows));
+}
+
+function appendLapHistory(settings, lapRecords) {
+  if (!lapRecords.length) return;
   const folder = ensureStorage(settings);
   const jsonlPath = path.join(folder, 'lap_history.jsonl');
   const csvPath = path.join(folder, 'lap_history.csv');
-  if (!fs.existsSync(csvPath)) fs.writeFileSync(csvPath, `${lapHistoryColumns().join(',')}\n`);
-  fs.appendFileSync(jsonlPath, `${JSON.stringify(entry)}\n`);
-  fs.appendFileSync(csvPath, `${entryToCsvRow(entry)}\n`);
+  const expectedHeader = LAP_HISTORY_COLUMNS.join(',');
+  let rewroteCsv = false;
+  if (fs.existsSync(csvPath)) {
+    const currentHeader = fs.readFileSync(csvPath, 'utf8').split(/\r?\n/, 1)[0];
+    if (currentHeader !== expectedHeader) {
+      const existingRecords = fs.existsSync(jsonlPath)
+        ? fs.readFileSync(jsonlPath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line))
+        : [];
+      fs.writeFileSync(csvPath, toCsvRows([...existingRecords, ...lapRecords], LAP_HISTORY_COLUMNS) + '\n');
+      rewroteCsv = true;
+    }
+  } else {
+    fs.writeFileSync(csvPath, `${expectedHeader}\n`);
+  }
+  fs.appendFileSync(jsonlPath, lapRecords.map((entry) => JSON.stringify(entry)).join('\n') + '\n');
+  const currentHeader = fs.readFileSync(csvPath, 'utf8').split(/\r?\n/, 1)[0];
+  if (!rewroteCsv && currentHeader === expectedHeader) fs.appendFileSync(csvPath, lapRecords.map((entry) => toCsvRows([entry], LAP_HISTORY_COLUMNS).split('\n')[1]).join('\n') + '\n');
+}
+
+function writeParserDebug(settings, debugInfo) {
+  const folder = ensureStorage(settings);
+  fs.writeFileSync(path.join(folder, 'parser_debug.json'), JSON.stringify(debugInfo, null, 2));
+}
+
+function writeSessionMetadata(settings, context) {
+  const folder = ensureStorage(settings);
+  fs.writeFileSync(path.join(folder, 'session_metadata.json'), JSON.stringify({
+    timingUrl: context.timingUrl || '',
+    sourceProvider: context.sourceProvider || 'unknown',
+    sessionName: normalizeForStorage({}, context).sessionName,
+    startedAt: context.startedAt || '',
+    lastUpdatedAt: context.collectedAt || '',
+    followedCar: context.followedCar || '',
+    storageSchemaVersion: 1
+  }, null, 2));
+}
+
+function parserDebugFromNormalized(normalized, storageRows, context, lastError = '') {
+  return {
+    timingUrl: context.timingUrl || '',
+    sourceProvider: context.sourceProvider || 'unknown',
+    detectedHeaders: normalized.headers || [],
+    rowCount: storageRows.length,
+    parsedCarNumbers: storageRows.map((row) => row.carNumber).filter(Boolean),
+    firstThreeRows: storageRows.slice(0, 3),
+    warnings: normalized.status === 'parser_error' ? [normalized.message] : [],
+    lastError,
+    updatedAt: context.collectedAt || new Date().toISOString()
+  };
 }
 
 // Loads already-recorded lap history at startup and rebuilds knownLapKeys so
@@ -318,9 +333,7 @@ function loadExistingHistory(settings) {
   try {
     const entries = fs.readFileSync(jsonlPath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
     entries.forEach((entry) => {
-      if (entry.carNumber !== undefined && entry.lapNumber !== null && entry.lapNumber !== undefined && entry.lastLap) {
-        knownLapKeys.add(`${entry.sourceMode || 'live'}|${entry.sessionName || ''}|${entry.carNumber}|${entry.lapNumber}`);
-      }
+      if (entry.carNumber && entry.lastLap) knownLapKeys.add(lapIdentity(entry));
     });
     return entries.slice(-20000);
   } catch (error) {
@@ -329,22 +342,18 @@ function loadExistingHistory(settings) {
   }
 }
 
-// Stores newly completed laps from normalized rows. A row is considered complete
-// only when it has a car number, lap number, last lap text, and parsed last-lap
-// milliseconds. Adjust this guard if incomplete laps should also be recorded.
-function updateLapHistory(settings, normalized, sourceMode = collectorState.mode || 'live') {
-  const recordedAt = new Date().toISOString();
+// Stores newly completed laps from provider-independent normalized storage rows.
+function updateLapHistory(settings, storageRows) {
   const newEntries = [];
-  normalized.rows.forEach((row) => {
-    if (row.carNumber == null || row.lapNumber == null || !row.lastLap || row.lastLapMs == null) return;
-    const sessionKey = normalized.session?.sessionName || normalized.session?.pageTitle || '';
-    const key = `${sourceMode}|${sessionKey}|${row.carNumber}|${row.lapNumber}`;
+  storageRows.forEach((row) => {
+    const entry = lapRecordFromNormalizedRow(row);
+    if (!entry.carNumber || !entry.lastLap || entry.lapTimeMs === '') return;
+    const key = lapIdentity(entry);
     if (knownLapKeys.has(key)) return;
     knownLapKeys.add(key);
-    const entry = historyEntryFromRow(row, normalized.session, recordedAt, sourceMode);
     newEntries.push(entry);
-    try { appendHistoryEntry(settings, entry); } catch (error) { addError(error, 'appendHistoryEntry'); }
   });
+  try { appendLapHistory(settings, newEntries); } catch (error) { addError(error, 'appendLapHistory'); }
   if (newEntries.length) collectorState.lapHistory = [...collectorState.lapHistory, ...newEntries].slice(-20000);
   return newEntries.length;
 }
@@ -354,11 +363,15 @@ function updateLapHistory(settings, normalized, sourceMode = collectorState.mode
 // current state without searching for timestamps.
 function saveLatestSnapshot(settings, normalized) {
   try {
-    const folder = ensureStorage(settings);
-    fs.writeFileSync(path.join(folder, 'latest_live_rows.json'), JSON.stringify({ collectedAt: new Date().toISOString(), session: normalized.session, headers: normalized.headers, rows: normalized.rows }, null, 2));
-    fs.writeFileSync(path.join(folder, 'latest_live_rows.csv'), toCsv(normalized.rows));
-    fs.writeFileSync(path.join(folder, 'latest_session_info.json'), JSON.stringify(normalized.session, null, 2));
+    const collectedAt = new Date().toISOString();
+    const context = storageContext(settings, normalized, collectedAt);
+    const storageRows = normalizeRowsForStorage(normalized.rows, context);
+    writeLatestRows(settings, storageRows);
+    writeParserDebug(settings, parserDebugFromNormalized(normalized, storageRows, context));
+    writeSessionMetadata(settings, context);
+    return { storageRows, context };
   } catch (error) { addError(error, 'saveLatestSnapshot'); }
+  return { storageRows: [], context: null };
 }
 
 // Reads the hidden live timing page once, normalizes the data, updates history,
@@ -370,7 +383,8 @@ async function pollLivePage() {
     const settings = loadSettings();
     const snapshot = await liveWindow.webContents.executeJavaScript(pageExtractionScript, true);
     const normalized = normalizeSnapshot(snapshot);
-    const newLapCount = updateLapHistory(settings, normalized, 'live');
+    const { storageRows } = saveLatestSnapshot(settings, normalized);
+    const newLapCount = updateLapHistory(settings, storageRows);
     collectorState = {
       ...collectorState,
       mode: 'live',
@@ -380,7 +394,6 @@ async function pollLivePage() {
       storage: storageInfo(settings), pollIntervalMs: Number(settings.pollIntervalMs || 3000),
       snapshots: [{ at: new Date().toISOString(), checksum: hashObject(normalized.rows), rowCount: normalized.rows.length, newLapCount }, ...collectorState.snapshots].slice(0, 20)
     };
-    saveLatestSnapshot(settings, normalized);
   } catch (error) {
     collectorState.status = 'error'; collectorState.message = 'Could not read the live timing page. See Debug for details.'; addError(error, 'pollLivePage');
   }
@@ -391,7 +404,15 @@ async function pollLivePage() {
 // here if the renderer should display their locations.
 function storageInfo(settings) {
   const folder = settings.storageFolder || defaultStorageFolder();
-  return { folder, latestRowsCsv: path.join(folder, 'latest_live_rows.csv'), lapHistoryCsv: path.join(folder, 'lap_history.csv'), lapHistoryJsonl: path.join(folder, 'lap_history.jsonl') };
+  return {
+    folder,
+    latestRowsCsv: path.join(folder, 'latest_live_rows.csv'),
+    latestRowsJson: path.join(folder, 'latest_live_rows.json'),
+    lapHistoryCsv: path.join(folder, 'lap_history.csv'),
+    lapHistoryJsonl: path.join(folder, 'lap_history.jsonl'),
+    parserDebugJson: path.join(folder, 'parser_debug.json'),
+    sessionMetadataJson: path.join(folder, 'session_metadata.json')
+  };
 }
 
 // Starts live collection for a URL. It opens/loads the hidden live window, does
@@ -463,8 +484,10 @@ ipcMain.handle('export:current', async () => {
   const jsonPath = path.join(folder, `live_rows_${timestamp}.json`);
   const csvPath = path.join(folder, `live_rows_${timestamp}.csv`);
   const historyPath = path.join(folder, `lap_history_${timestamp}.json`);
-  fs.writeFileSync(jsonPath, JSON.stringify({ session: collectorState.session, headers: collectorState.headers, rows: collectorState.rows }, null, 2));
-  fs.writeFileSync(csvPath, toCsv(collectorState.rows));
+  const context = storageContext(settings, { session: collectorState.session || {} }, new Date().toISOString());
+  const storageRows = normalizeRowsForStorage(collectorState.rows || [], context);
+  fs.writeFileSync(jsonPath, JSON.stringify(storageRows, null, 2));
+  fs.writeFileSync(csvPath, toCsvRows(storageRows));
   fs.writeFileSync(historyPath, JSON.stringify({ session: collectorState.session, lapHistory: collectorState.lapHistory }, null, 2));
   return { jsonPath, csvPath, historyPath };
 });

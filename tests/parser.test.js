@@ -29,4 +29,13 @@ assert.strictEqual(row.bestLapMs, 118735);
 assert.strictEqual(row.lapNumber, 5);
 assert.strictEqual(row.sector1, '42.881');
 
+const risHeaders = ['POS', '#', 'Cla', 'Drivers on Track', 'INT', 'LAST', 'BEST', 'LAPS', 'S1', 'S2', 'S3'];
+const risCells = ['1', '33', 'LMP3', 'Nigel Moore', '1.234', '1:42.123', '1:41.900', '5', '32.100', '39.500', '30.523'];
+const risRow = parseTimingRow(risHeaders, risCells);
+assert.strictEqual(risRow.carNumber, 33);
+assert.strictEqual(risRow.driver, 'Nigel Moore');
+assert.strictEqual(risRow.className, 'LMP3');
+assert.strictEqual(risRow.interval, '1.234');
+assert.strictEqual(risRow.sector1, '32.100');
+
 console.log('Parser tests passed.');

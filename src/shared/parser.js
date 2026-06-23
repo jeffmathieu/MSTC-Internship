@@ -17,6 +17,7 @@ function cleanText(value) {
 // existing concept, for example "START NO" for carNumber.
 function canonicalHeader(header) {
   const h = cleanText(header).toUpperCase();
+  if (h === '#') return 'carNumber';
   if (!h) return '';
   const compact = h.replace(/[^A-Z0-9]/g, '');
 
@@ -25,6 +26,7 @@ function canonicalHeader(header) {
   const direct = {
     POS: 'position',
     POSITION: 'position',
+    STATE: 'state',
     M: 'movement',
     NR: 'carNumber',
     NBR: 'carNumber',
@@ -35,17 +37,24 @@ function canonicalHeader(header) {
     ETA: 'eta',
     TEAM: 'team',
     ENTRANT: 'team',
+    TEAMNAME: 'team',
     CAR: 'car',
+    CARMODEL: 'car',
     VEHICLE: 'car',
     DRIVERINCAR: 'driver',
     DRIVER: 'driver',
+    DRIVERS: 'driver',
+    DRIVERSONTRACK: 'driver',
     CURRENTDRIVER: 'driver',
+    CLA: 'className',
     CLS: 'className',
     CLASS: 'className',
     PIC: 'classPosition',
     POSINCLASS: 'classPosition',
     GAP: 'gap',
     DIFF: 'diff',
+    INT: 'interval',
+    INTERVAL: 'interval',
     LAST: 'lastLap',
     LASTLAP: 'lastLap',
     BEST: 'bestLap',
@@ -54,8 +63,11 @@ function canonicalHeader(header) {
     LAP: 'lapNumber',
     LAPS: 'lapNumber',
     PIT: 'pit',
+    PITINFO: 'pit',
+    LASTPIT: 'lastPit',
     PITSTOP: 'pit',
     PITSTOPS: 'pit',
+    STINT: 'stint',
     NAT: 'nationality'
   };
 
@@ -182,6 +194,7 @@ function parseTimingRow(headers, cells) {
   return {
     position: parseInteger(valueAt(cells, headerMap, 'position')),
     movement: valueAt(cells, headerMap, 'movement'),
+    state: valueAt(cells, headerMap, 'state'),
     carNumber,
     carNumberRaw,
     eta: valueAt(cells, headerMap, 'eta'),
@@ -192,6 +205,7 @@ function parseTimingRow(headers, cells) {
     classPosition: parseInteger(valueAt(cells, headerMap, 'classPosition')),
     gap: valueAt(cells, headerMap, 'gap'),
     diff: valueAt(cells, headerMap, 'diff'),
+    interval: valueAt(cells, headerMap, 'interval'),
     lastLap: valueAt(cells, headerMap, 'lastLap'),
     bestLap: valueAt(cells, headerMap, 'bestLap'),
     inValue: valueAt(cells, headerMap, 'inValue'),
@@ -200,6 +214,8 @@ function parseTimingRow(headers, cells) {
     sector2: valueAt(cells, headerMap, 'sector2'),
     sector3: valueAt(cells, headerMap, 'sector3'),
     pit: valueAt(cells, headerMap, 'pit'),
+    lastPit: valueAt(cells, headerMap, 'lastPit'),
+    stint: valueAt(cells, headerMap, 'stint'),
     lastLapMs: parseLapTimeToMs(valueAt(cells, headerMap, 'lastLap')),
     bestLapMs: parseLapTimeToMs(valueAt(cells, headerMap, 'bestLap')),
     sector1Ms: parseLapTimeToMs(valueAt(cells, headerMap, 'sector1')),

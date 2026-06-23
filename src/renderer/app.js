@@ -108,8 +108,24 @@ function parseGapToMs(value) {
 }
 
 // Returns completed stored laps for one car in chronological order.
+function historyLapForUi(entry) {
+  const lastLapMs = Number(entry.lastLapMs ?? entry.lapTimeMs);
+  return {
+    ...entry,
+    driver: entry.driver ?? entry.driverName ?? '',
+    team: entry.team ?? entry.teamName ?? '',
+    car: entry.car ?? entry.carModel ?? '',
+    lastLapMs,
+    bestLapMs: Number(entry.bestLapMs),
+    sector1Ms: Number(entry.sector1Ms),
+    sector2Ms: Number(entry.sector2Ms),
+    sector3Ms: Number(entry.sector3Ms)
+  };
+}
+
 function lapsForCar(history, carNumber) {
   return (history || [])
+    .map(historyLapForUi)
     .filter((entry) => String(entry.carNumber) === String(carNumber) && Number.isFinite(entry.lastLapMs))
     .sort((a, b) => (Number(a.lapNumber) - Number(b.lapNumber)) || (new Date(a.recordedAt) - new Date(b.recordedAt)));
 }
