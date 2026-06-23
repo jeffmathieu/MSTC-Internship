@@ -8,15 +8,12 @@ let currentSettings = null;
 let currentState = null;
 let currentAnalysis = null;
 
-// Caches catch-estimate results when live timing temporarily lacks enough gap
-// data. Clear or change this keying if battle estimates should reset per session.
-const battleCache = new Map();
-
 // Shared norm-time prediction module loaded from src/shared/normPrediction.js.
 // Tests use the same module through require(), so prediction behavior is covered
 // without needing to launch the Electron renderer.
 const normPrediction = window.normPrediction;
 const lapAnalytics = window.lapAnalytics;
+const classBattle = window.classBattle;
 
 // UI warning thresholds. Prediction math lives in normPrediction.js; these
 // margins only decide how the dashboard colors the warning panel.
@@ -101,66 +98,6 @@ function parseLapTimeToMs(text) {
   return seconds === null ? null : Math.round(seconds * 1000);
 }
 
-// Converts a GAP/DIFF cell to milliseconds when possible. Lap-based gaps are
-// intentionally ignored because they cannot be converted to time directly.
-function parseGapToMs(value) {
-  const text = String(value || '').trim();
-  if (!text || text === '--' || text === '?' || /lap/i.test(text)) return null;
-  return parseLapTimeToMs(text.replace(/^\+/, ''));
-}
-
-function rowSortNumber(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 999999;
-}
-
-function classSortedRows(rows, className) {
-  return (rows || [])
-    .filter((row) => row.className === className)
-    .sort((a, b) => (rowSortNumber(a.classPosition) - rowSortNumber(b.classPosition)) || (rowSortNumber(a.position) - rowSortNumber(b.position)));
-}
-
-function overallSortedRows(rows) {
-  return [...(rows || [])].sort((a, b) => rowSortNumber(a.position) - rowSortNumber(b.position));
-}
-
-function previousOverallRow(rows, row) {
-  const ordered = overallSortedRows(rows);
-  const index = ordered.findIndex((candidate) => String(candidate.carNumber) === String(row.carNumber));
-  return index > 0 ? ordered[index - 1] : null;
-}
-
-function classGapToPrevious(rows, classRows, row) {
-  const classIndex = classRows.findIndex((candidate) => String(candidate.carNumber) === String(row.carNumber));
-  if (classIndex <= 0) return { ms: 0, label: 'class leader', reliable: true };
-
-  const previousClassRow = classRows[classIndex - 1];
-  const previousOverall = previousOverallRow(rows, row);
-  if (!previousOverall || String(previousOverall.carNumber) !== String(previousClassRow.carNumber)) {
-    return { ms: null, label: 'class gap unknown', reliable: false };
-  }
-
-  const gapMs = parseGapToMs(row.diff) ?? parseGapToMs(row.interval) ?? parseGapToMs(row.gap);
-  if (!Number.isFinite(gapMs)) return { ms: null, label: row.diff || row.interval || row.gap || 'class gap unknown', reliable: false };
-  return { ms: gapMs, label: formatSeconds(gapMs), reliable: true };
-}
-
-function relativeClassGap(rows, classRows, fromRow, toRow) {
-  const fromIndex = classRows.findIndex((row) => String(row.carNumber) === String(fromRow.carNumber));
-  const toIndex = classRows.findIndex((row) => String(row.carNumber) === String(toRow.carNumber));
-  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return null;
-
-  const start = Math.min(fromIndex, toIndex) + 1;
-  const end = Math.max(fromIndex, toIndex);
-  let totalMs = 0;
-  for (let i = start; i <= end; i += 1) {
-    const gap = classGapToPrevious(rows, classRows, classRows[i]);
-    if (!gap.reliable || !Number.isFinite(gap.ms)) return null;
-    totalMs += gap.ms;
-  }
-  return totalMs;
-}
-
 // Returns completed stored laps for one car in chronological order.
 function historyLapForUi(entry) {
   const lastLapMs = Number(entry.lastLapMs ?? entry.lapTimeMs);
@@ -206,13 +143,6 @@ function lapsForCar(history, carNumber) {
     });
 }
 
-// Computes recent race pace for catch estimates. Change n at call sites when a
-// shorter or longer pace window is wanted.
-function recentAverageForCar(history, carNumber, n = 5) {
-  const laps = lapsForCar(history, carNumber).slice(-n);
-  return average(laps.map((entry) => entry.lastLapMs));
-}
-
 // Updates the session summary card in the left column.
 function updateSession(session = {}) {
   $('session-time').textContent = session.timeToGo || session.pageUpdated || '—';
@@ -231,73 +161,22 @@ function renderFollowed(rows) {
   $('f-best').textContent = rowValue(row.bestLap);
 }
 
-// Builds same-class "battle" rows with catch/being-caught estimates. The logic
-// compares recent average lap pace and relative gaps, so it depends on stored
-// lap history as well as the current timing table.
-function buildBattleItems(rows, history) {
-  const wanted = String($('followed-car').value || '').trim();
-  const followed = rows.find((row) => String(row.carNumber) === wanted);
-  if (!followed || !followed.className) return [];
-  const sameClass = classSortedRows(rows, followed.className);
-  const ourAvg = recentAverageForCar(history, followed.carNumber, 5) || followed.lastLapMs;
-
-  return sameClass.filter((row) => String(row.carNumber) !== wanted).map((row) => {
-    const theirAvg = recentAverageForCar(history, row.carNumber, 5) || row.lastLapMs;
-    const relation = Number(row.classPosition || 999) < Number(followed.classPosition || 999) ? 'ahead' : 'behind';
-    const relativeGap = relativeClassGap(rows, sameClass, followed, row);
-    // A positive deltaPerLap means the chasing car is faster by that amount per
-    // lap. The estimate is intentionally conservative when gap data is missing.
-    let deltaPerLap = null, lapsToCatch = null, minutesToCatch = null, estimate = 'class gap unknown';
-    if (Number.isFinite(relativeGap) && Number.isFinite(ourAvg) && Number.isFinite(theirAvg) && relativeGap > 0) {
-      if (relation === 'ahead') {
-        deltaPerLap = theirAvg - ourAvg;
-        if (deltaPerLap > 0) {
-          lapsToCatch = relativeGap / deltaPerLap;
-          minutesToCatch = (lapsToCatch * ourAvg) / 60000;
-          estimate = `we catch #${row.carNumber}`;
-        } else estimate = 'we are not catching';
-      } else {
-        deltaPerLap = ourAvg - theirAvg;
-        if (deltaPerLap > 0) {
-          lapsToCatch = relativeGap / deltaPerLap;
-          minutesToCatch = (lapsToCatch * ourAvg) / 60000;
-          estimate = `#${row.carNumber} catches us`;
-        } else estimate = 'they are not catching';
-      }
-    }
-    const key = `${followed.carNumber}|${row.carNumber}`;
-    const item = { key, relation, row, gapRaw: row.gap, relativeGap, ourAvg, theirAvg, deltaPerLap, lapsToCatch, minutesToCatch, estimate, stale: false };
-    if (Number.isFinite(lapsToCatch) || /not catching|unknown/.test(estimate)) battleCache.set(key, item);
-    else if (battleCache.has(key)) return { ...battleCache.get(key), row: { ...battleCache.get(key).row, ...row }, relation, gapRaw: row.gap, stale: true };
-    return item;
-  });
-}
-
 // Renders the same-class timing table and highlights the followed car.
 function renderClassTable(rows, history) {
   const tbody = document.querySelector('#class-table tbody');
   tbody.innerHTML = '';
   const wanted = String($('followed-car').value || '').trim();
-  const followed = rows.find((row) => String(row.carNumber) === wanted);
-  if (!followed || !followed.className) {
+  const summary = classBattle.buildClassBattleSummary(rows, history, wanted);
+  if (!summary.followed) {
     $('class-summary').textContent = 'No class detected yet';
     tbody.innerHTML = '<tr><td colspan="8" class="muted">Waiting until our car and class are detected.</td></tr>';
     return;
   }
-  const battle = new Map(buildBattleItems(rows, history).map((item) => [String(item.row.carNumber), item]));
-  const sameClass = classSortedRows(rows, followed.className);
-  $('class-summary').textContent = `${followed.className} · ${sameClass.length} cars · our PIC ${rowValue(followed.classPosition)}`;
-  sameClass.forEach((row) => {
+  $('class-summary').textContent = `${summary.className} · ${summary.classRows.length} cars · our PIC ${rowValue(summary.followed.classPosition)}`;
+  summary.items.forEach(({ row, classGap, battle }) => {
     const tr = document.createElement('tr');
     if (String(row.carNumber) === wanted) tr.classList.add('followed');
-    const item = battle.get(String(row.carNumber));
-    const classGap = classGapToPrevious(rows, sameClass, row);
-    let catchInfo = 'our car';
-    if (item) {
-      const laps = Number.isFinite(item.lapsToCatch) ? `${item.lapsToCatch.toFixed(1)} laps` : '—';
-      const mins = Number.isFinite(item.minutesToCatch) ? `${item.minutesToCatch.toFixed(1)} min` : '';
-      catchInfo = `${item.estimate}${laps !== '—' ? ` · ${laps} ${mins}` : ''}${item.stale ? ' · last known' : ''}`;
-    }
+    const catchInfo = battle?.catchInfo || 'our car';
     [row.classPosition, row.carNumber, row.team, row.driver, row.lastLap, row.bestLap, classGap.label, catchInfo].forEach((value, index) => {
       const td = document.createElement('td');
       td.textContent = rowValue(value);
