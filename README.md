@@ -29,15 +29,55 @@ These settings are remembered. You can reopen the setup window with the **Setup*
 
 ## Data storage
 
-The app stores readable data in the folder you select:
+The app stores readable data in the folder you select. There are two kinds of
+files: source files that contain the timing data as it came in, and derived
+files that are recalculated from that source data.
 
 - `latest_live_rows.csv`
 - `latest_live_rows.json`
-- `latest_session_info.json`
 - `lap_history.csv`
 - `lap_history.jsonl`
+- `session_metadata.json`
+- `parser_debug.json`
+- `analytics_summary.json`
 
-Only new completed laps are appended to the lap history, so polling every few seconds does not create duplicate rows.
+`latest_live_rows.csv` and `latest_live_rows.json` are overwritten on every
+successful poll. They contain the current timing table only: position, car
+number, class, driver, last lap, best lap, sectors, gaps, and similar fields.
+These files are useful when you want to inspect what the app sees right now.
+
+`lap_history.csv` and `lap_history.jsonl` are the long-term source of truth.
+Only new completed laps are appended, so polling every few seconds does not
+create duplicate rows. These files keep all completed laps, including laps
+driven under safety car, full course yellow, code 60, or yellow flags. Those
+laps are stored because they are still part of the race history, but the
+analytics can exclude them from pace averages.
+
+`session_metadata.json` is overwritten with compact session information such as
+the timing URL, detected timing provider, followed car, session name, and last
+update time.
+
+`parser_debug.json` is overwritten with parser diagnostics. It shows which table
+headers were detected, how many rows were parsed, the first parsed rows, and any
+parser warnings. This is mainly for troubleshooting when a timing website
+changes its HTML.
+
+`analytics_summary.json` is a derived cache built from `lap_history`. It stores
+the current averages, best lap times, best sector times, driver statistics,
+class statistics, and comparison deltas used by the dashboard. It does not copy
+the full lap list again; detailed lap data stays in `lap_history.jsonl`.
+
+The averages are therefore available without the renderer having to rebuild all
+statistics from scratch every time. The app still keeps `lap_history` as the
+source of truth, so if the averaging rule changes later, the summary can be
+rebuilt from the saved laps.
+
+For neutralized laps, the storage keeps both the lap and its flag fields. A
+full lap under safety car or FCY is excluded from lap-time pace averages, but a
+sector can still count if that sector has its own green/eligible marker. For
+example: if sector 1 was completed under green and FCY starts during sector 2,
+sector 1 can still count for sector averages while the full lap does not count
+for lap-time averages.
 
 ## Live mode
 

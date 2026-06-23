@@ -15,6 +15,14 @@ const {
   toCsvRows,
   detectSourceProvider
 } = require('../shared/storageSchema');
+const {
+  completedLaps,
+  lapPaceEligible,
+  driverStats,
+  carStats,
+  carsInClass,
+  buildDashboardAnalysis
+} = require('../shared/lapAnalytics');
 
 // Main-process references. Electron keeps UI windows and timers alive through
 // these variables, so every start/stop function below updates them carefully.
@@ -309,6 +317,67 @@ function writeSessionMetadata(settings, context) {
   }, null, 2));
 }
 
+function compactStats(stats) {
+  if (!stats) return null;
+  const { laps, ...compact } = stats;
+  return compact;
+}
+
+function compactDashboardAnalysis(analysis) {
+  if (!analysis) return null;
+  return {
+    ...analysis,
+    driverComparison: analysis.driverComparison ? {
+      ...analysis.driverComparison,
+      bestDriver: compactStats(analysis.driverComparison.bestDriver),
+      currentDriver: compactStats(analysis.driverComparison.currentDriver)
+    } : null,
+    classComparison: analysis.classComparison ? {
+      ...analysis.classComparison,
+      ourCar: compactStats(analysis.classComparison.ourCar),
+      ourCurrentStint: compactStats(analysis.classComparison.ourCurrentStint),
+      bestClassCar: compactStats(analysis.classComparison.bestClassCar),
+      selectedCar: compactStats(analysis.classComparison.selectedCar)
+    } : null
+  };
+}
+
+function buildAnalyticsSummary(settings, context) {
+  const history = collectorState.lapHistory || [];
+  const laps = completedLaps(history);
+  const carNumbers = [...new Set(laps.map((lap) => lap.carNumber).filter(Boolean))];
+  const classNames = [...new Set(laps.map((lap) => lap.className).filter(Boolean))];
+  const selectedCarNumber = settings.comparisonCar || settings.selectedComparisonCar || '';
+
+  return {
+    storageSchemaVersion: 1,
+    generatedFrom: 'lap_history',
+    updatedAt: context?.collectedAt || new Date().toISOString(),
+    followedCar: settings.followedCar || '',
+    selectedComparisonCar: selectedCarNumber,
+    lapCount: laps.length,
+    paceLapCount: laps.filter(lapPaceEligible).length,
+    cars: carNumbers.map((carNumber) => compactStats(carStats(history, carNumber))),
+    classes: classNames.map((className) => ({
+      className,
+      cars: carsInClass(history, className).map(compactStats)
+    })),
+    driversByCar: Object.fromEntries(carNumbers.map((carNumber) => [
+      carNumber,
+      driverStats(history, carNumber).map(compactStats)
+    ])),
+    dashboardAnalysis: compactDashboardAnalysis(buildDashboardAnalysis(history, {
+      ourCarNumber: settings.followedCar || '',
+      selectedCarNumber
+    }))
+  };
+}
+
+function writeAnalyticsSummary(settings, context) {
+  const folder = ensureStorage(settings);
+  fs.writeFileSync(path.join(folder, 'analytics_summary.json'), JSON.stringify(buildAnalyticsSummary(settings, context), null, 2));
+}
+
 function parserDebugFromNormalized(normalized, storageRows, context, lastError = '') {
   return {
     timingUrl: context.timingUrl || '',
@@ -383,8 +452,11 @@ async function pollLivePage() {
     const settings = loadSettings();
     const snapshot = await liveWindow.webContents.executeJavaScript(pageExtractionScript, true);
     const normalized = normalizeSnapshot(snapshot);
-    const { storageRows } = saveLatestSnapshot(settings, normalized);
+    const { storageRows, context } = saveLatestSnapshot(settings, normalized);
     const newLapCount = updateLapHistory(settings, storageRows);
+    if (newLapCount) {
+      try { writeAnalyticsSummary(settings, context); } catch (error) { addError(error, 'writeAnalyticsSummary'); }
+    }
     collectorState = {
       ...collectorState,
       mode: 'live',
@@ -411,7 +483,8 @@ function storageInfo(settings) {
     lapHistoryCsv: path.join(folder, 'lap_history.csv'),
     lapHistoryJsonl: path.join(folder, 'lap_history.jsonl'),
     parserDebugJson: path.join(folder, 'parser_debug.json'),
-    sessionMetadataJson: path.join(folder, 'session_metadata.json')
+    sessionMetadataJson: path.join(folder, 'session_metadata.json'),
+    analyticsSummaryJson: path.join(folder, 'analytics_summary.json')
   };
 }
 
