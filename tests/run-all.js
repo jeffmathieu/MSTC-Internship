@@ -16,4 +16,4 @@ for (const file of testFiles) {
   require(path.join(testDir, file));
 }
 
-console.log("\nAll tests passed.");
+console.log("\nAll tests passed. 🏎️🏁🏆");

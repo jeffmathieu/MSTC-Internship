@@ -165,7 +165,7 @@ function lapRecordFromNormalizedRow(row) {
 function lapIdentity(row) {
   const base = [row.sourceProvider, row.timingUrl, row.sessionName, row.carNumber];
   if (row.lapNumber) return [...base, row.lapNumber, row.lastLap].join('|');
-  return [...base, row.collectedAt, row.lastLap].join('|');
+  return [...base, row.driverName || row.driver || '', row.lastLap].join('|');
 }
 
 module.exports = {

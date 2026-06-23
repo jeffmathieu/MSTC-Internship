@@ -41,9 +41,17 @@ const incompleteHistory = [
 ];
 
 assert.strictEqual(config.minDriverLaps, 2);
+assert.strictEqual(config.sectorSumToleranceMs, 5000);
 assert.deepStrictEqual(completeSectorLaps(null, 33), []);
 assert.strictEqual(completeSectorLaps(incompleteHistory, 88, 'Eve').length, 2);
 assert.strictEqual(completeSectorLaps(incompleteHistory, 88, 'Other').length, 0);
+
+const mismatchedSectorHistory = [
+  { carNumber: 66, driver: 'Mismatch', lapNumber: 1, lastLapMs: 126000, sector1Ms: 30000, sector2Ms: 35000, sector3Ms: 30000 },
+  { carNumber: 66, driver: 'Mismatch', lapNumber: 2, lastLapMs: 127000, sector1Ms: 31000, sector2Ms: 35000, sector3Ms: 30000 }
+];
+assert.strictEqual(completeSectorLaps(mismatchedSectorHistory, 66, 'Mismatch').length, 0);
+assert.strictEqual(predictionProfileForRow({ carNumber: 66, driver: 'Mismatch' }, mismatchedSectorHistory), null);
 
 const noCarReadiness = predictionReadiness(null, history);
 assert.strictEqual(noCarReadiness.reason, 'no-car');

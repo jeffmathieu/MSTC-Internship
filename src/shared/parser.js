@@ -209,7 +209,7 @@ function parseTimingRow(headers, cells) {
     lastLap: valueAt(cells, headerMap, 'lastLap'),
     bestLap: valueAt(cells, headerMap, 'bestLap'),
     inValue: valueAt(cells, headerMap, 'inValue'),
-    lapNumber: parseInteger(valueAt(cells, headerMap, 'lapNumber')) ?? parseInteger(valueAt(cells, headerMap, 'inValue')),
+    lapNumber: parseInteger(valueAt(cells, headerMap, 'lapNumber')),
     sector1: valueAt(cells, headerMap, 'sector1'),
     sector2: valueAt(cells, headerMap, 'sector2'),
     sector3: valueAt(cells, headerMap, 'sector3'),

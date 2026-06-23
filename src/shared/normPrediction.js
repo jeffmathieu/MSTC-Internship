@@ -18,7 +18,11 @@
     // Prefer a driver-specific model once this many complete sector laps exist.
     minDriverLaps: 2,
     // Fallback to all followed-car laps once this many complete sector laps exist.
-    minCarLaps: 2
+    minCarLaps: 2,
+    // Reject stored sector samples when S1+S2+S3 does not match LAST. This
+    // protects the predictor from live timing pages where sector columns show
+    // the current lap while LAST is the previous completed lap.
+    sectorSumToleranceMs: 5000
   };
 
   function average(values) {
@@ -47,6 +51,7 @@
     return lapsForCar(history, carNumber)
       .filter((lap) => !driver || lap.driver === driver)
       .filter((lap) => [lap.lastLapMs, lap.sector1Ms, lap.sector2Ms, lap.sector3Ms].every(Number.isFinite))
+      .filter((lap) => Math.abs((lap.sector1Ms + lap.sector2Ms + lap.sector3Ms) - lap.lastLapMs) <= (options.sectorSumToleranceMs ?? config.sectorSumToleranceMs))
       .slice(-options.recentLaps);
   }
 

@@ -36,6 +36,12 @@ let shouldCloseLiveWindow = false;
 // detection ever needs to include extra fields such as driver or class.
 const knownLapKeys = new Set();
 
+// Stores the latest live table row per car. Live sector columns describe the
+// lap currently in progress, while LAST describes the most recently completed
+// lap. When LAST changes, the previous row's sector values are the best sector
+// evidence we have for the lap that just completed.
+const latestLiveRowByCar = new Map();
+
 // Single source of truth for the collector UI. The renderer receives this
 // object through the "collector:update" IPC event whenever something changes.
 let collectorState = {
@@ -396,6 +402,7 @@ function parserDebugFromNormalized(normalized, storageRows, context, lastError =
 // the app does not duplicate old laps after restarting.
 function loadExistingHistory(settings) {
   knownLapKeys.clear();
+  latestLiveRowByCar.clear();
   const folder = ensureStorage(settings);
   const jsonlPath = path.join(folder, 'lap_history.jsonl');
   if (!fs.existsSync(jsonlPath)) return [];
@@ -411,11 +418,55 @@ function loadExistingHistory(settings) {
   }
 }
 
+function liveRowKey(row) {
+  return [row.sourceProvider, row.timingUrl, row.sessionName, row.carNumber].join('|');
+}
+
+function withoutCurrentSectors(row) {
+  return {
+    ...row,
+    sector1: '',
+    sector2: '',
+    sector3: '',
+    sector1Flag: '',
+    sector2Flag: '',
+    sector3Flag: '',
+    sector1Eligible: '',
+    sector2Eligible: '',
+    sector3Eligible: ''
+  };
+}
+
+function completedLapRowFromLiveRow(row, previousRow) {
+  if (!previousRow) return withoutCurrentSectors(row);
+  return {
+    ...row,
+    driverName: previousRow.driverName || row.driverName,
+    sector1: previousRow.sector1 || '',
+    sector2: previousRow.sector2 || '',
+    sector3: previousRow.sector3 || '',
+    sector1Flag: previousRow.sector1Flag || '',
+    sector2Flag: previousRow.sector2Flag || '',
+    sector3Flag: previousRow.sector3Flag || '',
+    sector1Eligible: previousRow.sector1Eligible || '',
+    sector2Eligible: previousRow.sector2Eligible || '',
+    sector3Eligible: previousRow.sector3Eligible || ''
+  };
+}
+
 // Stores newly completed laps from provider-independent normalized storage rows.
 function updateLapHistory(settings, storageRows) {
   const newEntries = [];
   storageRows.forEach((row) => {
-    const entry = lapRecordFromNormalizedRow(row);
+    if (!row.carNumber || !row.lastLap) return;
+    const carKey = liveRowKey(row);
+    const previousRow = latestLiveRowByCar.get(carKey);
+    latestLiveRowByCar.set(carKey, row);
+
+    if (previousRow && previousRow.lastLap === row.lastLap) return;
+
+    const completedRow = completedLapRowFromLiveRow(row, previousRow);
+    const entry = lapRecordFromNormalizedRow(completedRow);
     if (!entry.carNumber || !entry.lastLap || entry.lapTimeMs === '') return;
     const key = lapIdentity(entry);
     if (knownLapKeys.has(key)) return;
@@ -526,11 +577,21 @@ function stopCollector(closeLiveWindow = true) {
 // preload.js.
 ipcMain.handle('settings:get', () => loadSettings());
 ipcMain.handle('settings:set', (_event, settings) => {
-  const merged = { ...loadSettings(), ...settings };
+  const previous = loadSettings();
+  const merged = { ...previous, ...settings };
   // Clamp user-editable timing values so accidental input cannot create an
   // unusably fast/slow collector.
   merged.pollIntervalMs = Math.max(1000, Math.min(10000, Number(merged.pollIntervalMs || 3000)));
   saveSettings(merged);
+  if ((previous.storageFolder || '') !== (merged.storageFolder || '')) {
+    collectorState = {
+      ...collectorState,
+      lapHistory: loadExistingHistory(merged),
+      storage: storageInfo(merged),
+      snapshots: []
+    };
+    broadcastState();
+  }
   return merged;
 });
 

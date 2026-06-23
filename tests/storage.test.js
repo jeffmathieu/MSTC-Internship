@@ -122,10 +122,14 @@ const noLapNumberIdentity = lapIdentity({
   timingUrl: 'https://example.com/live',
   sessionName: 'Demo',
   carNumber: '7',
+  driverName: 'Fallback Driver',
   collectedAt: '2026-06-23T12:00:00.000Z',
-  lastLap: '1:40.000'
+  lastLap: '1:40.000',
+  sector1: '30.000',
+  sector2: '40.000',
+  sector3: '30.000'
 });
-assert.strictEqual(noLapNumberIdentity, 'unknown|https://example.com/live|Demo|7|2026-06-23T12:00:00.000Z|1:40.000');
+assert.strictEqual(noLapNumberIdentity, 'unknown|https://example.com/live|Demo|7|Fallback Driver|1:40.000');
 assert.strictEqual(detectSourceProvider({ sourceProvider: 'manual-provider', timingUrl: 'https://livetiming.getraceresults.com' }), 'manual-provider');
 assert.strictEqual(detectSourceProvider({ timingUrl: 'https://example.com/RISTiming/live' }), 'ris-timing');
 assert.strictEqual(detectSourceProvider({}), 'unknown');

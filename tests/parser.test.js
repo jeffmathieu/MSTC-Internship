@@ -58,7 +58,8 @@ assert.strictEqual(row.className, 'LMP2');
 assert.strictEqual(row.classPosition, 6);
 assert.strictEqual(row.lastLapMs, 204349);
 assert.strictEqual(row.bestLapMs, 118735);
-assert.strictEqual(row.lapNumber, 5);
+assert.strictEqual(row.inValue, '5');
+assert.strictEqual(row.lapNumber, null);
 assert.strictEqual(row.sector1, '42.881');
 assert.strictEqual(row.raw.NAT, '🇵🇱');
 assert.strictEqual(row.raw.NAT_8, '🇦🇺');
@@ -75,7 +76,8 @@ assert.strictEqual(risRow.sector1, '32.100');
 
 const fallbackLapHeaders = ['NR', 'TEAM', 'DRIVER', 'IN', 'LAST'];
 const fallbackLapRow = parseTimingRow(fallbackLapHeaders, ['12', 'Fallback Team', 'Fallback Driver', '9', '1:40.000']);
-assert.strictEqual(fallbackLapRow.lapNumber, 9);
+assert.strictEqual(fallbackLapRow.inValue, '9');
+assert.strictEqual(fallbackLapRow.lapNumber, null);
 assert.strictEqual(fallbackLapRow.bestLapMs, null);
 
 const sparseRow = parseTimingRow(['POS', 'NR'], ['?', '--']);

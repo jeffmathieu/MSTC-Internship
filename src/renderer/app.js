@@ -109,6 +109,58 @@ function parseGapToMs(value) {
   return parseLapTimeToMs(text.replace(/^\+/, ''));
 }
 
+function rowSortNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 999999;
+}
+
+function classSortedRows(rows, className) {
+  return (rows || [])
+    .filter((row) => row.className === className)
+    .sort((a, b) => (rowSortNumber(a.classPosition) - rowSortNumber(b.classPosition)) || (rowSortNumber(a.position) - rowSortNumber(b.position)));
+}
+
+function overallSortedRows(rows) {
+  return [...(rows || [])].sort((a, b) => rowSortNumber(a.position) - rowSortNumber(b.position));
+}
+
+function previousOverallRow(rows, row) {
+  const ordered = overallSortedRows(rows);
+  const index = ordered.findIndex((candidate) => String(candidate.carNumber) === String(row.carNumber));
+  return index > 0 ? ordered[index - 1] : null;
+}
+
+function classGapToPrevious(rows, classRows, row) {
+  const classIndex = classRows.findIndex((candidate) => String(candidate.carNumber) === String(row.carNumber));
+  if (classIndex <= 0) return { ms: 0, label: 'class leader', reliable: true };
+
+  const previousClassRow = classRows[classIndex - 1];
+  const previousOverall = previousOverallRow(rows, row);
+  if (!previousOverall || String(previousOverall.carNumber) !== String(previousClassRow.carNumber)) {
+    return { ms: null, label: 'class gap unknown', reliable: false };
+  }
+
+  const gapMs = parseGapToMs(row.diff) ?? parseGapToMs(row.interval) ?? parseGapToMs(row.gap);
+  if (!Number.isFinite(gapMs)) return { ms: null, label: row.diff || row.interval || row.gap || 'class gap unknown', reliable: false };
+  return { ms: gapMs, label: formatSeconds(gapMs), reliable: true };
+}
+
+function relativeClassGap(rows, classRows, fromRow, toRow) {
+  const fromIndex = classRows.findIndex((row) => String(row.carNumber) === String(fromRow.carNumber));
+  const toIndex = classRows.findIndex((row) => String(row.carNumber) === String(toRow.carNumber));
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return null;
+
+  const start = Math.min(fromIndex, toIndex) + 1;
+  const end = Math.max(fromIndex, toIndex);
+  let totalMs = 0;
+  for (let i = start; i <= end; i += 1) {
+    const gap = classGapToPrevious(rows, classRows, classRows[i]);
+    if (!gap.reliable || !Number.isFinite(gap.ms)) return null;
+    totalMs += gap.ms;
+  }
+  return totalMs;
+}
+
 // Returns completed stored laps for one car in chronological order.
 function historyLapForUi(entry) {
   const lastLapMs = Number(entry.lastLapMs ?? entry.lapTimeMs);
@@ -125,11 +177,33 @@ function historyLapForUi(entry) {
   };
 }
 
+function historySortTime(entry) {
+  const timestamp = entry.recordedAt || entry.collectedAt || '';
+  const ms = new Date(timestamp).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function lapSortNumber(entry) {
+  const n = Number(entry.lapNumber);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function lapDisplayLabel(entry, fallbackIndex = null) {
+  const lapNumber = lapSortNumber(entry);
+  if (lapNumber !== null) return String(lapNumber);
+  return fallbackIndex === null ? '—' : String(fallbackIndex + 1);
+}
+
 function lapsForCar(history, carNumber) {
   return (history || [])
     .map(historyLapForUi)
     .filter((entry) => String(entry.carNumber) === String(carNumber) && Number.isFinite(entry.lastLapMs))
-    .sort((a, b) => (Number(a.lapNumber) - Number(b.lapNumber)) || (new Date(a.recordedAt) - new Date(b.recordedAt)));
+    .sort((a, b) => {
+      const aLap = lapSortNumber(a);
+      const bLap = lapSortNumber(b);
+      if (aLap !== null && bLap !== null && aLap !== bLap) return aLap - bLap;
+      return historySortTime(a) - historySortTime(b);
+    });
 }
 
 // Computes recent race pace for catch estimates. Change n at call sites when a
@@ -164,24 +238,16 @@ function buildBattleItems(rows, history) {
   const wanted = String($('followed-car').value || '').trim();
   const followed = rows.find((row) => String(row.carNumber) === wanted);
   if (!followed || !followed.className) return [];
-  const sameClass = rows
-    .filter((row) => row.className === followed.className)
-    .sort((a,b) => (Number(a.classPosition || 999) - Number(b.classPosition || 999)) || (Number(a.position || 999) - Number(b.position || 999)));
+  const sameClass = classSortedRows(rows, followed.className);
   const ourAvg = recentAverageForCar(history, followed.carNumber, 5) || followed.lastLapMs;
-  const ourGap = parseGapToMs(followed.gap);
 
   return sameClass.filter((row) => String(row.carNumber) !== wanted).map((row) => {
     const theirAvg = recentAverageForCar(history, row.carNumber, 5) || row.lastLapMs;
-    const theirGap = parseGapToMs(row.gap);
     const relation = Number(row.classPosition || 999) < Number(followed.classPosition || 999) ? 'ahead' : 'behind';
-    let relativeGap = null;
-    if (Number.isFinite(ourGap) && Number.isFinite(theirGap)) {
-      relativeGap = relation === 'ahead' ? ourGap - theirGap : theirGap - ourGap;
-      if (relativeGap < 0) relativeGap = null;
-    }
+    const relativeGap = relativeClassGap(rows, sameClass, followed, row);
     // A positive deltaPerLap means the chasing car is faster by that amount per
     // lap. The estimate is intentionally conservative when gap data is missing.
-    let deltaPerLap = null, lapsToCatch = null, minutesToCatch = null, estimate = 'not enough gap data';
+    let deltaPerLap = null, lapsToCatch = null, minutesToCatch = null, estimate = 'class gap unknown';
     if (Number.isFinite(relativeGap) && Number.isFinite(ourAvg) && Number.isFinite(theirAvg) && relativeGap > 0) {
       if (relation === 'ahead') {
         deltaPerLap = theirAvg - ourAvg;
@@ -201,7 +267,7 @@ function buildBattleItems(rows, history) {
     }
     const key = `${followed.carNumber}|${row.carNumber}`;
     const item = { key, relation, row, gapRaw: row.gap, relativeGap, ourAvg, theirAvg, deltaPerLap, lapsToCatch, minutesToCatch, estimate, stale: false };
-    if (Number.isFinite(lapsToCatch) || /not catching|not enough/.test(estimate)) battleCache.set(key, item);
+    if (Number.isFinite(lapsToCatch) || /not catching|unknown/.test(estimate)) battleCache.set(key, item);
     else if (battleCache.has(key)) return { ...battleCache.get(key), row: { ...battleCache.get(key).row, ...row }, relation, gapRaw: row.gap, stale: true };
     return item;
   });
@@ -219,21 +285,20 @@ function renderClassTable(rows, history) {
     return;
   }
   const battle = new Map(buildBattleItems(rows, history).map((item) => [String(item.row.carNumber), item]));
-  const sameClass = rows
-    .filter((row) => row.className === followed.className)
-    .sort((a,b) => (Number(a.classPosition || 999) - Number(b.classPosition || 999)) || (Number(a.position || 999) - Number(b.position || 999)));
+  const sameClass = classSortedRows(rows, followed.className);
   $('class-summary').textContent = `${followed.className} · ${sameClass.length} cars · our PIC ${rowValue(followed.classPosition)}`;
   sameClass.forEach((row) => {
     const tr = document.createElement('tr');
     if (String(row.carNumber) === wanted) tr.classList.add('followed');
     const item = battle.get(String(row.carNumber));
+    const classGap = classGapToPrevious(rows, sameClass, row);
     let catchInfo = 'our car';
     if (item) {
       const laps = Number.isFinite(item.lapsToCatch) ? `${item.lapsToCatch.toFixed(1)} laps` : '—';
       const mins = Number.isFinite(item.minutesToCatch) ? `${item.minutesToCatch.toFixed(1)} min` : '';
       catchInfo = `${item.estimate}${laps !== '—' ? ` · ${laps} ${mins}` : ''}${item.stale ? ' · last known' : ''}`;
     }
-    [row.classPosition, row.carNumber, row.team, row.driver, row.lastLap, row.bestLap, row.gap, catchInfo].forEach((value, index) => {
+    [row.classPosition, row.carNumber, row.team, row.driver, row.lastLap, row.bestLap, classGap.label, catchInfo].forEach((value, index) => {
       const td = document.createElement('td');
       td.textContent = rowValue(value);
       if ([1,4,5].includes(index)) td.classList.add('mono');
@@ -447,7 +512,7 @@ const graphRegistry = [
       const car = $('followed-car').value.trim();
       const laps = lapsForCar(state.lapHistory || [], car);
       const byDriver = new Map();
-      laps.forEach((lap, index) => { const d = lap.driver || 'Unknown driver'; if (!byDriver.has(d)) byDriver.set(d, []); byDriver.get(d).push({ xPlot: index + 1, x: Number(lap.lapNumber), lapLabel: lap.lapNumber, y: lap.lastLapMs }); });
+      laps.forEach((lap, index) => { const d = lap.driver || 'Unknown driver'; if (!byDriver.has(d)) byDriver.set(d, []); byDriver.get(d).push({ xPlot: index + 1, x: lapSortNumber(lap) ?? index + 1, lapLabel: lapDisplayLabel(lap, index), y: lap.lastLapMs }); });
       const referenceMs = parseLapTimeToMs($('reference-time').value);
       drawLineGraph(container, [...byDriver.entries()].map(([label, points]) => ({ label, points })), { referenceMs });
     }
@@ -463,7 +528,7 @@ const graphRegistry = [
       const sameClass = rows.filter((row) => row.className === followed.className).slice(0, 10);
       const series = sameClass.map((row) => ({
         label: `#${row.carNumber} ${row.team || ''}`.trim(),
-        points: lapsForCar(state.lapHistory || [], row.carNumber).slice(-25).map((lap, index) => ({ xPlot: index + 1, x: Number(lap.lapNumber), lapLabel: lap.lapNumber, y: lap.lastLapMs }))
+        points: lapsForCar(state.lapHistory || [], row.carNumber).slice(-25).map((lap, index) => ({ xPlot: index + 1, x: lapSortNumber(lap) ?? index + 1, lapLabel: lapDisplayLabel(lap, index), y: lap.lastLapMs }))
       })).filter((s) => s.points.length >= 2);
       drawLineGraph(container, series);
     }
@@ -521,7 +586,7 @@ function renderDriverSummary(laps) {
   [...grouped.entries()].forEach(([driver, entries]) => {
     const times = entries.map((entry) => entry.lastLapMs).filter(Number.isFinite);
     const tr = document.createElement('tr');
-    [driver, entries.length, formatMs(average(times)), formatMs(times.length ? Math.min(...times) : null), entries[0]?.lapNumber ?? '—', entries.at(-1)?.lapNumber ?? '—'].forEach((value) => {
+    [driver, entries.length, formatMs(average(times)), formatMs(times.length ? Math.min(...times) : null), lapDisplayLabel(entries[0]), lapDisplayLabel(entries.at(-1))].forEach((value) => {
       const td = document.createElement('td'); td.textContent = value; tr.appendChild(td);
     });
     tbody.appendChild(tr);
@@ -532,9 +597,9 @@ function renderDriverSummary(laps) {
 function renderHistoryTable(laps) {
   const tbody = document.querySelector('#history-table tbody'); tbody.innerHTML = '';
   if (!laps.length) { tbody.innerHTML = '<tr><td colspan="6" class="muted">No stored laps yet.</td></tr>'; return; }
-  laps.forEach((lap) => {
+  laps.forEach((lap, index) => {
     const tr = document.createElement('tr');
-    [lap.lapNumber, lap.driver, lap.lastLap, lap.sector1, lap.sector2, lap.sector3].forEach((value) => { const td = document.createElement('td'); td.textContent = rowValue(value); tr.appendChild(td); });
+    [lapDisplayLabel(lap, index), lap.driver, lap.lastLap, lap.sector1, lap.sector2, lap.sector3].forEach((value) => { const td = document.createElement('td'); td.textContent = rowValue(value); tr.appendChild(td); });
     tbody.appendChild(tr);
   });
 }
