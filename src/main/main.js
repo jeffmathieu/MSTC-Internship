@@ -62,13 +62,21 @@ let collectorState = {
   storage: {},
   analyticsSummary: null,
   storageSessionFolder: '',
-  pollIntervalMs: 3000
+  pollIntervalMs: 5000
 };
 
 // Electron chooses a safe OS-specific folder for app settings. Race data is
 // stored in Documents by default so users can easily find CSV/JSON exports.
 const settingsPath = () => path.join(app.getPath('userData'), 'settings.json');
 const defaultStorageFolder = () => path.join(app.getPath('documents'), 'ZolderLiveTimingReader');
+const DEFAULT_POLL_INTERVAL_MS = 5000;
+
+function normalizeSettings(settings) {
+  return {
+    ...settings,
+    pollIntervalMs: DEFAULT_POLL_INTERVAL_MS
+  };
+}
 
 // Loads saved user settings. If the settings file does not exist or cannot be
 // parsed, the app falls back to defaults. Adjust default URLs, intervals, or
@@ -76,18 +84,17 @@ const defaultStorageFolder = () => path.join(app.getPath('documents'), 'ZolderLi
 function loadSettings() {
   try {
     const file = settingsPath();
-    if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (fs.existsSync(file)) return normalizeSettings(JSON.parse(fs.readFileSync(file, 'utf8')));
   } catch (error) {
     console.error('Could not load settings', error);
   }
-  return {
+  return normalizeSettings({
     timingUrl: 'https://livetiming.getraceresults.com/demo#screen-results',
     followedCar: '33',
     comparisonCar: '',
     storageFolder: defaultStorageFolder(),
-    pollIntervalMs: 3000,
     setupComplete: false
-  };
+  });
 }
 
 // Persists settings as formatted JSON. Any new setting added to loadSettings()
@@ -556,7 +563,7 @@ async function pollLivePage() {
       status: normalized.status,
       message: newLapCount ? `${normalized.message} Stored ${newLapCount} new completed lap(s).` : normalized.message,
       lastSuccessAt: new Date().toISOString(), headers: normalized.headers, rows: normalized.rows, session: normalized.session, diagnostics: normalized.diagnostics,
-      storage: storageInfo(settings), analyticsSummary, pollIntervalMs: Number(settings.pollIntervalMs || 3000),
+      storage: storageInfo(settings), analyticsSummary, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS),
       snapshots: [{ at: new Date().toISOString(), checksum: hashObject(normalized.rows), rowCount: normalized.rows.length, newLapCount }, ...collectorState.snapshots].slice(0, 20)
     };
   } catch (error) {
@@ -591,7 +598,7 @@ async function startCollector(url) {
   const settings = loadSettings();
   const startedAt = new Date().toISOString();
   const storageSessionFolder = createStorageSessionFolder(settings, url, startedAt);
-  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || 3000) };
+  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
   collectorState = { ...collectorState, lapHistory: loadExistingHistory(settings), storage: storageInfo(settings) };
   broadcastState();
   try {
@@ -601,7 +608,7 @@ async function startCollector(url) {
     await win.loadURL(url);
     collectorState.status = 'connected'; collectorState.message = 'Live timing page loaded. Waiting for timing table...'; broadcastState();
     await pollLivePage();
-    pollTimer = setInterval(pollLivePage, Number(settings.pollIntervalMs || 3000));
+    pollTimer = setInterval(pollLivePage, Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS));
   } catch (error) { collectorState.status = 'error'; collectorState.message = 'Failed to start live collector.'; addError(error, 'startCollector'); broadcastState(); }
 }
 
@@ -628,7 +635,7 @@ ipcMain.handle('settings:set', (_event, settings) => {
   const merged = { ...previous, ...settings };
   // Clamp user-editable timing values so accidental input cannot create an
   // unusably fast/slow collector.
-  merged.pollIntervalMs = Math.max(1000, Math.min(10000, Number(merged.pollIntervalMs || 3000)));
+  merged.pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
   saveSettings(merged);
   if ((previous.storageFolder || '') !== (merged.storageFolder || '')) {
     collectorState = {

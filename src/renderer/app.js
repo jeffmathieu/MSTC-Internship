@@ -6,6 +6,7 @@ const $ = (id) => document.getElementById(id);
 // currentState mirrors collectorState from src/main/main.js.
 let currentSettings = null;
 let currentState = null;
+const DEFAULT_POLL_INTERVAL_MS = 5000;
 
 const classBattle = window.classBattle;
 const lapAnalytics = window.lapAnalytics;
@@ -352,7 +353,7 @@ async function saveSettingsFromInputs(setupComplete = false) {
     followedCar: $('followed-car').value.trim(),
     comparisonCar: $('comparison-car')?.value.trim() || '',
     storageFolder: $('storage-folder').value.trim(),
-    pollIntervalMs: Number($('poll-interval').value || 3000)
+    pollIntervalMs: DEFAULT_POLL_INTERVAL_MS
   };
   if (setupComplete) patch.setupComplete = true;
   currentSettings = await window.liveTiming.setSettings(patch);
@@ -400,7 +401,7 @@ async function init() {
   $('followed-car').value = currentSettings.followedCar || '33';
   $('storage-folder').value = currentSettings.storageFolder || '';
   if ($('comparison-car')) $('comparison-car').value = currentSettings.comparisonCar || '';
-  $('poll-interval').value = String(currentSettings.pollIntervalMs || 3000);
+  $('poll-interval').value = String(currentSettings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS);
   syncSetupFromMain();
   setupDetailTabs();
 
