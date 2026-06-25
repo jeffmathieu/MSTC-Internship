@@ -61,6 +61,31 @@ assert.strictEqual(risRow.interval, '1.234');
 assert.strictEqual(risRow.sessionName, 'Demo Race');
 assert.strictEqual(risRow.sessionFlag, 'Full Course Yellow');
 
+const risScreenshotStorageRow = normalizeForStorage({
+  position: 12,
+  state: 'IN',
+  carNumber: 216,
+  team: 'Zeknova3 by a roule CITROEN C1',
+  className: 'C1',
+  classPosition: 3,
+  gap: '1.350',
+  interval: '1.350',
+  lastLap: '2:01.000',
+  bestLap: '1:58.172',
+  lapNumber: 272,
+  sector1: '37.736',
+  sector2: '1:19.654',
+  pit: '9',
+  lastPit: '0:55',
+  raw: { P: '12', '#': '216', INT: '1.350', 'TEAM INFO': 'Zeknova3 by a roule CITROEN C1' }
+}, { ...context, timingUrl: 'https://example.com/ris-timing/live' });
+assert.strictEqual(risScreenshotStorageRow.sourceProvider, 'ris-timing');
+assert.strictEqual(risScreenshotStorageRow.position, '12');
+assert.strictEqual(risScreenshotStorageRow.teamName, 'Zeknova3 by a roule CITROEN C1');
+assert.strictEqual(risScreenshotStorageRow.diff, '1.350');
+assert.strictEqual(risScreenshotStorageRow.interval, '1.350');
+assert.strictEqual(risScreenshotStorageRow.lastPit, '0:55');
+
 const fallbackContextRow = normalizeForStorage({
   movement: 'up',
   carNumberRaw: '007',
