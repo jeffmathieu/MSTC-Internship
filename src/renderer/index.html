@@ -3,22 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Zolder Race Engineer Dashboard</title>
+    <title>Race Engineer Dashboard</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <!-- First-run/settings modal. app.js keeps these visible inputs synchronized
-      with the hidden dashboard inputs used by the normal render/update flow. -->
     <div id="setup-modal" class="setup-modal hidden">
       <div class="setup-card">
         <p class="eyebrow">First setup</p>
         <h1>Race Engineer Dashboard</h1>
         <p class="subtitle">Choose the timing page, followed car and data folder before starting. These settings are remembered.</p>
-        <label>GetRaceResults live timing URL</label>
+        <label>Live timing URL</label>
         <input id="setup-url" type="text" value="https://livetiming.getraceresults.com/demo#screen-results" />
         <label>Our car number</label>
         <input id="setup-car" type="text" value="33" />
-        <label>Data storage folder</label>
+        <label>Data storage base folder</label>
         <div class="folder-row">
           <input id="setup-folder" type="text" readonly />
           <button id="setup-choose-folder" class="secondary">Choose folder</button>
@@ -29,126 +27,163 @@
       </div>
     </div>
 
-    <!-- Main dashboard shell. The left column focuses on race-engineer decisions;
-      the right column contains controls and deeper debug/detail views. -->
-    <div id="app" class="dashboard-shell">
-      <section class="left-column">
-        <!-- Session and followed-car card. Values are filled by renderFollowed()
-          and updateSession() in app.js. Keep this panel limited to the key
-          race-day fields requested for the top-left summary. -->
-        <section class="session-panel panel">
-          <div>
-            <p class="eyebrow">Session</p>
-          </div>
-          <div class="session-grid">
-            <div><span>Time left</span><strong id="session-time">—</strong></div>
-            <div><span>Driver</span><strong id="f-driver">—</strong></div>
-            <div><span>Class / PIC</span><strong class="class-pic"><span id="f-class">—</span> / <span id="f-pic">—</span></strong></div>
-            <div><span>Position</span><strong id="f-pos">—</strong></div>
-            <div><span>Last lap time</span><strong id="f-last">—</strong></div>
-            <div><span>Best lap time</span><strong id="f-best">—</strong></div>
-          </div>
-        </section>
-
-        <!-- Same-class timing table. renderClassTable() fills the body and catch
-          estimate text from current rows plus stored lap history. -->
-        <section class="panel class-panel">
-          <div class="section-header compact">
-            <div>
-              <p class="eyebrow">Same class</p>
-              <h2>Class timing and catch estimate</h2>
-            </div>
-            <small id="class-summary">—</small>
-          </div>
-          <div class="table-wrap mini-timing-wrap">
-            <table id="class-table" class="mini-timing">
-              <thead>
-                <tr>
-                  <th>PIC</th>
-                  <th>NR</th>
-                  <th>TEAM</th>
-                  <th>DRIVER</th>
-                  <th>LAST</th>
-                  <th>BEST</th>
-                  <th>CLASS GAP</th>
-                  <th>CATCH INFO</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </section>
-
+    <main id="app" class="engineer-dashboard">
+      <section class="info-strip board-box">
+        <div>
+          <span>Session</span>
+          <strong id="session-name">—</strong>
+        </div>
+        <div>
+          <span>Time left</span>
+          <strong id="session-time">—</strong>
+        </div>
+        <div>
+          <span>Our car</span>
+          <strong id="info-car">—</strong>
+        </div>
+        <div>
+          <span>Current driver</span>
+          <strong id="info-driver">—</strong>
+        </div>
+        <div>
+          <span>Class / PIC</span>
+          <strong><span id="info-class">—</span> / <span id="info-pic">—</span></strong>
+        </div>
+        <div>
+          <span>Status</span>
+          <strong id="status-text">IDLE</strong>
+        </div>
+        <div class="controls">
+          <button id="start" class="primary">Start</button>
+          <button id="stop" class="secondary">Stop</button>
+          <button id="show-live" class="secondary">Page</button>
+          <button id="open-setup" class="secondary">Setup</button>
+        </div>
       </section>
 
-      <section class="right-column">
-        <!-- Top control/status bar. Buttons call preload APIs wired in app.js. -->
-        <section class="topbar panel">
-          <div class="status-block">
-            <div class="status-pill" id="status-pill"><span></span><strong id="status-text">Idle</strong></div>
-            <div class="status-meta">
-              <small>Rows: <strong id="row-count">0</strong></small>
-              <small>Stored laps: <strong id="history-count">0</strong></small>
-              <small>Last update: <strong id="last-update">—</strong></small>
-            </div>
-          </div>
-
-          <!-- Settings are edited through the setup modal, but these hidden fields keep app.js/state sync simple.
-            Add a hidden field here when a new setting must participate in saveSettingsFromInputs(). -->
-          <div class="hidden-settings" aria-hidden="true">
-            <input id="timing-url" type="text" value="https://livetiming.getraceresults.com/demo#screen-results" />
-            <input id="followed-car" type="text" value="33" />
-            <input id="storage-folder" type="text" readonly />
-            <select id="poll-interval">
-              <option value="1000">1s</option>
-              <option value="2000">2s</option>
-              <option value="3000">3s</option>
-              <option value="5000">5s</option>
-              <option value="10000">10s</option>
-            </select>
-          </div>
-
-          <div class="topbar-buttons">
-            <button id="start" class="primary">Start live</button>
-            <button id="stop" class="secondary">Stop</button>
-            <button id="show-live" class="secondary">Show page</button>
-            <button id="export" class="secondary">Export</button>
-            <button id="open-setup" class="secondary">Setup</button>
-          </div>
-        </section>
-
-        <!-- Collapsible diagnostics/details area. Parser debug mirrors the
-          diagnostics object produced by main.js normalization. -->
-        <section class="panel details-panel">
-          <details>
-            <summary>Detailed timing table / debug</summary>
-            <nav class="tabs">
-              <button class="tab active" data-tab="all">All rows</button>
-              <button class="tab" data-tab="history">Stored laps</button>
-              <button class="tab" data-tab="debug">Parser debug</button>
-            </nav>
-            <div id="detail-all" class="detail-tab active">
-              <div class="table-wrap all-rows-wrap"><table id="cars-table"><thead><tr><th>POS</th><th>NR</th><th>TEAM</th><th>CAR</th><th>DRIVER</th><th>CLS</th><th>PIC</th><th>GAP</th><th>DIFF</th><th>LAST</th><th>BEST</th><th>LAP</th><th>S1</th><th>S2</th><th>S3</th><th>PIT</th></tr></thead><tbody></tbody></table></div>
-            </div>
-            <div id="detail-history" class="detail-tab">
-              <div class="two-col-details">
-                <div>
-                  <h3>Driver / stint summary</h3>
-                  <div class="table-wrap"><table id="driver-table"><thead><tr><th>Driver</th><th>Laps</th><th>Avg</th><th>Best</th><th>First</th><th>Last</th></tr></thead><tbody></tbody></table></div>
-                </div>
-                <div>
-                  <h3>Recent stored laps</h3>
-                  <div class="table-wrap"><table id="history-table"><thead><tr><th>Lap</th><th>Driver</th><th>Lap time</th><th>S1</th><th>S2</th><th>S3</th></tr></thead><tbody></tbody></table></div>
-                </div>
-              </div>
-            </div>
-            <div id="detail-debug" class="detail-tab">
-              <div class="debug-grid"><pre id="headers-debug">[]</pre><pre id="rows-debug">[]</pre><pre id="tables-debug">[]</pre><pre id="errors-debug">[]</pre></div>
-            </div>
-          </details>
-        </section>
+      <section class="main-times">
+        <article class="metric-box hero-metric" id="last-time-card">
+          <span>Last Time</span>
+          <strong id="last-time">—</strong>
+        </article>
+        <article class="metric-box hero-metric" id="best-time-card">
+          <span>Best Time</span>
+          <strong id="best-time">—</strong>
+        </article>
+        <article class="metric-box reference-card">
+          <span>Reference Lap Time</span>
+          <strong id="reference-lap-time">—</strong>
+          <small>Fixed value, configurable later</small>
+        </article>
       </section>
-    </div>
+
+      <section class="performance-grid">
+        <div class="sector-grid">
+          <article class="metric-box" id="sector1-card"><span>Sector 1</span><strong id="sector-1">—</strong></article>
+          <article class="metric-box" id="sector2-card"><span>Sector 2</span><strong id="sector-2">—</strong></article>
+          <article class="metric-box" id="sector3-card"><span>Sector 3</span><strong id="sector-3">—</strong></article>
+          <article class="metric-box ref"><span>REF Sect 1</span><strong id="ref-sector-1">—</strong></article>
+          <article class="metric-box ref"><span>REF Sect 2</span><strong id="ref-sector-2">—</strong></article>
+          <article class="metric-box ref"><span>REF Sect 3</span><strong id="ref-sector-3">—</strong></article>
+          <article class="metric-box" id="best-sector1-card"><span>BEST Sect 1</span><strong id="best-sector-1">—</strong></article>
+          <article class="metric-box" id="best-sector2-card"><span>BEST Sect 2</span><strong id="best-sector-2">—</strong></article>
+          <article class="metric-box" id="best-sector3-card"><span>BEST Sect 3</span><strong id="best-sector-3">—</strong></article>
+        </div>
+
+        <div class="prediction-column">
+          <article class="metric-box prediction">
+            <span>Predicted Lap Time</span>
+            <strong id="predicted-lap-time">—</strong>
+          </article>
+          <article class="metric-box ideal">
+            <span>Ideal Time</span>
+            <strong id="ideal-time">—</strong>
+            <small>Best S1 + best S2 + best S3</small>
+          </article>
+          <label class="xic-input metric-box">
+            <span>Input # XIC</span>
+            <input id="comparison-car" type="text" placeholder="Car #" />
+          </label>
+        </div>
+      </section>
+
+      <section class="comparison-grid">
+        <article class="compare-stack">
+          <div class="metric-box"><span>Best D1</span><strong id="best-d1-a">—</strong></div>
+          <div class="metric-box"><span>Last D2</span><strong id="last-d2">—</strong></div>
+          <div class="metric-box delta" id="delta-best-last-card"><span>Delta D1 - D2</span><strong id="delta-best-last">—</strong></div>
+        </article>
+        <article class="compare-stack">
+          <div class="metric-box"><span>Best D1</span><strong id="best-d1-b">—</strong></div>
+          <div class="metric-box"><span>Best D2</span><strong id="best-d2">—</strong></div>
+          <div class="metric-box delta" id="delta-best-best-card"><span>Delta D1 - D2</span><strong id="delta-best-best">—</strong></div>
+        </article>
+        <article class="compare-stack">
+          <div class="metric-box"><span>Average D1</span><strong id="average-d1">—</strong></div>
+          <div class="metric-box"><span>Average D2</span><strong id="average-d2">—</strong></div>
+          <div class="metric-box delta" id="delta-average-drivers-card"><span>Delta D1 - D2</span><strong id="delta-average-drivers">—</strong></div>
+        </article>
+        <article class="compare-stack">
+          <div class="metric-box"><span>Average BIC</span><strong id="average-bic">—</strong></div>
+          <div class="metric-box"><span>Average Dact</span><strong id="average-bic-driver">—</strong></div>
+          <div class="metric-box delta" id="delta-bic-card"><span>Delta BIC - Dact</span><strong id="delta-bic">—</strong></div>
+        </article>
+        <article class="compare-stack">
+          <div class="metric-box"><span>Average XIC</span><strong id="average-xic">—</strong></div>
+          <div class="metric-box"><span>Average Dact</span><strong id="average-xic-driver">—</strong></div>
+          <div class="metric-box delta" id="delta-xic-card"><span>Delta XIC - Dact</span><strong id="delta-xic">—</strong></div>
+        </article>
+      </section>
+
+      <section class="pit-window">
+        <p>Pitstop window</p>
+        <div class="pit-bar">
+          <span class="pit-red"></span>
+          <span class="pit-green"></span>
+          <span class="pit-red"></span>
+          <span class="pit-green"></span>
+          <span class="pit-red"></span>
+        </div>
+      </section>
+
+      <details class="debug-panel">
+        <summary>Detailed timing table / debug</summary>
+        <div class="debug-actions">
+          <button id="export" class="secondary">Export</button>
+          <span>Rows: <strong id="row-count">0</strong></span>
+          <span>Stored laps: <strong id="history-count">0</strong></span>
+          <span>Last update: <strong id="last-update">—</strong></span>
+        </div>
+        <div class="table-wrap">
+          <table id="cars-table">
+            <thead><tr><th>POS</th><th>NR</th><th>TEAM</th><th>CAR</th><th>DRIVER</th><th>CLS</th><th>PIC</th><th>GAP</th><th>DIFF</th><th>LAST</th><th>BEST</th><th>LAP</th><th>S1</th><th>S2</th><th>S3</th><th>PIT</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <pre id="headers-debug">[]</pre>
+        <pre id="rows-debug">[]</pre>
+        <pre id="tables-debug">[]</pre>
+        <pre id="errors-debug">[]</pre>
+        <div class="hidden-detail-tables">
+          <table id="driver-table"><tbody></tbody></table>
+          <table id="history-table"><tbody></tbody></table>
+        </div>
+      </details>
+
+      <div class="hidden-settings" aria-hidden="true">
+        <input id="timing-url" type="text" value="https://livetiming.getraceresults.com/demo#screen-results" />
+        <input id="followed-car" type="text" value="33" />
+        <input id="storage-folder" type="text" readonly />
+        <select id="poll-interval">
+          <option value="1000">1s</option>
+          <option value="2000">2s</option>
+          <option value="3000">3s</option>
+          <option value="5000">5s</option>
+          <option value="10000">10s</option>
+        </select>
+      </div>
+    </main>
+
     <script src="../shared/lapAnalytics.js"></script>
     <script src="../shared/classBattle.js"></script>
     <script src="app.js"></script>

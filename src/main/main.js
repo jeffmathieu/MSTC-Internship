@@ -60,6 +60,7 @@ let collectorState = {
   errors: [],
   snapshots: [],
   storage: {},
+  analyticsSummary: null,
   storageSessionFolder: '',
   pollIntervalMs: 3000
 };
@@ -82,6 +83,7 @@ function loadSettings() {
   return {
     timingUrl: 'https://livetiming.getraceresults.com/demo#screen-results',
     followedCar: '33',
+    comparisonCar: '',
     storageFolder: defaultStorageFolder(),
     pollIntervalMs: 3000,
     setupComplete: false
@@ -419,7 +421,10 @@ function buildAnalyticsSummary(settings, context) {
 
 function writeAnalyticsSummary(settings, context) {
   const folder = ensureStorage(settings);
-  fs.writeFileSync(path.join(folder, 'analytics_summary.json'), JSON.stringify(buildAnalyticsSummary(settings, context), null, 2));
+  const summary = buildAnalyticsSummary(settings, context);
+  fs.writeFileSync(path.join(folder, 'analytics_summary.json'), JSON.stringify(summary, null, 2));
+  collectorState.analyticsSummary = summary;
+  return summary;
 }
 
 function parserDebugFromNormalized(normalized, storageRows, context, lastError = '') {
@@ -543,16 +548,15 @@ async function pollLivePage() {
     const normalized = normalizeSnapshot(snapshot);
     const { storageRows, context } = saveLatestSnapshot(settings, normalized);
     const newLapCount = updateLapHistory(settings, storageRows);
-    if (newLapCount) {
-      try { writeAnalyticsSummary(settings, context); } catch (error) { addError(error, 'writeAnalyticsSummary'); }
-    }
+    let analyticsSummary = collectorState.analyticsSummary;
+    try { analyticsSummary = writeAnalyticsSummary(settings, context); } catch (error) { addError(error, 'writeAnalyticsSummary'); }
     collectorState = {
       ...collectorState,
       mode: 'live',
       status: normalized.status,
       message: newLapCount ? `${normalized.message} Stored ${newLapCount} new completed lap(s).` : normalized.message,
       lastSuccessAt: new Date().toISOString(), headers: normalized.headers, rows: normalized.rows, session: normalized.session, diagnostics: normalized.diagnostics,
-      storage: storageInfo(settings), pollIntervalMs: Number(settings.pollIntervalMs || 3000),
+      storage: storageInfo(settings), analyticsSummary, pollIntervalMs: Number(settings.pollIntervalMs || 3000),
       snapshots: [{ at: new Date().toISOString(), checksum: hashObject(normalized.rows), rowCount: normalized.rows.length, newLapCount }, ...collectorState.snapshots].slice(0, 20)
     };
   } catch (error) {
@@ -587,7 +591,7 @@ async function startCollector(url) {
   const settings = loadSettings();
   const startedAt = new Date().toISOString();
   const storageSessionFolder = createStorageSessionFolder(settings, url, startedAt);
-  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || 3000) };
+  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || 3000) };
   collectorState = { ...collectorState, lapHistory: loadExistingHistory(settings), storage: storageInfo(settings) };
   broadcastState();
   try {

@@ -1,209 +1,308 @@
-/* Theme tokens. Change the dashboard color system here first; most components
-   below consume these custom properties instead of hard-coded colors. */
 :root {
-  --bg: #070a11;
-  --panel: #111723;
-  --panel-2: #151c2a;
-  --line: #263246;
-  --line-strong: #35445f;
-  --text: #f4f7fb;
-  --muted: #a9b4c7;
-  --muted-2: #768398;
-  --blue: #4b8dff;
-  --green: #27d980;
-  --yellow: #ffc857;
-  --orange: #ff8c42;
-  --red: #ff4f67;
-  --purple: #b692ff;
+  --page: #f7f7f4;
+  --ink: #171717;
+  --muted: #646464;
+  --box: #ffffff;
+  --line: #1f1f1f;
+  --soft-line: #d8d8d2;
+  --green: #1e9f67;
+  --red: #d94c62;
+  --blue: #315fc7;
 }
 
-/* Global document reset and base typography. Body overflow is hidden on desktop
-   because the dashboard is designed as a fixed cockpit-style layout. */
 * { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
 body {
-  margin: 0;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: radial-gradient(circle at top right, #101827, var(--bg) 45%);
-  color: var(--text);
-  overflow: hidden;
+  color: var(--ink);
+  background: var(--page);
 }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 
-/* Main two-column application layout. Adjust the left column width here when
-   the session/class panels need more or less horizontal space. */
-.dashboard-shell {
-  width: 100vw;
-  height: 100vh;
+.engineer-dashboard {
+  width: min(1500px, 100vw);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 20px 34px;
   display: grid;
-  grid-template-columns: minmax(460px, 39vw) minmax(0, 1fr);
-  gap: 12px;
-  padding: 14px;
+  grid-template-rows: auto auto auto auto auto auto;
+  gap: 10px;
 }
 
-/* Column row sizing. The left column keeps session compact while letting the
-   class timing table fill the remaining height. */
-.left-column, .right-column { display: grid; gap: 12px; min-height: 0; }
-.left-column { grid-template-rows: 160px minmax(0, 1fr); }
-.right-column { grid-template-rows: auto minmax(0, 1fr); }
-
-/* Shared panel shell. Individual panels below override padding/layout but reuse
-   this surface treatment. */
-.panel {
-  background: linear-gradient(180deg, rgba(21,28,42,0.94), rgba(10,14,22,0.94));
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  box-shadow: 0 18px 45px rgba(0,0,0,.22);
-  overflow: hidden;
+.board-box,
+.metric-box {
+  background: var(--box);
+  border: 3px solid var(--line);
+  border-radius: 0;
+  box-shadow: 0 2px 0 rgba(0,0,0,.08);
 }
 
-/* Reusable text helpers and compact headings. */
-.eyebrow {
-  margin: 0 0 6px;
-  font-size: 12px;
-  letter-spacing: .18em;
-  color: var(--muted);
-  text-transform: uppercase;
-  font-weight: 800;
-}
-h1, h2, h3, p { margin-top: 0; }
-h1 { font-size: 22px; line-height: 1.08; margin-bottom: 8px; overflow-wrap: anywhere; }
-h2 { font-size: 21px; line-height: 1.1; margin-bottom: 4px; }
-h3 { font-size: 16px; }
-.note, .subtitle, .muted { color: var(--muted); }
-
-/* Session/followed-car summary card. IDs inside this area are updated by
-   updateSession() and renderFollowed() in app.js. */
-.session-panel { padding: 14px; display: grid; grid-template-columns: 1fr; grid-template-rows: auto 1fr; min-height:0; }
-.session-grid {
+.info-strip {
+  min-height: 78px;
+  padding: 12px 20px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0,1fr));
-  gap: 6px;
-  align-content: center;
-}
-.session-grid div {
-  background: rgba(255,255,255,.035);
-  border: 1px solid rgba(255,255,255,.06);
-  border-radius: 10px;
-  padding: 7px 8px;
-  min-width: 0;
-}
-.session-grid div > span, .followed-grid span { display:block; color: var(--muted-2); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; font-weight: 800; }
-.session-grid strong { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display:block; }
-.session-grid .class-pic span { display: inline; }
-
-/* Same-class timing panel and table styling. Sticky headers keep context while
-   scrolling through larger timing tables. */
-.class-panel { padding: 16px; min-height: 0; display: grid; grid-template-rows: auto 1fr; }
-.section-header { display:flex; align-items:center; justify-content:space-between; gap: 16px; margin-bottom: 12px; }
-.section-header.compact { margin-bottom: 8px; }
-.section-header small { color: var(--muted); }
-.table-wrap { overflow:auto; border: 1px solid var(--line); border-radius: 14px; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { position: sticky; top: 0; z-index: 1; background: #121a28; color: #cbd4e3; text-align:left; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
-th, td { padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,.07); white-space: nowrap; }
-tbody tr:nth-child(even) { background: rgba(255,255,255,.025); }
-tr.followed { background: rgba(75,141,255,.25) !important; outline: 1px solid rgba(75,141,255,.45); }
-.catch-cell { white-space: normal; min-width: 210px; max-width: 350px; }
-.mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-
-/* Original topbar/control grid styles. The simplified topbar block later in this
-   file overrides parts of these rules while keeping form/button primitives. */
-.topbar { padding: 14px; display: grid; grid-template-columns: 220px minmax(0,1fr); gap: 14px; min-height: 170px; overflow: visible; }
-.status-block { display:flex; flex-direction:column; justify-content:space-between; gap: 10px; }
-.status-block small { display:block; color: var(--muted); margin-top: 3px; }
-.status-pill { display:inline-flex; width:max-content; align-items:center; gap: 9px; border: 1px solid var(--line-strong); padding: 10px 15px; border-radius: 999px; background: rgba(255,255,255,.04); }
-.status-pill span { width: 12px; height: 12px; border-radius: 99px; background: var(--muted); box-shadow: 0 0 18px currentColor; }
-.status-pill.ok span { background: var(--green); color: var(--green); }
-.status-pill.warn span { background: var(--yellow); color: var(--yellow); }
-.status-pill.bad span { background: var(--red); color: var(--red); }
-.controls-grid { display:grid; grid-template-columns: minmax(260px, 1.4fr) 80px 110px 88px minmax(220px, 1fr); gap: 10px; align-items:end; min-width:0; }
-.field label, .setup-card label { display:block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .12em; font-weight: 800; margin-bottom: 4px; }
-input, select { width:100%; min-width:0; color: var(--text); background: #090e17; border: 1px solid var(--line-strong); border-radius: 10px; padding: 8px 10px; outline:none; }
-input:focus, select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(75,141,255,.16); }
-.folder-row { display:grid; grid-template-columns: 1fr auto; gap: 6px; }
-button { border: 1px solid var(--line-strong); border-radius: 10px; color: var(--text); background: rgba(255,255,255,.06); padding: 7px 9px; font-weight: 800; }
-button.primary { background: linear-gradient(135deg, #2f77ff, #6b9cff); border-color: transparent; color: white; }
-button.secondary:hover { border-color: var(--blue); }
-button.muted-primary { background: linear-gradient(135deg, #5e4baa, #7b6fe8); }
-.button-row { display:flex; gap: 8px; align-items:center; flex-wrap:wrap; }
-.button-row.end { justify-content:flex-end; }
-.control-buttons { grid-column: 1 / 3; }
-
-/* Collapsible details/debug area. Tabs are toggled by setupDetailTabs(). */
-.details-panel { min-height:0; padding: 12px; }
-details { height:100%; min-height:0; display:flex; flex-direction:column; }
-summary { cursor:pointer; color: var(--muted); font-weight:800; margin-bottom: 8px; }
-.tabs { display:flex; gap: 8px; margin-bottom: 8px; }
-.tab { padding: 7px 10px; }
-.tab.active { background: rgba(75,141,255,.22); border-color: var(--blue); }
-.detail-tab { display:none; height: calc(100% - 44px); min-height:0; }
-.detail-tab.active { display:block; }
-.all-rows-wrap { max-height: 420px; }
-.two-col-details { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.debug-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
-pre { margin:0; white-space:pre-wrap; overflow:auto; max-height:150px; background:#070b12; border:1px solid var(--line); border-radius:12px; padding:10px; color:#d5dcee; }
-.picker { display:flex; gap: 6px; flex-wrap:wrap; margin-top: 6px; }
-.mini-button { padding: 5px 8px; font-size: 12px; }
-
-/* First-run/setup modal. Keep IDs synchronized with app.js when adding settings. */
-.setup-modal { position: fixed; inset:0; background: rgba(3,6,10,.82); z-index: 50; display:flex; align-items:center; justify-content:center; padding: 20px; }
-.setup-modal.hidden { display:none; }
-.setup-card { width:min(820px, 94vw); background: linear-gradient(180deg, #171f2f, #0d121c); border:1px solid var(--line-strong); border-radius: 22px; padding: 24px; box-shadow:0 25px 80px rgba(0,0,0,.55); }
-.setup-row { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
-.setup-card input { margin-bottom: 12px; }
-
-/* Responsive single-column layout for narrow screens. The app is primarily a
-   desktop dashboard, but this keeps it usable on smaller displays. */
-@media (max-width: 1100px) {
-  body { overflow:auto; }
-  .dashboard-shell { height:auto; min-height:100vh; grid-template-columns: 1fr; }
-  .left-column, .right-column { grid-template-rows:auto; }
-  .topbar { grid-template-columns: 1fr; }
-  .controls-grid { grid-template-columns: 1fr 90px 120px; }
-  .storage-field, .control-buttons { grid-column: 1 / -1; justify-content:flex-start; }
-}
-
-/* Native details element cleanup when collapsed. */
-details:not([open]) { height: auto; }
-details:not([open]) .tabs, details:not([open]) .detail-tab { display: none !important; }
-
-
-/* Simplified top-right control bar: only status + race-day actions are visible. */
-.topbar {
-  padding: 18px 24px;
-  display: flex;
+  grid-template-columns: 1.2fr .8fr .55fr 1fr .75fr .7fr auto;
+  gap: 16px;
   align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  min-height: 145px;
-  overflow: hidden;
 }
-.status-block {
+.info-strip div { min-width: 0; }
+.info-strip span,
+.metric-box span {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 12px;
+  line-height: 1.1;
+  font-weight: 900;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.info-strip strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+}
+.controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+button {
+  border: 2px solid var(--line);
+  background: white;
+  color: var(--ink);
+  padding: 8px 12px;
+  font-weight: 900;
+}
+button.primary { background: var(--ink); color: white; }
+
+.main-times {
+  display: grid;
+  grid-template-columns: 1fr 1fr .85fr;
+  gap: 18px;
+}
+.metric-box {
+  min-height: 58px;
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 18px;
-  min-width: 260px;
 }
-.status-meta small {
-  display: block;
+.metric-box strong {
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 900;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hero-metric {
+  min-height: 88px;
+  text-align: center;
+}
+.hero-metric span { font-size: 17px; color: var(--ink); }
+.hero-metric strong { font-size: clamp(32px, 4.2vw, 56px); }
+.reference-card strong,
+.prediction strong,
+.ideal strong { font-size: clamp(24px, 2.9vw, 40px); }
+.metric-box small {
+  margin-top: 8px;
   color: var(--muted);
-  margin-top: 4px;
+  font-weight: 700;
 }
-.topbar-buttons {
-  display: flex;
+
+.performance-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(310px, .9fr);
+  gap: 18px;
+}
+.sector-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 16px;
+  align-content: start;
+}
+.sector-grid .metric-box { text-align: center; min-height: 64px; }
+.sector-grid .metric-box strong { font-size: clamp(20px, 2.4vw, 34px); }
+.sector-grid .ref strong { color: var(--muted); }
+.prediction-column {
+  display: grid;
+  grid-template-rows: 1fr 1fr auto;
+  gap: 10px;
+}
+.prediction,
+.ideal { min-height: 86px; text-align: center; }
+.xic-input {
+  display: grid;
+  grid-template-columns: 1fr 120px;
   align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
   gap: 12px;
+  min-height: 56px;
 }
-.topbar-buttons button {
-  min-width: 118px;
-  height: 48px;
-  font-size: 18px;
+.xic-input span { margin: 0; }
+input {
+  min-width: 0;
+  width: 100%;
+  border: 2px solid var(--line);
+  background: white;
+  color: var(--ink);
+  padding: 8px 10px;
+  font-weight: 900;
+}
+
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+}
+.compare-stack {
+  display: grid;
+  grid-template-rows: repeat(3, 58px);
+  gap: 8px;
+}
+.compare-stack .metric-box {
+  min-height: 0;
+  padding: 10px 12px;
+  text-align: center;
+}
+.compare-stack .metric-box strong { font-size: clamp(18px, 1.7vw, 28px); }
+.delta.good { border-color: var(--green); box-shadow: 0 0 0 3px rgba(30,159,103,.16); }
+.delta.bad { border-color: var(--red); box-shadow: 0 0 0 3px rgba(217,76,98,.16); }
+.delta.neutral { border-color: var(--line); }
+.metric-box.flash-good {
+  animation: flashGood 1.6s ease-out;
+}
+@keyframes flashGood {
+  0% { background: #d9f6e8; border-color: var(--green); }
+  100% { background: var(--box); }
+}
+
+.pit-window {
+  margin-top: 4px;
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+}
+.pit-window p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 900;
+}
+.pit-bar {
+  height: 40px;
+  display: grid;
+  grid-template-columns: .6fr 1.1fr .62fr 1.12fr .62fr;
+  border: 2px solid var(--line);
+}
+.pit-bar span { border-right: 2px solid rgba(0,0,0,.18); }
+.pit-bar span:last-child { border-right: 0; }
+.pit-red { background: #d84d65; }
+.pit-green { background: #259a71; }
+
+.debug-panel {
+  margin-top: 0;
+  border: 2px solid var(--line);
+  background: white;
+  padding: 10px 12px;
+}
+summary {
+  cursor: pointer;
+  font-weight: 900;
+}
+.debug-actions {
+  margin: 12px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  color: var(--muted);
   font-weight: 800;
 }
-.hidden-settings {
-  display: none !important;
+.table-wrap {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--soft-line);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+th, td {
+  padding: 8px 9px;
+  border-bottom: 1px solid var(--soft-line);
+  text-align: left;
+  white-space: nowrap;
+}
+th {
+  position: sticky;
+  top: 0;
+  background: #eeeeea;
+  z-index: 1;
+}
+tr.followed { background: #e9f0ff; }
+pre {
+  margin: 10px 0 0;
+  padding: 10px;
+  max-height: 150px;
+  overflow: auto;
+  background: #f1f1ee;
+  border: 1px solid var(--soft-line);
+  white-space: pre-wrap;
+}
+.hidden-detail-tables,
+.hidden-settings { display: none !important; }
+
+.setup-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0,0,0,.42);
+}
+.setup-modal.hidden { display: none; }
+.setup-card {
+  width: min(760px, 95vw);
+  background: white;
+  border: 3px solid var(--line);
+  padding: 24px;
+}
+.setup-card h1 { margin: 0 0 8px; }
+.setup-card label {
+  display: block;
+  margin: 14px 0 5px;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.subtitle, .eyebrow { color: var(--muted); }
+.folder-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+.button-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+@media (max-width: 1050px) {
+  .engineer-dashboard { padding: 16px; }
+  .info-strip,
+  .main-times,
+  .performance-grid,
+  .comparison-grid,
+  .pit-window { grid-template-columns: 1fr; }
+  .controls { justify-content: flex-start; flex-wrap: wrap; }
+  .compare-stack { grid-template-rows: repeat(3, minmax(70px, auto)); }
+  .xic-input { grid-template-columns: 1fr; }
 }

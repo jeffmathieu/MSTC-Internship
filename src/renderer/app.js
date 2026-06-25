@@ -8,6 +8,8 @@ let currentSettings = null;
 let currentState = null;
 
 const classBattle = window.classBattle;
+const lapAnalytics = window.lapAnalytics;
+const previousMetricValues = new Map();
 
 // Maps collector states to the visual status pill classes in styles.css.
 function statusClass(status) {
@@ -16,16 +18,36 @@ function statusClass(status) {
   return 'bad';
 }
 
-// Updates the compact status pill. The message is currently shown elsewhere via
-// debug/state data; add a visible message target here if the topbar needs one.
+// Updates the compact status text in the top information strip.
 function setStatus(status, message) {
-  const pill = $('status-pill');
-  pill.className = `status-pill ${statusClass(status)}`;
-  $('status-text').textContent = String(status || 'idle').toUpperCase();
+  const target = $('status-text');
+  if (target) target.textContent = String(status || 'idle').toUpperCase();
 }
 
 // Displays missing table values consistently.
 function rowValue(value) { return value === null || value === undefined || value === '' ? '—' : value; }
+
+function setText(id, value) {
+  const el = $(id);
+  if (el) el.textContent = rowValue(value);
+}
+
+function setMetric(id, value, { flash = false } = {}) {
+  const el = $(id);
+  if (!el) return;
+  const next = rowValue(value);
+  const previous = previousMetricValues.get(id);
+  el.textContent = next;
+  if (flash && previous && previous !== '—' && next !== '—' && previous !== next) {
+    const card = el.closest('.metric-box');
+    if (card) {
+      card.classList.remove('flash-good');
+      void card.offsetWidth;
+      card.classList.add('flash-good');
+    }
+  }
+  previousMetricValues.set(id, next);
+}
 
 // Formats stored millisecond values for details tables.
 function formatMs(ms) {
@@ -38,6 +60,33 @@ function formatMs(ms) {
   const milli = remaining % 1000;
   if (hours > 0) return `${sign}${hours}:${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}.${String(milli).padStart(3,'0')}`;
   return `${sign}${minutes}:${String(seconds).padStart(2,'0')}.${String(milli).padStart(3,'0')}`;
+}
+
+function numericMs(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function displayDelta(ms) {
+  if (!Number.isFinite(ms)) return '—';
+  const sign = ms > 0 ? '+' : ms < 0 ? '-' : '';
+  return `${sign}${formatMs(Math.abs(ms))}`;
+}
+
+function setDelta(cardId, textId, deltaMs) {
+  const card = $(cardId);
+  const numeric = Number.isFinite(deltaMs) ? deltaMs : null;
+  setMetric(textId, numeric !== null ? displayDelta(numeric) : '—');
+  if (!card) return;
+  card.classList.remove('good', 'bad', 'neutral');
+  if (numeric === null || numeric === 0) card.classList.add('neutral');
+  else card.classList.add(numeric > 0 ? 'good' : 'bad');
+}
+
+function invertedDelta(value) {
+  const n = numericMs(value);
+  return n === null ? null : -n;
 }
 
 // Numeric helper used by driver/stint tables.
@@ -94,7 +143,8 @@ function lapsForCar(history, carNumber) {
 
 // Updates the session summary card in the left column.
 function updateSession(session = {}) {
-  $('session-time').textContent = session.timeToGo || session.pageUpdated || '—';
+  setText('session-name', session.sessionName || session.pageTitle || '—');
+  setText('session-time', session.timeToGo || session.pageUpdated || '—');
 }
 
 // Updates the followed-car values shown in the compact session panel.
@@ -102,17 +152,21 @@ function renderFollowed(rows) {
   const wanted = String($('followed-car').value || '').trim();
   const match = rows.find((row) => String(row.carNumber) === wanted);
   const row = match || {};
-  $('f-driver').textContent = rowValue(row.driver);
-  $('f-class').textContent = rowValue(row.className);
-  $('f-pic').textContent = rowValue(row.classPosition);
-  $('f-pos').textContent = rowValue(row.position);
-  $('f-last').textContent = rowValue(row.lastLap);
-  $('f-best').textContent = rowValue(row.bestLap);
+  setText('info-car', wanted || row.carNumber || '—');
+  setText('info-driver', row.driver);
+  setText('info-class', row.className);
+  setText('info-pic', row.classPosition);
+  setMetric('last-time', row.lastLap, { flash: true });
+  setMetric('best-time', row.bestLap, { flash: true });
+  setMetric('sector-1', row.sector1);
+  setMetric('sector-2', row.sector2);
+  setMetric('sector-3', row.sector3);
 }
 
 // Renders the same-class timing table and highlights the followed car.
 function renderClassTable(rows, history) {
   const tbody = document.querySelector('#class-table tbody');
+  if (!tbody) return;
   tbody.innerHTML = '';
   const wanted = String($('followed-car').value || '').trim();
   const summary = classBattle.buildClassBattleSummary(rows, history, wanted);
@@ -137,6 +191,73 @@ function renderClassTable(rows, history) {
   });
 }
 
+function getOurCarAnalytics(summary) {
+  const wanted = String($('followed-car').value || '').trim();
+  return (summary?.cars || []).find((car) => String(car.carNumber) === wanted) || null;
+}
+
+function renderSectorAnalytics(summary) {
+  const ourCar = getOurCarAnalytics(summary);
+  const bestS1 = numericMs(ourCar?.bestSector1Ms);
+  const bestS2 = numericMs(ourCar?.bestSector2Ms);
+  const bestS3 = numericMs(ourCar?.bestSector3Ms);
+  setMetric('best-sector-1', formatMs(bestS1), { flash: true });
+  setMetric('best-sector-2', formatMs(bestS2), { flash: true });
+  setMetric('best-sector-3', formatMs(bestS3), { flash: true });
+  const ideal = [bestS1, bestS2, bestS3].every(Number.isFinite) ? bestS1 + bestS2 + bestS3 : null;
+  setMetric('ideal-time', formatMs(ideal), { flash: true });
+
+  setMetric('ref-sector-1', '—');
+  setMetric('ref-sector-2', '—');
+  setMetric('ref-sector-3', '—');
+  setMetric('reference-lap-time', '—');
+  setMetric('predicted-lap-time', '—');
+}
+
+function driverStatsForLiveCar(summary, rows, carNumber) {
+  const row = (rows || []).find((candidate) => String(candidate.carNumber) === String(carNumber));
+  const driverName = row?.driver || '';
+  const stats = (summary?.driversByCar?.[String(carNumber)] || []).find((driver) => driver.driverName === driverName) || null;
+  return { row, driverName, stats };
+}
+
+function renderDriverAndClassComparisons(summary, rows) {
+  const driverComparison = summary?.dashboardAnalysis?.driverComparison;
+  const classComparison = summary?.dashboardAnalysis?.classComparison;
+  const bestDriver = driverComparison?.bestDriver || null;
+  const currentDriver = driverComparison?.currentDriver || null;
+  const bestClassCar = classComparison?.bestClassCar || null;
+  const selectedCar = classComparison?.selectedCar || null;
+  const bicDriver = bestClassCar ? driverStatsForLiveCar(summary, rows, bestClassCar.carNumber).stats : null;
+  const xicDriver = selectedCar ? driverStatsForLiveCar(summary, rows, selectedCar.carNumber).stats : null;
+
+  setMetric('best-d1-a', formatMs(numericMs(bestDriver?.bestLapMs)));
+  setMetric('last-d2', formatMs(numericMs(currentDriver?.lastLapMs)));
+  setDelta('delta-best-last-card', 'delta-best-last', invertedDelta(driverComparison?.deltas?.bestDriverBestLapToCurrentLastLapMs));
+
+  setMetric('best-d1-b', formatMs(numericMs(bestDriver?.bestLapMs)));
+  setMetric('best-d2', formatMs(numericMs(currentDriver?.bestLapMs)));
+  setDelta('delta-best-best-card', 'delta-best-best', invertedDelta(driverComparison?.deltas?.bestDriverBestLapToCurrentBestLapMs));
+
+  setMetric('average-d1', formatMs(numericMs(bestDriver?.averageLapMs)));
+  setMetric('average-d2', formatMs(numericMs(currentDriver?.averageLapMs)));
+  setDelta('delta-average-drivers-card', 'delta-average-drivers', invertedDelta(driverComparison?.deltas?.bestDriverAverageToCurrentAverageMs));
+
+  setMetric('average-bic', formatMs(numericMs(bestClassCar?.averageLapMs)));
+  setMetric('average-bic-driver', formatMs(numericMs(bicDriver?.averageLapMs)));
+  const bicDelta = numericMs(bestClassCar?.averageLapMs) !== null && numericMs(bicDriver?.averageLapMs) !== null
+    ? numericMs(bestClassCar?.averageLapMs) - numericMs(bicDriver?.averageLapMs)
+    : null;
+  setDelta('delta-bic-card', 'delta-bic', bicDelta);
+
+  setMetric('average-xic', formatMs(numericMs(selectedCar?.averageLapMs)));
+  setMetric('average-xic-driver', formatMs(numericMs(xicDriver?.averageLapMs)));
+  const xicDelta = numericMs(selectedCar?.averageLapMs) !== null && numericMs(xicDriver?.averageLapMs) !== null
+    ? numericMs(selectedCar?.averageLapMs) - numericMs(xicDriver?.averageLapMs)
+    : null;
+  setDelta('delta-xic-card', 'delta-xic', xicDelta);
+}
+
 // Renders the full parsed timing table in the details/debug area.
 function renderAllRowsTable(rows) {
   const tbody = document.querySelector('#cars-table tbody');
@@ -156,7 +277,7 @@ function renderAllRowsTable(rows) {
 
 // Summarizes stored laps by driver/stint for the details panel.
 function renderDriverSummary(laps) {
-  const tbody = document.querySelector('#driver-table tbody'); tbody.innerHTML = '';
+  const tbody = document.querySelector('#driver-table tbody'); if (!tbody) return; tbody.innerHTML = '';
   const grouped = new Map();
   laps.forEach((lap) => { const name = lap.driver || 'Unknown'; if (!grouped.has(name)) grouped.set(name, []); grouped.get(name).push(lap); });
   if (!grouped.size) { tbody.innerHTML = '<tr><td colspan="6" class="muted">No stored driver laps yet.</td></tr>'; return; }
@@ -172,7 +293,7 @@ function renderDriverSummary(laps) {
 
 // Shows recent stored laps for the followed car.
 function renderHistoryTable(laps) {
-  const tbody = document.querySelector('#history-table tbody'); tbody.innerHTML = '';
+  const tbody = document.querySelector('#history-table tbody'); if (!tbody) return; tbody.innerHTML = '';
   if (!laps.length) { tbody.innerHTML = '<tr><td colspan="6" class="muted">No stored laps yet.</td></tr>'; return; }
   laps.forEach((lap, index) => {
     const tr = document.createElement('tr');
@@ -205,7 +326,8 @@ function render(state) {
   $('history-count').textContent = String(history.length);
   $('last-update').textContent = currentState.lastSuccessAt ? new Date(currentState.lastSuccessAt).toLocaleTimeString() : '—';
   renderFollowed(rows);
-  renderClassTable(rows, history);
+  renderSectorAnalytics(currentState.analyticsSummary || null);
+  renderDriverAndClassComparisons(currentState.analyticsSummary || null, rows);
   renderAllRowsTable(rows);
   renderDetails(currentState);
 }
@@ -228,6 +350,7 @@ async function saveSettingsFromInputs(setupComplete = false) {
   const patch = {
     timingUrl: $('timing-url').value.trim(),
     followedCar: $('followed-car').value.trim(),
+    comparisonCar: $('comparison-car')?.value.trim() || '',
     storageFolder: $('storage-folder').value.trim(),
     pollIntervalMs: Number($('poll-interval').value || 3000)
   };
@@ -276,6 +399,7 @@ async function init() {
   $('timing-url').value = currentSettings.timingUrl || 'https://livetiming.getraceresults.com/demo#screen-results';
   $('followed-car').value = currentSettings.followedCar || '33';
   $('storage-folder').value = currentSettings.storageFolder || '';
+  if ($('comparison-car')) $('comparison-car').value = currentSettings.comparisonCar || '';
   $('poll-interval').value = String(currentSettings.pollIntervalMs || 3000);
   syncSetupFromMain();
   setupDetailTabs();
@@ -294,6 +418,7 @@ async function init() {
   // Persist settings immediately when hidden inputs change. If new settings are
   // added to the modal, include their hidden input IDs here.
   ['timing-url','followed-car','poll-interval'].forEach((id) => $(id)?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); }));
+  $('comparison-car')?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); });
   window.liveTiming.onCollectorUpdate(render);
   render(await window.liveTiming.getCollectorState());
   if (!currentSettings.setupComplete || !currentSettings.storageFolder) showSetup(true);
