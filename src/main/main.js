@@ -60,6 +60,7 @@ let collectorState = {
   errors: [],
   snapshots: [],
   storage: {},
+  storageSessionFolder: '',
   pollIntervalMs: 3000
 };
 
@@ -247,11 +248,47 @@ function normalizeSnapshot(snapshot) {
   };
 }
 
-// Makes sure the selected storage folder exists before writing exports/history.
-// Change defaultStorageFolder() instead of this function when only the default
-// location needs to move.
+function slugPart(value, fallback = 'session') {
+  const slug = cleanText(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return slug || fallback;
+}
+
+function providerOrHostFromUrl(url) {
+  const provider = detectSourceProvider({ timingUrl: url });
+  if (provider !== 'unknown') return provider;
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'timing'; }
+}
+
+function uniqueFolderPath(baseFolder, folderName) {
+  let candidate = path.join(baseFolder, folderName);
+  let suffix = 2;
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(baseFolder, `${folderName}-${suffix}`);
+    suffix += 1;
+  }
+  return candidate;
+}
+
+function createStorageSessionFolder(settings, url, startedAt) {
+  const baseFolder = settings.storageFolder || defaultStorageFolder();
+  fs.mkdirSync(baseFolder, { recursive: true });
+  const timestamp = new Date(startedAt).toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[:]/g, '-');
+  const provider = slugPart(providerOrHostFromUrl(url), 'timing');
+  const followedCar = settings.followedCar ? `car-${slugPart(settings.followedCar, 'unknown')}` : 'car-unknown';
+  const folder = uniqueFolderPath(baseFolder, `${timestamp}_${provider}_${followedCar}`);
+  fs.mkdirSync(folder, { recursive: true });
+  return folder;
+}
+
+// Makes sure the active session storage folder exists before writing
+// exports/history. The user-selected storageFolder is treated as a base folder;
+// startCollector() creates a session-specific child folder for each live run.
 function ensureStorage(settings) {
-  const folder = settings.storageFolder || defaultStorageFolder();
+  const folder = collectorState.storageSessionFolder || settings.storageFolder || defaultStorageFolder();
   fs.mkdirSync(folder, { recursive: true });
   return folder;
 }
@@ -318,6 +355,8 @@ function writeSessionMetadata(settings, context) {
     startedAt: context.startedAt || '',
     lastUpdatedAt: context.collectedAt || '',
     followedCar: context.followedCar || '',
+    baseStorageFolder: settings.storageFolder || defaultStorageFolder(),
+    storageFolder: folder,
     storageSchemaVersion: 1
   }, null, 2));
 }
@@ -525,8 +564,10 @@ async function pollLivePage() {
 // Returns user-facing paths for the Debug/Storage UI. Add new exported files
 // here if the renderer should display their locations.
 function storageInfo(settings) {
-  const folder = settings.storageFolder || defaultStorageFolder();
+  const baseFolder = settings.storageFolder || defaultStorageFolder();
+  const folder = collectorState.storageSessionFolder || baseFolder;
   return {
+    baseFolder,
     folder,
     latestRowsCsv: path.join(folder, 'latest_live_rows.csv'),
     latestRowsJson: path.join(folder, 'latest_live_rows.json'),
@@ -544,7 +585,10 @@ function storageInfo(settings) {
 async function startCollector(url) {
   stopCollector(false);
   const settings = loadSettings();
-  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt: new Date().toISOString(), lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: loadExistingHistory(settings), session: {}, diagnostics: {}, errors: [], snapshots: [], storage: storageInfo(settings), pollIntervalMs: Number(settings.pollIntervalMs || 3000) };
+  const startedAt = new Date().toISOString();
+  const storageSessionFolder = createStorageSessionFolder(settings, url, startedAt);
+  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || 3000) };
+  collectorState = { ...collectorState, lapHistory: loadExistingHistory(settings), storage: storageInfo(settings) };
   broadcastState();
   try {
     const win = createLiveWindow();

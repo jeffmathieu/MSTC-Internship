@@ -26,9 +26,18 @@ These settings are remembered. You can reopen the setup window with the **Setup*
 
 ## Data storage
 
-The app stores readable data in the folder you select. There are two kinds of
-files: source files that contain the timing data as it came in, and derived
-files that are recalculated from that source data.
+The folder you select is a base storage folder. Every time you press **Start
+live**, the app creates a new session folder inside that base folder, for
+example:
+
+`2026-06-25T08-42-10Z_ris-timing_car-33`
+
+All files for that live run are written into that session folder, so you do not
+need to manually create a new folder for each race, qualifying, practice, or
+race-weekend session.
+
+Each session folder contains readable source files that contain the timing data
+as it came in, and derived files that are recalculated from that source data.
 
 - `latest_live_rows.csv`
 - `latest_live_rows.json`
