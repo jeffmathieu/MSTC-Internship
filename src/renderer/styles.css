@@ -188,26 +188,78 @@ input {
 
 .pit-window {
   margin-top: 4px;
+  padding: 10px 14px 12px;
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  gap: 18px;
-  align-items: center;
+  gap: 8px;
 }
-.pit-window p {
-  margin: 0;
-  font-size: 14px;
+.pit-header {
+  display: grid;
+  grid-template-columns: 1.2fr .65fr .85fr 1.2fr 92px 74px 78px;
+  gap: 12px;
+  align-items: end;
+}
+.pit-header div,
+.pit-header label { min-width: 0; }
+.pit-header span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  line-height: 1.1;
+  font-weight: 900;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pit-header strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+  line-height: 1.1;
   font-weight: 900;
 }
+.pit-header input {
+  height: 32px;
+  padding: 4px 7px;
+  font-size: 14px;
+}
 .pit-bar {
-  height: 40px;
+  position: relative;
+  height: 34px;
   display: grid;
   grid-template-columns: .6fr 1.1fr .62fr 1.12fr .62fr;
   border: 2px solid var(--line);
+  overflow: hidden;
 }
 .pit-bar span { border-right: 2px solid rgba(0,0,0,.18); }
 .pit-bar span:last-child { border-right: 0; }
-.pit-red { background: #d84d65; }
-.pit-green { background: #259a71; }
+.pit-red,
+.pit-start-closed,
+.pit-end-closed { background: #d84d65; }
+.pit-green,
+.pit-open { background: #259a71; }
+.pit-cooldown { background: #e1aa3d; }
+.pit-bar i {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: 0;
+  width: 4px;
+  background: #111;
+  border: 1px solid white;
+  transform: translateX(-2px);
+}
+.pit-window.open { border-color: var(--green); }
+.pit-window.soon { border-color: #d79a22; }
+.pit-window.closed { border-color: var(--red); }
+.pit-window.urgent { border-color: var(--red); box-shadow: 0 0 0 4px rgba(217,76,98,.18); }
+.pit-detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
 
 .debug-panel {
   margin-top: 0;
@@ -307,6 +359,7 @@ pre {
   .performance-grid,
   .comparison-grid,
   .pit-window { grid-template-columns: 1fr; }
+  .pit-header { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .controls { justify-content: flex-start; flex-wrap: wrap; }
   .compare-stack { grid-template-rows: repeat(3, minmax(70px, auto)); }
   .xic-input { grid-template-columns: 1fr; }

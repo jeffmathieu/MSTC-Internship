@@ -10,6 +10,7 @@ const DEFAULT_POLL_INTERVAL_MS = 5000;
 
 const classBattle = window.classBattle;
 const lapAnalytics = window.lapAnalytics;
+const pitstopPlanner = window.pitstopPlanner;
 const previousMetricValues = new Map();
 
 // Maps collector states to the visual status pill classes in styles.css.
@@ -30,13 +31,13 @@ function rowValue(value) { return value === null || value === undefined || value
 
 function setText(id, value) {
   const el = $(id);
-  if (el) el.textContent = rowValue(value);
+  if (el) el.textContent = String(rowValue(value));
 }
 
 function setMetric(id, value, { flash = false } = {}) {
   const el = $(id);
   if (!el) return;
-  const next = rowValue(value);
+  const next = String(rowValue(value));
   const previous = previousMetricValues.get(id);
   el.textContent = next;
   if (flash && previous && previous !== '—' && next !== '—' && previous !== next) {
@@ -73,6 +74,28 @@ function displayDelta(ms) {
   if (!Number.isFinite(ms)) return '—';
   const sign = ms > 0 ? '+' : ms < 0 ? '-' : '';
   return `${sign}${formatMs(Math.abs(ms))}`;
+}
+
+function secondsFromInput(id, fallbackSeconds) {
+  const value = Number($(id)?.value);
+  return Number.isFinite(value) && value >= 0 ? value : fallbackSeconds;
+}
+
+function hoursFromInput(id, fallbackHours) {
+  const value = Number($(id)?.value);
+  return Number.isFinite(value) && value > 0 ? value : fallbackHours;
+}
+
+function pitRulesFromInputs() {
+  return {
+    raceDurationMs: hoursFromInput('pit-race-hours', 24) * 60 * 60 * 1000,
+    pitClosedStartMs: 25 * 60 * 1000,
+    pitClosedEndMs: 25 * 60 * 1000,
+    pitCooldownMs: 25 * 60 * 1000,
+    pitStopDurationMs: secondsFromInput('pit-duration', 75) * 1000,
+    requiredPitStops: Math.max(0, Math.floor(secondsFromInput('pit-required-input', 2))),
+    nearWindowLaps: 2
+  };
 }
 
 function setDelta(cardId, textId, deltaMs) {
@@ -259,6 +282,51 @@ function renderDriverAndClassComparisons(summary, rows) {
   setDelta('delta-xic-card', 'delta-xic', xicDelta);
 }
 
+function projectionLabel(projection) {
+  if (!projection?.available) return projection?.reason || 'Waiting for class gaps';
+  const position = projection.projectedClassPosition ? `PIC ${projection.projectedClassPosition}` : 'PIC ?';
+  const behind = projection.carAhead ? `${displayDelta(Math.abs(projection.carAhead.projectedGapToUsMs))} behind #${projection.carAhead.carNumber}` : 'class lead';
+  const ahead = projection.carBehind ? `${displayDelta(Math.abs(projection.carBehind.projectedGapToUsMs))} ahead #${projection.carBehind.carNumber}` : 'no car behind';
+  return `${position} · ${behind} · ${ahead}`;
+}
+
+function renderPitstopPlan(plan) {
+  const pitWindow = document.querySelector('.pit-window');
+  if (!plan) {
+    setText('pit-status', 'Waiting');
+    setText('pit-next', '—');
+    setText('pit-projection', '—');
+    setText('pit-completed', '0');
+    setText('pit-required', $('pit-required-input')?.value || '2');
+    setText('pit-detail', 'Waiting for race clock and class gaps.');
+    if (pitWindow) pitWindow.classList.remove('open', 'soon', 'closed', 'urgent');
+    return;
+  }
+
+  setText('pit-status', plan.label || plan.status);
+  setText('pit-completed', plan.completedPitStops);
+  setText('pit-required', plan.rules?.requiredPitStops ?? $('pit-required-input')?.value ?? '2');
+  setText('pit-next', plan.canPitNow ? 'Now' : (Number.isFinite(plan.waitMs) ? pitstopPlanner.formatDuration(plan.waitMs) : 'Closed'));
+  setText('pit-projection', projectionLabel(plan.projection));
+  const detailParts = [
+    Number.isFinite(plan.clock?.elapsedMs) ? `Elapsed ${pitstopPlanner.formatDuration(plan.clock.elapsedMs)}` : '',
+    Number.isFinite(plan.clock?.remainingMs) ? `remaining ${pitstopPlanner.formatDuration(plan.clock.remainingMs)}` : '',
+    Number.isFinite(plan.mustPitSoonMs) ? `latest safe stop in ${pitstopPlanner.formatDuration(plan.mustPitSoonMs)}` : '',
+    `pit loss ${pitstopPlanner.formatDuration(plan.rules?.pitStopDurationMs)}`
+  ].filter(Boolean);
+  setText('pit-detail', detailParts.join(' · '));
+
+  if (pitWindow) {
+    pitWindow.classList.remove('open', 'soon', 'closed', 'urgent');
+    pitWindow.classList.add(plan.status || 'closed');
+  }
+  const progress = $('pit-progress');
+  if (progress) {
+    const pct = Math.max(0, Math.min(100, Number(plan.clock?.progress || 0) * 100));
+    progress.style.left = `${pct}%`;
+  }
+}
+
 // Renders the full parsed timing table in the details/debug area.
 function renderAllRowsTable(rows) {
   const tbody = document.querySelector('#cars-table tbody');
@@ -329,6 +397,7 @@ function render(state) {
   renderFollowed(rows);
   renderSectorAnalytics(currentState.analyticsSummary || null);
   renderDriverAndClassComparisons(currentState.analyticsSummary || null, rows);
+  renderPitstopPlan(currentState.pitstopPlan || null);
   renderAllRowsTable(rows);
   renderDetails(currentState);
 }
@@ -353,7 +422,8 @@ async function saveSettingsFromInputs(setupComplete = false) {
     followedCar: $('followed-car').value.trim(),
     comparisonCar: $('comparison-car')?.value.trim() || '',
     storageFolder: $('storage-folder').value.trim(),
-    pollIntervalMs: DEFAULT_POLL_INTERVAL_MS
+    pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
+    pitRules: pitRulesFromInputs()
   };
   if (setupComplete) patch.setupComplete = true;
   currentSettings = await window.liveTiming.setSettings(patch);
@@ -401,6 +471,9 @@ async function init() {
   $('followed-car').value = currentSettings.followedCar || '33';
   $('storage-folder').value = currentSettings.storageFolder || '';
   if ($('comparison-car')) $('comparison-car').value = currentSettings.comparisonCar || '';
+  if ($('pit-duration')) $('pit-duration').value = String(Math.round((currentSettings.pitRules?.pitStopDurationMs || 75000) / 1000));
+  if ($('pit-required-input')) $('pit-required-input').value = String(currentSettings.pitRules?.requiredPitStops ?? 2);
+  if ($('pit-race-hours')) $('pit-race-hours').value = String((currentSettings.pitRules?.raceDurationMs || 86400000) / 3600000);
   $('poll-interval').value = String(currentSettings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS);
   syncSetupFromMain();
   setupDetailTabs();
@@ -420,6 +493,7 @@ async function init() {
   // added to the modal, include their hidden input IDs here.
   ['timing-url','followed-car','poll-interval'].forEach((id) => $(id)?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); }));
   $('comparison-car')?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); });
+  ['pit-duration','pit-required-input','pit-race-hours'].forEach((id) => $(id)?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); }));
   window.liveTiming.onCollectorUpdate(render);
   render(await window.liveTiming.getCollectorState());
   if (!currentSettings.setupComplete || !currentSettings.storageFolder) showSetup(true);

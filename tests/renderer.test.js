@@ -29,6 +29,7 @@ class FakeElement {
     this.listeners = {};
     this.parentElement = null;
     this.offsetWidth = 100;
+    this.style = {};
   }
   appendChild(child) {
     child.parentElement = this;
@@ -131,6 +132,23 @@ const initialState = {
 
 const updatedState = {
   ...initialState,
+  pitstopPlan: {
+    label: 'Pit window open',
+    status: 'open',
+    canPitNow: true,
+    waitMs: 0,
+    completedPitStops: 1,
+    remainingRequiredStops: 1,
+    mustPitSoonMs: 1800000,
+    clock: { elapsedMs: 3600000, remainingMs: 3600000, progress: 0.5 },
+    rules: { requiredPitStops: 2, pitStopDurationMs: 75000 },
+    projection: {
+      available: true,
+      projectedClassPosition: 2,
+      carAhead: { carNumber: '2', projectedGapToUsMs: -5000 },
+      carBehind: { carNumber: '56', projectedGapToUsMs: 10000 }
+    }
+  },
   analyticsSummary: {
     cars: [{ carNumber: '13', bestSector1Ms: 41000, bestSector2Ms: 46000, bestSector3Ms: 36000 }],
     driversByCar: {
@@ -177,7 +195,7 @@ const liveTiming = {
 };
 
 const context = {
-  window: { liveTiming, classBattle: {}, lapAnalytics: {} },
+  window: { liveTiming, classBattle: {}, lapAnalytics: {}, pitstopPlanner: require('../src/shared/pitstopPlanner') },
   document,
   console,
   alert: () => {},
@@ -223,11 +241,17 @@ module.exports = (async () => {
   assert.ok(document.getElementById('delta-bic-card').classList.contains('good'));
   assert.strictEqual(document.getElementById('delta-xic').textContent, '+0:01.000');
   assert.ok(document.getElementById('delta-xic-card').classList.contains('good'));
+  assert.strictEqual(document.getElementById('pit-status').textContent, 'Pit window open');
+  assert.strictEqual(document.getElementById('pit-completed').textContent, '1');
+  assert.strictEqual(document.getElementById('pit-required').textContent, '2');
+  assert.strictEqual(document.getElementById('pit-next').textContent, 'Now');
+  assert.ok(document.getElementById('pit-projection').textContent.includes('PIC 2'));
 
   document.getElementById('comparison-car').value = '56';
   await document.getElementById('comparison-car').trigger('change');
   assert.strictEqual(lastSettingsPatch.comparisonCar, '56');
   assert.strictEqual(lastSettingsPatch.pollIntervalMs, 5000);
+  assert.strictEqual(lastSettingsPatch.pitRules.pitStopDurationMs, 75000);
 
   console.log('Renderer UI tests passed.');
 })().catch((error) => {

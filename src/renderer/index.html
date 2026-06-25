@@ -135,15 +135,46 @@
         </article>
       </section>
 
-      <section class="pit-window">
-        <p>Pitstop window</p>
-        <div class="pit-bar">
-          <span class="pit-red"></span>
-          <span class="pit-green"></span>
-          <span class="pit-red"></span>
-          <span class="pit-green"></span>
-          <span class="pit-red"></span>
+      <section class="pit-window board-box">
+        <div class="pit-header">
+          <div>
+            <span>Pitstop window</span>
+            <strong id="pit-status">—</strong>
+          </div>
+          <div>
+            <span>Required stops</span>
+            <strong><span id="pit-completed">0</span>/<span id="pit-required">2</span></strong>
+          </div>
+          <div>
+            <span>Next pit</span>
+            <strong id="pit-next">—</strong>
+          </div>
+          <div>
+            <span>After pit</span>
+            <strong id="pit-projection">—</strong>
+          </div>
+          <label>
+            <span>Pit time</span>
+            <input id="pit-duration" type="number" min="0" step="1" value="75" />
+          </label>
+          <label>
+            <span>Stops</span>
+            <input id="pit-required-input" type="number" min="0" step="1" value="2" />
+          </label>
+          <label>
+            <span>Race h</span>
+            <input id="pit-race-hours" type="number" min="0.25" step="0.25" value="24" />
+          </label>
         </div>
+        <div class="pit-bar" id="pit-bar">
+          <span class="pit-segment pit-start-closed"></span>
+          <span class="pit-segment pit-open"></span>
+          <span class="pit-segment pit-cooldown"></span>
+          <span class="pit-segment pit-open"></span>
+          <span class="pit-segment pit-end-closed"></span>
+          <i id="pit-progress"></i>
+        </div>
+        <p id="pit-detail" class="pit-detail">Waiting for race clock and class gaps.</p>
       </section>
 
       <details class="debug-panel">
@@ -186,6 +217,7 @@
 
     <script src="../shared/lapAnalytics.js"></script>
     <script src="../shared/classBattle.js"></script>
+    <script src="../shared/pitstopPlanner.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
