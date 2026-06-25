@@ -11,9 +11,14 @@ const testFiles = fs
   .filter((file) => file.endsWith(".test.js"))
   .sort();
 
-for (const file of testFiles) {
-  console.log(`\nRunning ${file}`);
-  require(path.join(testDir, file));
-}
+(async () => {
+  for (const file of testFiles) {
+    console.log(`\nRunning ${file}`);
+    await require(path.join(testDir, file));
+  }
 
-console.log("\nAll tests passed.");
+  console.log("\nAll tests passed.");
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
