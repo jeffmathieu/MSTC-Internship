@@ -128,7 +128,7 @@ button.primary { background: var(--ink); color: white; }
   color: var(--muted);
   font-size: 13px;
   line-height: 1;
-  transform: scaleY(-1);
+  transform: scaleX(-1);
 }
 .edit-ref:hover { border-color: var(--line); color: var(--ink); }
 .ref-edit-input {
