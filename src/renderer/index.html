@@ -70,10 +70,11 @@
           <span>Best Time</span>
           <strong id="best-time">—</strong>
         </article>
-        <article class="metric-box reference-card">
+        <article class="metric-box reference-card norm-card" id="reference-lap-card">
+          <button class="edit-ref" data-ref-key="lapMs" data-ref-label="reference lap time" title="Edit reference lap time" aria-label="Edit reference lap time">✎</button>
           <span>Reference Lap Time</span>
           <strong id="reference-lap-time">—</strong>
-          <small>Fixed value, configurable later</small>
+          <small>Race / quali limit</small>
         </article>
       </section>
 
@@ -82,16 +83,31 @@
           <article class="metric-box" id="sector1-card"><span>Sector 1</span><strong id="sector-1">—</strong></article>
           <article class="metric-box" id="sector2-card"><span>Sector 2</span><strong id="sector-2">—</strong></article>
           <article class="metric-box" id="sector3-card"><span>Sector 3</span><strong id="sector-3">—</strong></article>
-          <article class="metric-box ref"><span>REF Sect 1</span><strong id="ref-sector-1">—</strong></article>
-          <article class="metric-box ref"><span>REF Sect 2</span><strong id="ref-sector-2">—</strong></article>
-          <article class="metric-box ref"><span>REF Sect 3</span><strong id="ref-sector-3">—</strong></article>
+          <article class="metric-box ref norm-card" id="ref-sector1-card">
+            <button class="edit-ref" data-ref-key="sector1Ms" data-ref-label="reference sector 1" title="Edit reference sector 1" aria-label="Edit reference sector 1">✎</button>
+            <span>REF Sect 1</span>
+            <strong id="ref-sector-1">—</strong>
+            <small id="ref-sector-1-delta">Last — · Best —</small>
+          </article>
+          <article class="metric-box ref norm-card" id="ref-sector2-card">
+            <button class="edit-ref" data-ref-key="sector2Ms" data-ref-label="reference sector 2" title="Edit reference sector 2" aria-label="Edit reference sector 2">✎</button>
+            <span>REF Sect 2</span>
+            <strong id="ref-sector-2">—</strong>
+            <small id="ref-sector-2-delta">Last — · Best —</small>
+          </article>
+          <article class="metric-box ref norm-card" id="ref-sector3-card">
+            <button class="edit-ref" data-ref-key="sector3Ms" data-ref-label="reference sector 3" title="Edit reference sector 3" aria-label="Edit reference sector 3">✎</button>
+            <span>REF Sect 3</span>
+            <strong id="ref-sector-3">—</strong>
+            <small id="ref-sector-3-delta">Last — · Best —</small>
+          </article>
           <article class="metric-box" id="best-sector1-card"><span>BEST Sect 1</span><strong id="best-sector-1">—</strong></article>
           <article class="metric-box" id="best-sector2-card"><span>BEST Sect 2</span><strong id="best-sector-2">—</strong></article>
           <article class="metric-box" id="best-sector3-card"><span>BEST Sect 3</span><strong id="best-sector-3">—</strong></article>
         </div>
 
         <div class="prediction-column">
-          <article class="metric-box prediction">
+          <article class="metric-box prediction norm-card" id="predicted-lap-card">
             <span>Predicted Lap Time</span>
             <strong id="predicted-lap-time">—</strong>
             <small id="predicted-lap-delta">Waiting for S1</small>
@@ -99,7 +115,7 @@
           <article class="metric-box ideal">
             <span>Ideal Time</span>
             <strong id="ideal-time">—</strong>
-            <small>Best S1 + best S2 + best S3</small>
+            <small id="ideal-time-delta">Best S1 + best S2 + best S3</small>
           </article>
           <label class="xic-input metric-box">
             <span>Input # XIC</span>
@@ -206,6 +222,10 @@
         <input id="timing-url" type="text" value="https://livetiming.getraceresults.com/demo#screen-results" />
         <input id="followed-car" type="text" value="33" />
         <input id="storage-folder" type="text" readonly />
+        <input id="reference-lap-ms" type="hidden" />
+        <input id="reference-sector1-ms" type="hidden" />
+        <input id="reference-sector2-ms" type="hidden" />
+        <input id="reference-sector3-ms" type="hidden" />
         <select id="poll-interval">
           <option value="1000">1s</option>
           <option value="2000">2s</option>
@@ -219,6 +239,7 @@
     <script src="../shared/lapAnalytics.js"></script>
     <script src="../shared/classBattle.js"></script>
     <script src="../shared/pitstopPlanner.js"></script>
+    <script src="../shared/normReference.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

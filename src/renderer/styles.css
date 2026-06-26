@@ -7,6 +7,7 @@
   --soft-line: #d8d8d2;
   --green: #1e9f67;
   --red: #d94c62;
+  --orange: #e2a93b;
   --blue: #315fc7;
 }
 
@@ -91,6 +92,7 @@ button.primary { background: var(--ink); color: white; }
   display: flex;
   flex-direction: column;
   justify-content: center;
+  position: relative;
 }
 .metric-box strong {
   font-size: 28px;
@@ -114,6 +116,26 @@ button.primary { background: var(--ink); color: white; }
   color: var(--muted);
   font-weight: 700;
 }
+.edit-ref {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 2px solid var(--soft-line);
+  background: white;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+}
+.edit-ref:hover { border-color: var(--line); color: var(--ink); }
+.norm-card.norm-good { border-color: var(--green); box-shadow: 0 0 0 3px rgba(30,159,103,.14); }
+.norm-card.norm-warn { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(226,169,59,.18); }
+.norm-card.norm-bad { border-color: var(--red); box-shadow: 0 0 0 3px rgba(217,76,98,.17); }
+.norm-text.norm-good { color: var(--green); }
+.norm-text.norm-warn { color: var(--orange); }
+.norm-text.norm-bad { color: var(--red); }
 
 .performance-grid {
   display: grid;
@@ -128,7 +150,13 @@ button.primary { background: var(--ink); color: white; }
 }
 .sector-grid .metric-box { text-align: center; min-height: 64px; }
 .sector-grid .metric-box strong { font-size: clamp(20px, 2.4vw, 34px); }
-.sector-grid .ref strong { color: var(--muted); }
+.sector-grid .ref strong { color: var(--muted); font-size: clamp(14px, 1.5vw, 20px); }
+.sector-grid .ref small {
+  margin-top: 5px;
+  font-size: clamp(14px, 1.4vw, 18px);
+  line-height: 1.05;
+  color: var(--ink);
+}
 .prediction-column {
   display: grid;
   grid-template-rows: 1fr 1fr auto;

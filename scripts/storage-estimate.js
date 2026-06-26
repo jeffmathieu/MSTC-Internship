@@ -19,7 +19,7 @@ const CONFIG = {
   // followedCars is how many dashboards/cars you actively focus on. The current
   // app stores all parsed timing rows, so disk usage mainly follows storedCars.
   storedCars: 45,
-  followedCars: 3,
+  followedCars: 1,
 
   // Approximate bytes per completed lap in each append-only format. These are
   // intentionally conservative and easy to tune after checking real files.

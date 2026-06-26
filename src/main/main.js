@@ -79,11 +79,21 @@ let collectorState = {
 const settingsPath = () => path.join(app.getPath('userData'), 'settings.json');
 const defaultStorageFolder = () => path.join(app.getPath('documents'), 'ZolderLiveTimingReader');
 const DEFAULT_POLL_INTERVAL_MS = 5000;
+const DEFAULT_REFERENCE_TIMES = {
+  lapMs: null,
+  sector1Ms: null,
+  sector2Ms: null,
+  sector3Ms: null
+};
 
 function normalizeSettings(settings) {
   return {
     ...settings,
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
+    referenceTimes: {
+      ...DEFAULT_REFERENCE_TIMES,
+      ...(settings?.referenceTimes || {})
+    },
     pitRules: {
       ...DEFAULT_PIT_RULES,
       ...(settings?.pitRules || {})
@@ -105,6 +115,7 @@ function loadSettings() {
     timingUrl: 'https://livetiming.getraceresults.com/demo#screen-results',
     followedCar: '33',
     comparisonCar: '',
+    referenceTimes: DEFAULT_REFERENCE_TIMES,
     storageFolder: defaultStorageFolder(),
     pitRules: DEFAULT_PIT_RULES,
     setupComplete: false

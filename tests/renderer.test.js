@@ -72,7 +72,8 @@ function createFakeDocument() {
   }
 
   ['last-time-card', 'best-time-card', 'best-sector1-card', 'best-sector2-card', 'best-sector3-card',
-    'delta-best-last-card', 'delta-best-best-card', 'delta-average-drivers-card', 'delta-bic-card', 'delta-xic-card'
+    'delta-best-last-card', 'delta-best-best-card', 'delta-average-drivers-card', 'delta-bic-card', 'delta-xic-card',
+    'predicted-lap-card', 'reference-lap-card', 'ref-sector1-card', 'ref-sector2-card', 'ref-sector3-card'
   ].forEach((id) => byId(id).classList.add('metric-box'));
 
   const metricChildren = {
@@ -113,6 +114,12 @@ const settings = {
   timingUrl: 'https://example.com/live',
   followedCar: '13',
   comparisonCar: '56',
+  referenceTimes: {
+    lapMs: 124500,
+    sector1Ms: 41000,
+    sector2Ms: 46500,
+    sector3Ms: 36500
+  },
   storageFolder: '/tmp/race-data',
   pollIntervalMs: 5000,
   setupComplete: true
@@ -210,7 +217,7 @@ const liveTiming = {
 };
 
 const context = {
-  window: { liveTiming, classBattle: {}, lapAnalytics: {}, pitstopPlanner: require('../src/shared/pitstopPlanner') },
+  window: { liveTiming, classBattle: {}, lapAnalytics: {}, pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference') },
   document,
   console,
   alert: () => {},
@@ -239,6 +246,9 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('last-time').textContent, '2:05.000');
   assert.strictEqual(document.getElementById('best-time').textContent, '2:03.500');
   assert.strictEqual(document.getElementById('sector-1').textContent, '41.000');
+  assert.strictEqual(document.getElementById('reference-lap-time').textContent, '2:04.500');
+  assert.strictEqual(document.getElementById('ref-sector-1').textContent, '0:41.000');
+  assert.strictEqual(document.getElementById('ref-sector-1-delta').textContent, 'Last 0.000s · Best —');
   assert.strictEqual(document.getElementById('best-sector-1').textContent, '—');
   assert.strictEqual(document.getElementById('ideal-time').textContent, '—');
   assert.notStrictEqual(document.getElementById('best-sector-1').textContent, '0:00.000');
@@ -251,8 +261,13 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('best-sector-2').textContent, '0:46.000');
   assert.strictEqual(document.getElementById('best-sector-3').textContent, '0:36.000');
   assert.strictEqual(document.getElementById('ideal-time').textContent, '2:03.000');
+  assert.strictEqual(document.getElementById('ideal-time-delta').textContent, 'Delta -1.500s');
+  assert.ok(document.getElementById('ideal-time').classList.contains('norm-bad'));
   assert.strictEqual(document.getElementById('predicted-lap-time').textContent, '2:04.321');
   assert.strictEqual(document.getElementById('predicted-lap-delta').textContent, 'Delta +0.679s');
+  assert.ok(document.getElementById('predicted-lap-card').classList.contains('norm-bad'));
+  assert.strictEqual(document.getElementById('ref-sector-2-delta').textContent, 'Last -0.500s · Best -0.500s');
+  assert.ok(document.getElementById('ref-sector2-card').classList.contains('norm-bad'));
   assert.strictEqual(document.getElementById('best-d1-a').textContent, '2:03.000');
   assert.strictEqual(document.getElementById('last-d2').textContent, '2:06.500');
   assert.strictEqual(document.getElementById('delta-best-last').textContent, '-3.500s');

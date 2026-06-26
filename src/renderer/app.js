@@ -11,6 +11,7 @@ const DEFAULT_POLL_INTERVAL_MS = 5000;
 const classBattle = window.classBattle;
 const lapAnalytics = window.lapAnalytics;
 const pitstopPlanner = window.pitstopPlanner;
+const normReference = window.normReference;
 const previousMetricValues = new Map();
 
 // Maps collector states to the visual status pill classes in styles.css.
@@ -78,9 +79,58 @@ function numericMs(value) {
 // Formats a signed delta. Positive/negative meaning depends on the caller, so
 // setDelta() is responsible for assigning good/bad styling.
 function displayDelta(ms) {
-  if (!Number.isFinite(ms)) return '—';
-  const sign = ms > 0 ? '+' : ms < 0 ? '-' : '';
-  return `${sign}${(Math.abs(ms) / 1000).toFixed(3)}s`;
+  return normReference.displayDeltaSeconds(ms);
+}
+
+// Parses dashboard-entered times such as "2:04.500", "124.500" or "41.2".
+// Values are stored as milliseconds in settings so race/quali reference times
+// can change without touching code.
+function parseDashboardTimeToMs(value) {
+  return normReference.parseDashboardTimeToMs(value);
+}
+
+function msFromHiddenInput(id) {
+  const n = Number($(id)?.value);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function currentReferenceTimes() {
+  return {
+    lapMs: msFromHiddenInput('reference-lap-ms'),
+    sector1Ms: msFromHiddenInput('reference-sector1-ms'),
+    sector2Ms: msFromHiddenInput('reference-sector2-ms'),
+    sector3Ms: msFromHiddenInput('reference-sector3-ms')
+  };
+}
+
+function setHiddenMs(id, value) {
+  const input = $(id);
+  if (input) input.value = Number.isFinite(value) ? String(Math.round(value)) : '';
+}
+
+function syncReferenceInputs(settings = currentSettings || {}) {
+  const refs = settings.referenceTimes || {};
+  setHiddenMs('reference-lap-ms', numericMs(refs.lapMs));
+  setHiddenMs('reference-sector1-ms', numericMs(refs.sector1Ms));
+  setHiddenMs('reference-sector2-ms', numericMs(refs.sector2Ms));
+  setHiddenMs('reference-sector3-ms', numericMs(refs.sector3Ms));
+}
+
+function setNormCardState(id, state) {
+  const el = $(id);
+  if (!el) return;
+  el.classList.remove('norm-good', 'norm-warn', 'norm-bad');
+  if (state && state !== 'neutral') el.classList.add(`norm-${state}`);
+}
+
+function setNormTextState(id, state) {
+  const el = $(id);
+  if (!el) return;
+  el.classList.remove('norm-text', 'norm-good', 'norm-warn', 'norm-bad');
+  if (state && state !== 'neutral') {
+    el.classList.add('norm-text');
+    el.classList.add(`norm-${state}`);
+  }
 }
 
 // Reads pit duration inputs as seconds. Invalid values fall back so one bad UI
@@ -109,6 +159,10 @@ function pitRulesFromInputs() {
     requiredPitStops: Math.max(0, Math.floor(secondsFromInput('pit-required-input', 2))),
     nearWindowLaps: 2
   };
+}
+
+function referenceTimesFromInputs() {
+  return currentReferenceTimes();
 }
 
 // Updates a delta card and applies semantic border color. In this UI positive
@@ -248,9 +302,27 @@ function getOurCarAnalytics(summary) {
 // Renders best sector values and ideal time from analytics_summary.json. Ref
 // fields stay fixed placeholders for now; prediction comes from main.js so the
 // renderer does not duplicate sector-average rules.
-function renderSectorAnalytics(summary) {
+function rowSectorMs(row, sectorNumber) {
+  return numericMs(row?.[`sector${sectorNumber}Ms`]) ?? parseDashboardTimeToMs(row?.[`sector${sectorNumber}`]);
+}
+
+function followedRow(rows) {
+  const wanted = String($('followed-car').value || '').trim();
+  return (rows || []).find((row) => String(row.carNumber) === wanted) || null;
+}
+
+function renderRefSector(sectorNumber, refMs, lastMs, bestMs) {
+  const status = normReference.sectorReferenceStatus(lastMs, bestMs, refMs);
+  setMetric(`ref-sector-${sectorNumber}`, formatMs(refMs));
+  setText(`ref-sector-${sectorNumber}-delta`, status.label);
+  setNormCardState(`ref-sector${sectorNumber}-card`, status.state);
+}
+
+function renderSectorAnalytics(summary, rows = []) {
   const ourCar = getOurCarAnalytics(summary);
   const prediction = currentState?.lapPrediction || null;
+  const refs = currentReferenceTimes();
+  const row = followedRow(rows);
   const bestS1 = numericMs(ourCar?.bestSector1Ms);
   const bestS2 = numericMs(ourCar?.bestSector2Ms);
   const bestS3 = numericMs(ourCar?.bestSector3Ms);
@@ -258,18 +330,25 @@ function renderSectorAnalytics(summary) {
   setMetric('best-sector-2', formatMs(bestS2), { flash: true });
   setMetric('best-sector-3', formatMs(bestS3), { flash: true });
   const ideal = [bestS1, bestS2, bestS3].every(Number.isFinite) ? bestS1 + bestS2 + bestS3 : null;
+  const idealStatus = normReference.idealReferenceStatus(bestS1, bestS2, bestS3, refs.lapMs);
   setMetric('ideal-time', formatMs(ideal), { flash: true });
+  setText('ideal-time-delta', idealStatus.deltaMs !== null ? `Delta ${idealStatus.deltaLabel}` : 'Best S1 + best S2 + best S3');
+  setNormTextState('ideal-time', idealStatus.state);
 
-  setMetric('ref-sector-1', '—');
-  setMetric('ref-sector-2', '—');
-  setMetric('ref-sector-3', '—');
-  setMetric('reference-lap-time', '—');
+  renderRefSector(1, refs.sector1Ms, rowSectorMs(row, 1), bestS1);
+  renderRefSector(2, refs.sector2Ms, rowSectorMs(row, 2), bestS2);
+  renderRefSector(3, refs.sector3Ms, rowSectorMs(row, 3), bestS3);
+  setMetric('reference-lap-time', formatMs(refs.lapMs));
+  setNormCardState('reference-lap-card', 'neutral');
   setMetric('predicted-lap-time', prediction?.available ? formatMs(numericMs(prediction.predictedLapMs)) : '—', { flash: true });
   const predictionDelta = numericMs(prediction?.predictionDeltaMs);
   const predictionDetail = prediction?.available && predictionDelta !== null
     ? `Delta ${displayDelta(predictionDelta)}`
     : prediction?.available ? rowValue(prediction.label) : rowValue(prediction?.reason || 'Waiting for S1');
   setText('predicted-lap-delta', predictionDetail);
+  const predictedMs = numericMs(prediction?.predictedLapMs);
+  const predictedStatus = normReference.lapReferenceStatus(prediction?.available ? predictedMs : null, refs.lapMs);
+  setNormCardState('predicted-lap-card', predictedStatus.state);
 }
 
 // Looks up the current live driver for a car and then finds that driver's stored
@@ -450,7 +529,7 @@ function render(state) {
   $('history-count').textContent = String(history.length);
   $('last-update').textContent = currentState.lastSuccessAt ? new Date(currentState.lastSuccessAt).toLocaleTimeString() : '—';
   renderFollowed(rows);
-  renderSectorAnalytics(currentState.analyticsSummary || null);
+  renderSectorAnalytics(currentState.analyticsSummary || null, rows);
   renderDriverAndClassComparisons(currentState.analyticsSummary || null, rows);
   renderPitstopPlan(currentState.pitstopPlan || null);
   renderAllRowsTable(rows);
@@ -476,6 +555,7 @@ async function saveSettingsFromInputs(setupComplete = false) {
     timingUrl: $('timing-url').value.trim(),
     followedCar: $('followed-car').value.trim(),
     comparisonCar: $('comparison-car')?.value.trim() || '',
+    referenceTimes: referenceTimesFromInputs(),
     storageFolder: $('storage-folder').value.trim(),
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     pitRules: pitRulesFromInputs()
@@ -490,6 +570,29 @@ function syncSetupFromMain() {
   $('setup-url').value = $('timing-url').value;
   $('setup-car').value = $('followed-car').value;
   $('setup-folder').value = $('storage-folder').value;
+}
+
+async function editReferenceTime(button) {
+  const key = button?.dataset?.refKey;
+  const label = button?.dataset?.refLabel || 'reference time';
+  const inputByKey = {
+    lapMs: 'reference-lap-ms',
+    sector1Ms: 'reference-sector1-ms',
+    sector2Ms: 'reference-sector2-ms',
+    sector3Ms: 'reference-sector3-ms'
+  };
+  if (!key || !inputByKey[key]) return;
+  const currentMs = msFromHiddenInput(inputByKey[key]);
+  const answer = prompt(`Enter ${label}`, Number.isFinite(currentMs) ? formatMs(currentMs) : '');
+  if (answer === null) return;
+  const parsed = parseDashboardTimeToMs(answer);
+  if (parsed === null) {
+    alert('Please enter a time like 2:04.500, 124.500, or 41.2');
+    return;
+  }
+  setHiddenMs(inputByKey[key], parsed);
+  await saveSettingsFromInputs();
+  render(currentState);
 }
 
 // Copies visible setup modal values back into the hidden dashboard inputs used
@@ -526,6 +629,7 @@ async function init() {
   $('followed-car').value = currentSettings.followedCar || '33';
   $('storage-folder').value = currentSettings.storageFolder || '';
   if ($('comparison-car')) $('comparison-car').value = currentSettings.comparisonCar || '';
+  syncReferenceInputs(currentSettings);
   if ($('pit-duration')) $('pit-duration').value = String(Math.round((currentSettings.pitRules?.pitStopDurationMs || 75000) / 1000));
   if ($('pit-required-input')) $('pit-required-input').value = String(currentSettings.pitRules?.requiredPitStops ?? 2);
   if ($('pit-race-hours')) $('pit-race-hours').value = String((currentSettings.pitRules?.raceDurationMs || 86400000) / 3600000);
@@ -549,6 +653,7 @@ async function init() {
   ['timing-url','followed-car','poll-interval'].forEach((id) => $(id)?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); }));
   $('comparison-car')?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); });
   ['pit-duration','pit-required-input','pit-race-hours'].forEach((id) => $(id)?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); }));
+  document.querySelectorAll('.edit-ref').forEach((button) => button.addEventListener('click', () => editReferenceTime(button)));
   window.liveTiming.onCollectorUpdate(render);
   render(await window.liveTiming.getCollectorState());
   if (!currentSettings.setupComplete || !currentSettings.storageFolder) showSetup(true);
