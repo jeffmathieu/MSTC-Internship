@@ -182,6 +182,7 @@ const updatedState = {
     canPitNow: true,
     waitMs: 0,
     completedPitStops: 1,
+    lastPitElapsedMs: 3600000,
     remainingRequiredStops: 1,
     mustPitSoonMs: 1800000,
     clock: { elapsedMs: 3600000, remainingMs: 3600000, progress: 0.5 },
@@ -313,7 +314,10 @@ module.exports = (async () => {
   assert.ok(document.getElementById('pit-projection').textContent.includes('PIC 2'));
   assert.ok(document.getElementById('pit-projection').textContent.includes('0:05.000 behind #2'));
   assert.ok(document.getElementById('pit-projection').textContent.includes('0:10.000 ahead #56'));
-  assert.strictEqual(document.getElementById('pit-bar').style.gridTemplateColumns, '1500000fr 4950000fr 1500000fr 4950000fr 1500000fr');
+  assert.strictEqual(document.getElementById('pit-bar').style.gridTemplateColumns, '1500000fr 11400000fr 1500000fr');
+  assert.strictEqual(document.getElementById('pit-cooldown-overlay').style.left, '25%');
+  assert.ok(document.getElementById('pit-cooldown-overlay').style.width.startsWith('10.416'));
+  assert.strictEqual(document.getElementById('pit-cooldown-overlay').style.display, 'block');
 
   document.getElementById('comparison-car').value = '56';
   await document.getElementById('comparison-car').trigger('change');

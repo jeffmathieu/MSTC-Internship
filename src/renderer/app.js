@@ -455,9 +455,24 @@ function renderPitstopPlan(plan) {
     const race = Math.max(1, Number(plan.rules.raceDurationMs));
     const start = Math.max(0, Number(plan.rules.pitClosedStartMs || 0));
     const end = Math.max(0, Number(plan.rules.pitClosedEndMs || 0));
-    const cooldown = Math.max(0, Number(plan.rules.pitCooldownMs || 0));
-    const open = Math.max(0, race - start - end - cooldown);
-    bar.style.gridTemplateColumns = `${start}fr ${open / 2}fr ${cooldown}fr ${open / 2}fr ${end}fr`;
+    const open = Math.max(0, race - start - end);
+    bar.style.gridTemplateColumns = `${start}fr ${open}fr ${end}fr`;
+  }
+  const cooldownOverlay = $('pit-cooldown-overlay');
+  if (cooldownOverlay && plan.rules?.raceDurationMs) {
+    const race = Math.max(1, Number(plan.rules.raceDurationMs));
+    const lastPitElapsedMs = numericMs(plan.lastPitElapsedMs ?? plan.pitState?.lastPitElapsedMs);
+    const cooldownMs = Math.max(0, Number(plan.rules.pitCooldownMs || 0));
+    if (Number.isFinite(lastPitElapsedMs) && cooldownMs > 0) {
+      const startPct = Math.max(0, Math.min(100, (lastPitElapsedMs / race) * 100));
+      const endPct = Math.max(startPct, Math.min(100, ((lastPitElapsedMs + cooldownMs) / race) * 100));
+      cooldownOverlay.style.left = `${startPct}%`;
+      cooldownOverlay.style.width = `${endPct - startPct}%`;
+      cooldownOverlay.style.display = endPct > startPct ? 'block' : 'none';
+    } else {
+      cooldownOverlay.style.display = 'none';
+      cooldownOverlay.style.width = '0%';
+    }
   }
 }
 

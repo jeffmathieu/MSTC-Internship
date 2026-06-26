@@ -257,22 +257,24 @@ const fallbackUnscoredOurCarProjection = projectClassAfterPit([
 assert.strictEqual(fallbackUnscoredOurCarProjection.available, false);
 assert.strictEqual(fallbackUnscoredOurCarProjection.reason, 'Our projected race distance is not reliable yet');
 
-// Regression test for the important lapped-car bug: 75 seconds of pit loss must
-// not place us behind a car that is four completed laps down.
+// Physical rejoin projection follows the numeric DIFF/INT chain. Even if a car
+// is laps down in the race classification, a tiny numeric interval means it is
+// physically close enough to pass us during a pitstop.
 const lappedCarProjection = projectClassAfterPit([
   { position: 1, classPosition: 1, carNumber: 10, className: 'CC', team: 'Leader', lapNumber: 20, interval: '--', lastLapMs: 125000 },
   { position: 2, classPosition: 2, carNumber: 33, className: 'CC', team: 'Us', lapNumber: 20, interval: '10.000', lastLapMs: 125000 },
   { position: 5, classPosition: 5, carNumber: 65, className: 'CC', team: 'Lapped', lapNumber: 16, interval: '0.319', lastLapMs: 126000 }
 ], '33', 75000, { averageLapMs: 125000 });
 assert.strictEqual(lappedCarProjection.available, true);
-assert.strictEqual(lappedCarProjection.projectedClassPosition, 2);
-assert.strictEqual(lappedCarProjection.carBehind.carNumber, '65');
-assert.strictEqual(lappedCarProjection.carBehind.lapDeltaToUs, -4);
-assert.ok(lappedCarProjection.carBehind.projectedGapToUsMs > 3 * 120000);
+assert.strictEqual(lappedCarProjection.projectedClassPosition, 3);
+assert.strictEqual(lappedCarProjection.carAhead.carNumber, '65');
+assert.strictEqual(lappedCarProjection.carAhead.lapDeltaToUs, -4);
+assert.strictEqual(lappedCarProjection.carAhead.projectedGapToUsMs, -74681);
+assert.strictEqual(lappedCarProjection.carBehind, null);
 
 // Regression for an Asian LMS-style table: a lapped other-class car can sit
-// visually between us and the next same-class car. Its "-- 65 laps --" gap must
-// not be added as 65 laps of time before reaching the next LMP3 row.
+// visually between us and the next same-class car. Its "-- 65 laps --" GAP must
+// not be converted into seconds; the numeric DIFF/INT chain is used instead.
 const lappedInterloperProjection = projectClassAfterPit([
   { position: 8, classPosition: 1, carNumber: 13, className: 'LMP3', team: 'Us', lapNumber: 100, gap: '1:05.031', diff: '1:05.031', interval: '1:05.031', lastLapMs: 125000 },
   { position: 9, classPosition: 2, carNumber: 59, className: 'LMP2 AM', team: 'Other class lapped', lapNumber: 35, gap: '-- 65 laps --', diff: '1:55.519', interval: '1:55.519', lastLapMs: 119621 },
@@ -283,10 +285,10 @@ const lappedInterloperProjection = projectClassAfterPit([
   { position: 22, classPosition: 6, carNumber: 3, className: 'LMP3', team: 'Lapped LMP3', lapNumber: 38, gap: '-- 62 laps --', diff: '57.342', interval: '57.342', lastLapMs: 127053 }
 ], '13', 75000, { averageLapMs: 125000 });
 assert.strictEqual(lappedInterloperProjection.available, true);
-assert.strictEqual(lappedInterloperProjection.projectedClassPosition, 4);
-assert.strictEqual(lappedInterloperProjection.carAhead.carNumber, '9');
-assert.strictEqual(lappedInterloperProjection.carBehind.carNumber, '65');
-assert.ok(Math.abs(lappedInterloperProjection.carBehind.projectedGapToUsMs) < 10000);
+assert.strictEqual(lappedInterloperProjection.projectedClassPosition, 1);
+assert.strictEqual(lappedInterloperProjection.carAhead, null);
+assert.strictEqual(lappedInterloperProjection.carBehind.carNumber, '12');
+assert.strictEqual(lappedInterloperProjection.carBehind.projectedGapToUsMs, 40690);
 
 // Tight same-lap scenario: after losing 5.050s we should stay only 50ms ahead
 // of car #18. This protects millisecond-level after-pit gap math.

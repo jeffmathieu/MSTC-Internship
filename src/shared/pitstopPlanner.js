@@ -199,14 +199,6 @@ function previousOverallRow(rows, row) {
   return index > 0 ? ordered[index - 1] : null;
 }
 
-// Reads lap gap labels such as "-- 11 laps --". These are not precise second
-// gaps, but they tell us that simply adding DIFF seconds would cross a lap
-// boundary and become misleading.
-function lapGapCount(value) {
-  const match = String(value || '').match(/(\d+)\s*laps?/i);
-  return match ? Number(match[1]) : null;
-}
-
 // Returns our followed row plus all rows in the same class, sorted by class
 // position. Future UI filters for class can be added here.
 function classRows(rows, followedCarNumber) {
@@ -276,44 +268,21 @@ function relativeGapsFromClassIntervals(rows, rowsInClass) {
 // Walks down the full timing table from our car and adds adjacent overall
 // intervals until the configured pit loss is consumed. This mirrors how the
 // timing page itself defines DIFF/INT: each row's interval is to the previous
-// overall row, regardless of class. That makes it the right source for finding
-// which cars physically pass us during a pitstop.
+// overall row, regardless of class. Lap-gap labels are not converted to seconds
+// here; if the provider gives a numeric DIFF/INT, that is the physical gap chain
+// we need for "where do we rejoin after the stop?".
 function overallGapsBehindFollowed(rows, followedCarNumber, averageLapMs = null) {
   const ordered = overallSortedRows(rows);
   const startIndex = ordered.findIndex((row) => String(row.carNumber) === String(followedCarNumber));
   if (startIndex < 0) return [];
-  const followed = ordered[startIndex];
-  const followedLap = lapNumber(followed);
-  const followedClass = followed.className || '';
-  const lapMs = numberOrNull(averageLapMs) || estimateAverageLapMs(rows);
   let totalMs = 0;
   const gaps = [];
 
   for (let index = startIndex + 1; index < ordered.length; index += 1) {
     const row = ordered[index];
-    const currentLap = lapNumber(row);
-    const previousLap = lapNumber(ordered[index - 1]);
-    const explicitLapGap = lapGapCount(row.gap);
-    const crossedLapBoundary = Number.isFinite(followedLap) && Number.isFinite(currentLap) && currentLap < followedLap;
-    const lapDropFromPrevious = Number.isFinite(previousLap) && Number.isFinite(currentLap) && currentLap < previousLap;
-
-    const crossesLapBoundary = explicitLapGap || crossedLapBoundary || lapDropFromPrevious;
-    if (crossesLapBoundary && row.className !== followedClass) {
-      // Other-class cars can appear between same-class rivals while being many
-      // laps down/up. Their lap gap is not a seconds interval between our car
-      // and the next class car, so counting it creates absurd projections such
-      // as "+8000s ahead". Same-class lapped cars are still handled below.
-      continue;
-    }
-
-    if (crossesLapBoundary && Number.isFinite(lapMs)) {
-      totalMs += lapMs * Math.max(1, explicitLapGap || (Number.isFinite(followedLap) && Number.isFinite(currentLap) ? followedLap - currentLap : 1));
-    } else {
-      const intervalMs = intervalForRow(row);
-      if (!Number.isFinite(intervalMs)) break;
-      totalMs += intervalMs;
-    }
-
+    const intervalMs = intervalForRow(row);
+    if (!Number.isFinite(intervalMs)) break;
+    totalMs += intervalMs;
     gaps.push({ row, gapFromFollowedMs: totalMs });
   }
   return gaps;
@@ -321,10 +290,9 @@ function overallGapsBehindFollowed(rows, followedCarNumber, averageLapMs = null)
 
 // Predicts where our car would rejoin the class after losing pitLossMs.
 //
-// The key detail is that this is lap-aware: cars with fewer completed laps are
-// treated as one or more laps behind, not as a nearby interval. This prevents the
-// dashboard from saying we would fall behind a car that is actually several laps
-// down.
+// The first path uses the provider's overall DIFF/INT chain, which is the best
+// source for the physical rejoin position after a pitstop. The class-gap
+// fallback below is only used when that overall chain is unavailable.
 function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) {
   const { followed, rows: rowsInClass } = classRows(rows, followedCarNumber);
   if (!followed || !rowsInClass.length) return { available: false, reason: 'No class data yet', items: [] };
@@ -502,6 +470,7 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
     waitMs: windowState.waitMs,
     completedPitStops,
     totalPitStops,
+    lastPitElapsedMs: numberOrNull(pitState.lastPitElapsedMs),
     remainingRequiredStops,
     latestSafePitElapsedMs,
     mustPitSoonMs,
