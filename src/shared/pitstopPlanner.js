@@ -185,6 +185,28 @@ function compareRaceOrder(a, b) {
   return (Number(a.position) || 999999) - (Number(b.position) || 999999);
 }
 
+// Sorts the full timing table by overall position. This is separate from
+// compareRaceOrder because provider DIFF/INT columns are relative to visual
+// table order, not class order.
+function overallSortedRows(rows) {
+  return [...(rows || [])].sort((a, b) => (Number(a.position) || 999999) - (Number(b.position) || 999999));
+}
+
+// Finds the row immediately above another car in the full timing table.
+function previousOverallRow(rows, row) {
+  const ordered = overallSortedRows(rows);
+  const index = ordered.findIndex((candidate) => String(candidate.carNumber) === String(row.carNumber));
+  return index > 0 ? ordered[index - 1] : null;
+}
+
+// Reads lap gap labels such as "-- 11 laps --". These are not precise second
+// gaps, but they tell us that simply adding DIFF seconds would cross a lap
+// boundary and become misleading.
+function lapGapCount(value) {
+  const match = String(value || '').match(/(\d+)\s*laps?/i);
+  return match ? Number(match[1]) : null;
+}
+
 // Returns our followed row plus all rows in the same class, sorted by class
 // position. Future UI filters for class can be added here.
 function classRows(rows, followedCarNumber) {
@@ -229,11 +251,17 @@ function estimateAverageLapMs(rows, fallback = null) {
 // Builds cumulative gaps from class leader using adjacent class intervals. When
 // any interval becomes unreliable, later cumulative gaps are marked unreliable
 // instead of silently producing a false after-pit prediction.
-function relativeGapsFromClassIntervals(rowsInClass) {
+// A class interval is reliable only when the previous overall timing row is
+// also the previous class row. Otherwise another-class traffic sits between the
+// cars and DIFF/INT describes the wrong car.
+function relativeGapsFromClassIntervals(rows, rowsInClass) {
   let totalMs = 0;
   let reliable = true;
   return rowsInClass.map((row, index) => {
     if (index === 0) return { row, gapToClassLeaderMs: 0, reliable: true };
+    const previousClassRow = rowsInClass[index - 1];
+    const previousOverall = previousOverallRow(rows, row);
+    if (!previousOverall || String(previousOverall.carNumber) !== String(previousClassRow.carNumber)) reliable = false;
     const intervalMs = intervalForRow(row);
     if (!Number.isFinite(intervalMs)) reliable = false;
     if (reliable) totalMs += intervalMs;
@@ -245,6 +273,42 @@ function relativeGapsFromClassIntervals(rowsInClass) {
   });
 }
 
+// Walks down the full timing table from our car and adds adjacent overall
+// intervals until the configured pit loss is consumed. This mirrors how the
+// timing page itself defines DIFF/INT: each row's interval is to the previous
+// overall row, regardless of class. That makes it the right source for finding
+// which cars physically pass us during a pitstop.
+function overallGapsBehindFollowed(rows, followedCarNumber, averageLapMs = null) {
+  const ordered = overallSortedRows(rows);
+  const startIndex = ordered.findIndex((row) => String(row.carNumber) === String(followedCarNumber));
+  if (startIndex < 0) return [];
+  const followed = ordered[startIndex];
+  const followedLap = lapNumber(followed);
+  const lapMs = numberOrNull(averageLapMs) || estimateAverageLapMs(rows);
+  let totalMs = 0;
+  const gaps = [];
+
+  for (let index = startIndex + 1; index < ordered.length; index += 1) {
+    const row = ordered[index];
+    const currentLap = lapNumber(row);
+    const previousLap = lapNumber(ordered[index - 1]);
+    const explicitLapGap = lapGapCount(row.gap);
+    const crossedLapBoundary = Number.isFinite(followedLap) && Number.isFinite(currentLap) && currentLap < followedLap;
+    const lapDropFromPrevious = Number.isFinite(previousLap) && Number.isFinite(currentLap) && currentLap < previousLap;
+
+    if ((explicitLapGap || crossedLapBoundary || lapDropFromPrevious) && Number.isFinite(lapMs)) {
+      totalMs += lapMs * Math.max(1, explicitLapGap || (Number.isFinite(followedLap) && Number.isFinite(currentLap) ? followedLap - currentLap : 1));
+    } else {
+      const intervalMs = intervalForRow(row);
+      if (!Number.isFinite(intervalMs)) break;
+      totalMs += intervalMs;
+    }
+
+    gaps.push({ row, gapFromFollowedMs: totalMs });
+  }
+  return gaps;
+}
+
 // Predicts where our car would rejoin the class after losing pitLossMs.
 //
 // The key detail is that this is lap-aware: cars with fewer completed laps are
@@ -254,9 +318,50 @@ function relativeGapsFromClassIntervals(rowsInClass) {
 function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) {
   const { followed, rows: rowsInClass } = classRows(rows, followedCarNumber);
   if (!followed || !rowsInClass.length) return { available: false, reason: 'No class data yet', items: [] };
-  const relative = relativeGapsFromClassIntervals(rowsInClass);
-  const our = relative.find((item) => String(item.row.carNumber) === String(followedCarNumber));
   const averageLapMs = estimateAverageLapMs(rowsInClass, options.averageLapMs);
+  const overallBehind = overallGapsBehindFollowed(rows, followedCarNumber, averageLapMs);
+  const classBehind = overallBehind.filter((item) => item.row.className === followed.className);
+  if (Number.isFinite(pitLossMs) && classBehind.length) {
+    const passedClassCars = classBehind.filter((item) => item.gapFromFollowedMs <= pitLossMs);
+    const carAheadEntry = passedClassCars.at(-1) || null;
+    const carBehindEntry = classBehind.find((item) => item.gapFromFollowedMs > pitLossMs) || null;
+    const currentClassPosition = Number(followed.classPosition);
+    const projectedClassPosition = Number.isFinite(currentClassPosition)
+      ? currentClassPosition + passedClassCars.length
+      : rowsInClass.findIndex((row) => String(row.carNumber) === String(followedCarNumber)) + 1 + passedClassCars.length;
+
+    return {
+      available: true,
+      projectedClassPosition,
+      averageLapMs,
+      carAhead: carAheadEntry ? {
+        carNumber: String(carAheadEntry.row.carNumber),
+        team: carAheadEntry.row.team || '',
+        driver: carAheadEntry.row.driver || '',
+        currentClassPosition: carAheadEntry.row.classPosition || null,
+        lapDeltaToUs: Number.isFinite(lapNumber(carAheadEntry.row)) && Number.isFinite(lapNumber(followed)) ? lapNumber(carAheadEntry.row) - lapNumber(followed) : null,
+        projectedGapToUsMs: carAheadEntry.gapFromFollowedMs - pitLossMs,
+        isOurCar: false
+      } : null,
+      carBehind: carBehindEntry ? {
+        carNumber: String(carBehindEntry.row.carNumber),
+        team: carBehindEntry.row.team || '',
+        driver: carBehindEntry.row.driver || '',
+        currentClassPosition: carBehindEntry.row.classPosition || null,
+        lapDeltaToUs: Number.isFinite(lapNumber(carBehindEntry.row)) && Number.isFinite(lapNumber(followed)) ? lapNumber(carBehindEntry.row) - lapNumber(followed) : null,
+        projectedGapToUsMs: carBehindEntry.gapFromFollowedMs - pitLossMs,
+        isOurCar: false
+      } : null,
+      items: [
+        ...passedClassCars.map((item) => ({ carNumber: String(item.row.carNumber), projectedGapToUsMs: item.gapFromFollowedMs - pitLossMs, isOurCar: false })),
+        { carNumber: String(followedCarNumber), projectedGapToUsMs: 0, isOurCar: true },
+        ...classBehind.filter((item) => item.gapFromFollowedMs > pitLossMs).map((item) => ({ carNumber: String(item.row.carNumber), projectedGapToUsMs: item.gapFromFollowedMs - pitLossMs, isOurCar: false }))
+      ]
+    };
+  }
+
+  const relative = relativeGapsFromClassIntervals(rows, rowsInClass);
+  const our = relative.find((item) => String(item.row.carNumber) === String(followedCarNumber));
   const ourLap = lapNumber(followed);
   const canUseLapAwareProjection = Number.isFinite(averageLapMs) && Number.isFinite(ourLap);
 
@@ -267,6 +372,7 @@ function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) 
   const scoreFor = (item, extraLossMs = 0) => {
     const lap = lapNumber(item.row);
     if (canUseLapAwareProjection && Number.isFinite(lap)) {
+      if (lap === ourLap && !Number.isFinite(item.gapToClassLeaderMs)) return null;
       const knownGapMs = Number.isFinite(item.gapToClassLeaderMs) ? item.gapToClassLeaderMs : 0;
       return (lap * averageLapMs) - knownGapMs - extraLossMs;
     }

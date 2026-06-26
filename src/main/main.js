@@ -580,13 +580,13 @@ function completedLapRowFromLiveRow(row, previousRow) {
     driverName: previousRow.driverName || row.driverName,
     sector1: previousRow.sector1 || '',
     sector2: previousRow.sector2 || '',
-    sector3: previousRow.sector3 || '',
+    sector3: previousRow.sector3 || row.sector3 || '',
     sector1Flag: previousRow.sector1Flag || '',
     sector2Flag: previousRow.sector2Flag || '',
-    sector3Flag: previousRow.sector3Flag || '',
+    sector3Flag: previousRow.sector3Flag || row.sector3Flag || '',
     sector1Eligible: previousRow.sector1Eligible || '',
     sector2Eligible: previousRow.sector2Eligible || '',
-    sector3Eligible: previousRow.sector3Eligible || ''
+    sector3Eligible: previousRow.sector3Eligible || row.sector3Eligible || ''
   };
 }
 

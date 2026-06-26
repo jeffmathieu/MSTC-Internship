@@ -201,13 +201,28 @@ assert.deepStrictEqual(projectClassAfterPit([{ carNumber: 33, className: '', lap
 
 // When class positions tie, overall position is used as stable fallback order.
 const positionFallbackProjection = projectClassAfterPit([
-  { position: 3, classPosition: 1, carNumber: 33, className: 'CC', interval: '--' },
-  { position: 2, classPosition: 2, carNumber: 7, className: 'CC', interval: '1.000' },
-  { position: 1, classPosition: 2, carNumber: 8, className: 'CC', interval: '1.000' }
+  { position: 1, classPosition: 1, carNumber: 33, className: 'CC', interval: '--' },
+  { position: 2, classPosition: 2, carNumber: 8, className: 'CC', interval: '1.000' },
+  { position: 3, classPosition: 2, carNumber: 7, className: 'CC', interval: '1.000' }
 ], '33', 500);
 assert.strictEqual(positionFallbackProjection.available, true);
 assert.strictEqual(positionFallbackProjection.items[1].carNumber, '8');
 assert.strictEqual(positionFallbackProjection.items[2].carNumber, '7');
+
+// Mixed-class traffic must be included in the physical after-pit loss. #65 is
+// not adjacent to #18 in class order because a GT car sits between them, but the
+// overall DIFF chain still tells us how much time we lose before reaching #65.
+const mixedClassInterloperProjection = projectClassAfterPit([
+  { position: 1, classPosition: 1, carNumber: 33, className: 'CC', interval: '--', lapNumber: 20, lastLapMs: 125000 },
+  { position: 2, classPosition: 2, carNumber: 18, className: 'CC', interval: '10.000', lapNumber: 20, lastLapMs: 125000 },
+  { position: 3, classPosition: 1, carNumber: 90, className: 'GT', interval: '0.250', lapNumber: 20, lastLapMs: 126000 },
+  { position: 4, classPosition: 3, carNumber: 65, className: 'CC', interval: '0.319', lapNumber: 20, lastLapMs: 125000 },
+  { position: 5, classPosition: 4, carNumber: 91, className: 'CC', interval: '20', lapNumber: 20, lastLapMs: 126000 },
+], '33', 15000, { averageLapMs: 125000 });
+assert.strictEqual(mixedClassInterloperProjection.available, true);
+assert.strictEqual(mixedClassInterloperProjection.projectedClassPosition, 3);
+assert.strictEqual(mixedClassInterloperProjection.carAhead.carNumber, '65');
+assert.strictEqual(mixedClassInterloperProjection.carBehind.carNumber, '91');
 
 // Invalid pit loss should not produce a projection.
 const impossibleProjection = projectClassAfterPit([
@@ -226,6 +241,21 @@ const filteredUnscoredCarProjection = projectClassAfterPit([
 assert.strictEqual(filteredUnscoredCarProjection.available, true);
 assert.strictEqual(filteredUnscoredCarProjection.items.length, 1);
 assert.strictEqual(filteredUnscoredCarProjection.items[0].carNumber, '33');
+
+const fallbackLapAwareProjection = projectClassAfterPit([
+  { position: 1, classPosition: 1, carNumber: 10, className: 'CC', interval: '--', lapNumber: 20, lastLapMs: 125000 },
+  { position: 2, classPosition: 2, carNumber: 33, className: 'CC', interval: '5.000', lapNumber: 20, lastLapMs: 125000 }
+], '33', 500, { averageLapMs: 125000 });
+assert.strictEqual(fallbackLapAwareProjection.available, true);
+assert.strictEqual(fallbackLapAwareProjection.projectedClassPosition, 2);
+assert.strictEqual(fallbackLapAwareProjection.carAhead.carNumber, '10');
+
+const fallbackUnscoredOurCarProjection = projectClassAfterPit([
+  { position: 1, classPosition: 1, carNumber: 10, className: 'CC', interval: '--', lapNumber: 20, lastLapMs: 125000 },
+  { position: 2, classPosition: 2, carNumber: 33, className: 'CC', interval: '1L', lapNumber: 20, lastLapMs: 125000 }
+], '33', 500, { averageLapMs: 125000 });
+assert.strictEqual(fallbackUnscoredOurCarProjection.available, false);
+assert.strictEqual(fallbackUnscoredOurCarProjection.reason, 'Our projected race distance is not reliable yet');
 
 // Regression test for the important lapped-car bug: 75 seconds of pit loss must
 // not place us behind a car that is four completed laps down.

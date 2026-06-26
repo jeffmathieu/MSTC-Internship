@@ -199,10 +199,12 @@ function renderFollowed(rows) {
   const wanted = String($('followed-car').value || '').trim();
   const match = rows.find((row) => String(row.carNumber) === wanted);
   const row = match || {};
+  const classPic = row.className || row.classPosition
+    ? `${rowValue(row.className)} / ${rowValue(row.classPosition)}`
+    : '—';
   setText('info-car', wanted || row.carNumber || '—');
   setText('info-driver', row.driver);
-  setText('info-class', row.className);
-  setText('info-pic', row.classPosition);
+  setText('info-class-pic', classPic);
   setMetric('last-time', row.lastLap, { flash: true });
   setMetric('best-time', row.bestLap, { flash: true });
   setMetric('sector-1', row.sector1);
@@ -361,6 +363,15 @@ function renderPitstopPlan(plan) {
   if (progress) {
     const pct = Math.max(0, Math.min(100, Number(plan.clock?.progress || 0) * 100));
     progress.style.left = `${pct}%`;
+  }
+  const bar = $('pit-bar');
+  if (bar && plan.rules?.raceDurationMs) {
+    const race = Math.max(1, Number(plan.rules.raceDurationMs));
+    const start = Math.max(0, Number(plan.rules.pitClosedStartMs || 0));
+    const end = Math.max(0, Number(plan.rules.pitClosedEndMs || 0));
+    const cooldown = Math.max(0, Number(plan.rules.pitCooldownMs || 0));
+    const open = Math.max(0, race - start - end - cooldown);
+    bar.style.gridTemplateColumns = `${start}fr ${open / 2}fr ${cooldown}fr ${open / 2}fr ${end}fr`;
   }
 }
 

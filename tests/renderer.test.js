@@ -149,7 +149,7 @@ const updatedState = {
     remainingRequiredStops: 1,
     mustPitSoonMs: 1800000,
     clock: { elapsedMs: 3600000, remainingMs: 3600000, progress: 0.5 },
-    rules: { requiredPitStops: 2, pitStopDurationMs: 75000 },
+    rules: { requiredPitStops: 2, pitStopDurationMs: 75000, raceDurationMs: 14400000, pitClosedStartMs: 1500000, pitClosedEndMs: 1500000, pitCooldownMs: 1500000 },
     projection: {
       available: true,
       projectedClassPosition: 2,
@@ -228,7 +228,7 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('session-time').textContent, '55:54');
   assert.strictEqual(document.getElementById('info-car').textContent, '13');
   assert.strictEqual(document.getElementById('info-driver').textContent, 'Nigel Moore');
-  assert.strictEqual(document.getElementById('info-class').textContent, 'LMP3');
+  assert.strictEqual(document.getElementById('info-class-pic').textContent, 'LMP3 / 1');
   assert.strictEqual(document.getElementById('last-time').textContent, '2:05.000');
   assert.strictEqual(document.getElementById('best-time').textContent, '2:03.500');
   assert.strictEqual(document.getElementById('sector-1').textContent, '41.000');
@@ -256,6 +256,7 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('pit-stops-summary').textContent, '1/2');
   assert.strictEqual(document.getElementById('pit-next').textContent, 'Now');
   assert.ok(document.getElementById('pit-projection').textContent.includes('PIC 2'));
+  assert.strictEqual(document.getElementById('pit-bar').style.gridTemplateColumns, '1500000fr 4950000fr 1500000fr 4950000fr 1500000fr');
 
   document.getElementById('comparison-car').value = '56';
   await document.getElementById('comparison-car').trigger('change');
