@@ -304,6 +304,7 @@ return {
   lapsForDriver,
   statsForLaps,
   driverStats,
+  currentDriverName,
   bestDriverByAverage,
   compareBestDriverToCurrentDriver,
   carStats,

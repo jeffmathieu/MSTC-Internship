@@ -80,7 +80,7 @@ function numericMs(value) {
 function displayDelta(ms) {
   if (!Number.isFinite(ms)) return '—';
   const sign = ms > 0 ? '+' : ms < 0 ? '-' : '';
-  return `${sign}${formatMs(Math.abs(ms))}`;
+  return `${sign}${(Math.abs(ms) / 1000).toFixed(3)}s`;
 }
 
 // Reads pit duration inputs as seconds. Invalid values fall back so one bad UI
@@ -245,10 +245,12 @@ function getOurCarAnalytics(summary) {
   return (summary?.cars || []).find((car) => String(car.carNumber) === wanted) || null;
 }
 
-// Renders best sector values and ideal time from analytics_summary.json. Ref and
-// prediction fields are placeholders until those rules are defined later.
+// Renders best sector values and ideal time from analytics_summary.json. Ref
+// fields stay fixed placeholders for now; prediction comes from main.js so the
+// renderer does not duplicate sector-average rules.
 function renderSectorAnalytics(summary) {
   const ourCar = getOurCarAnalytics(summary);
+  const prediction = currentState?.lapPrediction || null;
   const bestS1 = numericMs(ourCar?.bestSector1Ms);
   const bestS2 = numericMs(ourCar?.bestSector2Ms);
   const bestS3 = numericMs(ourCar?.bestSector3Ms);
@@ -262,7 +264,12 @@ function renderSectorAnalytics(summary) {
   setMetric('ref-sector-2', '—');
   setMetric('ref-sector-3', '—');
   setMetric('reference-lap-time', '—');
-  setMetric('predicted-lap-time', '—');
+  setMetric('predicted-lap-time', prediction?.available ? formatMs(numericMs(prediction.predictedLapMs)) : '—', { flash: true });
+  const predictionDelta = numericMs(prediction?.predictionDeltaMs);
+  const predictionDetail = prediction?.available && predictionDelta !== null
+    ? `Delta ${displayDelta(predictionDelta)}`
+    : prediction?.available ? rowValue(prediction.label) : rowValue(prediction?.reason || 'Waiting for S1');
+  setText('predicted-lap-delta', predictionDetail);
 }
 
 // Looks up the current live driver for a car and then finds that driver's stored

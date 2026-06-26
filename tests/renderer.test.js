@@ -140,6 +140,13 @@ const initialState = {
 
 const updatedState = {
   ...initialState,
+  lapPrediction: {
+    available: true,
+    predictedLapMs: 124321,
+    completedSectorCount: 1,
+    driverName: 'Nigel Moore',
+    predictionDeltaMs: 679
+  },
   pitstopPlan: {
     label: 'Pit window open',
     status: 'open',
@@ -244,13 +251,15 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('best-sector-2').textContent, '0:46.000');
   assert.strictEqual(document.getElementById('best-sector-3').textContent, '0:36.000');
   assert.strictEqual(document.getElementById('ideal-time').textContent, '2:03.000');
+  assert.strictEqual(document.getElementById('predicted-lap-time').textContent, '2:04.321');
+  assert.strictEqual(document.getElementById('predicted-lap-delta').textContent, 'Delta +0.679s');
   assert.strictEqual(document.getElementById('best-d1-a').textContent, '2:03.000');
   assert.strictEqual(document.getElementById('last-d2').textContent, '2:06.500');
-  assert.strictEqual(document.getElementById('delta-best-last').textContent, '-0:03.500');
+  assert.strictEqual(document.getElementById('delta-best-last').textContent, '-3.500s');
   assert.ok(document.getElementById('delta-best-last-card').classList.contains('bad'));
-  assert.strictEqual(document.getElementById('delta-bic').textContent, '+0:00.500');
+  assert.strictEqual(document.getElementById('delta-bic').textContent, '+0.500s');
   assert.ok(document.getElementById('delta-bic-card').classList.contains('good'));
-  assert.strictEqual(document.getElementById('delta-xic').textContent, '+0:01.000');
+  assert.strictEqual(document.getElementById('delta-xic').textContent, '+1.000s');
   assert.ok(document.getElementById('delta-xic-card').classList.contains('good'));
   assert.strictEqual(document.getElementById('pit-status').textContent, 'Pit window open');
   assert.strictEqual(document.getElementById('pit-stops-summary').textContent, '1/2');

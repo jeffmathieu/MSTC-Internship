@@ -31,6 +31,7 @@ const CONFIG = {
   analyticsSummaryBaseBytes: 2500,
   analyticsSummaryBytesPerCar: 850,
   analyticsSummaryBytesPerDriver: 700,
+  lapPredictionBytes: 3500,
   averageDriversPerCar: 4,
 
   // Optional overhead for headers/newlines/session variation.
@@ -70,13 +71,15 @@ function latestSnapshotBytes(carCount, config = CONFIG) {
   const parserDebugBytes = config.overheadBytesPerFile + carCount * config.parserDebugBytesPerCar;
   const sessionMetadataBytes = config.sessionMetadataBytes;
   const analyticsSummaryBytes = analyticsSummarySizeBytes(carCount, config);
+  const lapPredictionBytes = config.lapPredictionBytes;
   return {
     latestCsvBytes,
     latestJsonBytes,
     parserDebugBytes,
     sessionMetadataBytes,
     analyticsSummaryBytes,
-    totalBytes: latestCsvBytes + latestJsonBytes + parserDebugBytes + sessionMetadataBytes + analyticsSummaryBytes
+    lapPredictionBytes,
+    totalBytes: latestCsvBytes + latestJsonBytes + parserDebugBytes + sessionMetadataBytes + analyticsSummaryBytes + lapPredictionBytes
   };
 }
 
@@ -125,7 +128,7 @@ function printScenario(label, result) {
 // Prints one overwritten/latest-files scenario line.
 function printLatestScenario(label, carCount, config) {
   const result = latestSnapshotBytes(carCount, config);
-  console.log(`${label.padEnd(24)} cars=${String(carCount).padStart(2)} latestCSV=${formatBytes(result.latestCsvBytes).padStart(9)} latestJSON=${formatBytes(result.latestJsonBytes).padStart(9)} debug=${formatBytes(result.parserDebugBytes).padStart(9)} analytics=${formatBytes(result.analyticsSummaryBytes).padStart(9)} total=${formatBytes(result.totalBytes).padStart(9)}`);
+  console.log(`${label.padEnd(24)} cars=${String(carCount).padStart(2)} latestCSV=${formatBytes(result.latestCsvBytes).padStart(9)} latestJSON=${formatBytes(result.latestJsonBytes).padStart(9)} debug=${formatBytes(result.parserDebugBytes).padStart(9)} analytics=${formatBytes(result.analyticsSummaryBytes).padStart(9)} prediction=${formatBytes(result.lapPredictionBytes).padStart(9)} total=${formatBytes(result.totalBytes).padStart(9)}`);
 }
 
 // Prints analytics-summary details so driver-count assumptions are visible.
@@ -171,7 +174,7 @@ function main(config = CONFIG) {
   console.log('------------------------');
   printAnalyticsBreakdown('Needed averages/stats', config.storedCars, config);
   console.log('');
-  console.log('Note: latest/debug files are overwritten every poll. analytics_summary.json is overwritten when new laps are stored. It contains averages/stats for stored cars and drivers, but not every individual lap again.');
+  console.log('Note: latest/debug/prediction files are overwritten every poll. analytics_summary.json is overwritten when new laps are stored. It contains averages/stats for stored cars and drivers, but not every individual lap again.');
   console.log('');
   console.log(`Total estimated stored data: ${formatBytes(totalStoredBytes)} (${totalStoredBytes.toLocaleString()} bytes)`);
 }

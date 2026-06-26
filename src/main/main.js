@@ -28,6 +28,7 @@ const {
   buildPitstopPlan,
   nextPitStateFromRow
 } = require('../shared/pitstopPlanner');
+const { buildLapPrediction } = require('../shared/lapPrediction');
 
 // Main-process references. Electron keeps UI windows and timers alive through
 // these variables, so every start/stop function below updates them carefully.
@@ -67,6 +68,7 @@ let collectorState = {
   snapshots: [],
   storage: {},
   analyticsSummary: null,
+  lapPrediction: null,
   pitstopPlan: null,
   storageSessionFolder: '',
   pollIntervalMs: 5000
@@ -513,6 +515,26 @@ function writeAnalyticsSummary(settings, context) {
   return summary;
 }
 
+// Builds and stores the current-lap prediction from live sectors plus completed
+// lap history. The renderer only displays this object; all prediction rules stay
+// in src/shared/lapPrediction.js where they are covered by focused tests.
+function writeLapPrediction(settings, context, rows) {
+  const folder = ensureStorage(settings);
+  const followedCarNumber = settings.followedCar || '';
+  const liveRow = (rows || []).find((row) => String(row.carNumber) === String(followedCarNumber));
+  const prediction = buildLapPrediction({
+    history: collectorState.lapHistory || [],
+    rows,
+    carNumber: followedCarNumber,
+    currentDriver: liveRow?.driver || liveRow?.driverName || '',
+    options: { sampleSize: 10 }
+  });
+  const payload = { ...prediction, updatedAt: context?.collectedAt || new Date().toISOString() };
+  fs.writeFileSync(path.join(folder, 'lap_prediction.json'), JSON.stringify(payload, null, 2));
+  collectorState.lapPrediction = payload;
+  return payload;
+}
+
 // Converts parser + storage context into a small debug object for disk/UI.
 function parserDebugFromNormalized(normalized, storageRows, context, lastError = '') {
   return {
@@ -644,8 +666,10 @@ async function pollLivePage() {
     const { storageRows, context } = saveLatestSnapshot(settings, normalized);
     const newLapCount = updateLapHistory(settings, storageRows);
     let analyticsSummary = collectorState.analyticsSummary;
+    let lapPrediction = collectorState.lapPrediction;
     let pitstopPlan = collectorState.pitstopPlan;
     try { analyticsSummary = writeAnalyticsSummary(settings, context); } catch (error) { addError(error, 'writeAnalyticsSummary'); }
+    try { lapPrediction = writeLapPrediction(settings, context, normalized.rows); } catch (error) { addError(error, 'writeLapPrediction'); }
     try { pitstopPlan = writePitstopPlan(settings, context, normalized.rows); } catch (error) { addError(error, 'writePitstopPlan'); }
     collectorState = {
       ...collectorState,
@@ -653,7 +677,7 @@ async function pollLivePage() {
       status: normalized.status,
       message: newLapCount ? `${normalized.message} Stored ${newLapCount} new completed lap(s).` : normalized.message,
       lastSuccessAt: new Date().toISOString(), headers: normalized.headers, rows: normalized.rows, session: normalized.session, diagnostics: normalized.diagnostics,
-      storage: storageInfo(settings), analyticsSummary, pitstopPlan, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS),
+      storage: storageInfo(settings), analyticsSummary, lapPrediction, pitstopPlan, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS),
       snapshots: [{ at: new Date().toISOString(), checksum: hashObject(normalized.rows), rowCount: normalized.rows.length, newLapCount }, ...collectorState.snapshots].slice(0, 20)
     };
   } catch (error) {
@@ -677,6 +701,7 @@ function storageInfo(settings) {
     parserDebugJson: path.join(folder, 'parser_debug.json'),
     sessionMetadataJson: path.join(folder, 'session_metadata.json'),
     analyticsSummaryJson: path.join(folder, 'analytics_summary.json'),
+    lapPredictionJson: path.join(folder, 'lap_prediction.json'),
     pitstopPlanJson: path.join(folder, 'pitstop_plan.json')
   };
 }
@@ -690,7 +715,7 @@ async function startCollector(url) {
   const startedAt = new Date().toISOString();
   const storageSessionFolder = createStorageSessionFolder(settings, url, startedAt);
   latestPitStateByCar.clear();
-  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, pitstopPlan: null, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
+  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, lapPrediction: null, pitstopPlan: null, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
   collectorState = { ...collectorState, lapHistory: loadExistingHistory(settings), storage: storageInfo(settings) };
   broadcastState();
   try {
