@@ -574,7 +574,6 @@ function syncSetupFromMain() {
 
 async function editReferenceTime(button) {
   const key = button?.dataset?.refKey;
-  const label = button?.dataset?.refLabel || 'reference time';
   const inputByKey = {
     lapMs: 'reference-lap-ms',
     sector1Ms: 'reference-sector1-ms',
@@ -582,17 +581,47 @@ async function editReferenceTime(button) {
     sector3Ms: 'reference-sector3-ms'
   };
   if (!key || !inputByKey[key]) return;
+  const card = button.closest('.metric-box');
+  if (!card || card.querySelector('.ref-edit-input')) return;
   const currentMs = msFromHiddenInput(inputByKey[key]);
-  const answer = prompt(`Enter ${label}`, Number.isFinite(currentMs) ? formatMs(currentMs) : '');
-  if (answer === null) return;
-  const parsed = parseDashboardTimeToMs(answer);
-  if (parsed === null) {
-    alert('Please enter a time like 2:04.500, 124.500, or 41.2');
-    return;
-  }
-  setHiddenMs(inputByKey[key], parsed);
-  await saveSettingsFromInputs();
-  render(currentState);
+  const editor = document.createElement('input');
+  editor.className = 'ref-edit-input';
+  editor.type = 'text';
+  editor.value = Number.isFinite(currentMs) ? formatMs(currentMs) : '';
+  editor.placeholder = '2:04.500';
+  card.appendChild(editor);
+  editor.focus();
+  editor.select();
+
+  let finished = false;
+  const close = () => {
+    if (editor.parentElement) editor.parentElement.removeChild(editor);
+  };
+  const commit = async () => {
+    if (finished) return;
+    finished = true;
+    const parsed = parseDashboardTimeToMs(editor.value);
+    if (parsed === null) {
+      alert('Please enter a time like 2:04.500, 124.500, or 41.2');
+      finished = false;
+      editor.focus();
+      editor.select();
+      return;
+    }
+    setHiddenMs(inputByKey[key], parsed);
+    close();
+    await saveSettingsFromInputs();
+    render(currentState);
+  };
+
+  editor.addEventListener('keydown', async (event) => {
+    if (event.key === 'Enter') await commit();
+    if (event.key === 'Escape') {
+      finished = true;
+      close();
+    }
+  });
+  editor.addEventListener('blur', commit);
 }
 
 // Copies visible setup modal values back into the hidden dashboard inputs used

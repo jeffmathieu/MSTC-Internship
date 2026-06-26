@@ -35,17 +35,34 @@ class FakeElement {
     this.offsetWidth = 100;
     this.style = {};
   }
+  set className(value) {
+    this._className = String(value || '');
+    this._className.split(/\s+/).filter(Boolean).forEach((name) => this.classList.add(name));
+  }
+  get className() { return this._className || ''; }
   appendChild(child) {
     child.parentElement = this;
     this.children.push(child);
     return child;
   }
+  removeChild(child) {
+    this.children = this.children.filter((candidate) => candidate !== child);
+    child.parentElement = null;
+    return child;
+  }
   addEventListener(event, callback) {
     this.listeners[event] = callback;
   }
-  async trigger(event) {
-    if (this.listeners[event]) await this.listeners[event]({ target: this });
+  async trigger(event, extra = {}) {
+    if (this.listeners[event]) await this.listeners[event]({ target: this, ...extra });
   }
+  querySelector(selector) {
+    if (!selector.startsWith('.')) return null;
+    const className = selector.slice(1);
+    return this.children.find((child) => child.classList.contains(className)) || null;
+  }
+  focus() {}
+  select() {}
   closest(selector) {
     if (selector !== '.metric-box') return null;
     let node = this;
@@ -91,6 +108,11 @@ function createFakeDocument() {
   Object.entries(metricChildren).forEach(([childId, parentId]) => {
     byId(childId).parentElement = byId(parentId);
   });
+  const editReferenceLap = new FakeElement('edit-reference-lap', 'button');
+  editReferenceLap.dataset = { refKey: 'lapMs', refLabel: 'reference lap time' };
+  editReferenceLap.classList.add('edit-ref');
+  byId('reference-lap-card').appendChild(editReferenceLap);
+  elements.set('edit-reference-lap', editReferenceLap);
 
   const tableBodies = new Map([
     ['#cars-table tbody', new FakeElement('cars-table-body', 'tbody')],
@@ -104,7 +126,7 @@ function createFakeDocument() {
     getElementById: byId,
     createElement: (tagName) => new FakeElement('', tagName),
     querySelector: (selector) => tableBodies.has(selector) ? tableBodies.get(selector) : null,
-    querySelectorAll: () => []
+    querySelectorAll: (selector) => selector === '.edit-ref' ? [editReferenceLap] : []
   };
 }
 
@@ -268,6 +290,15 @@ module.exports = (async () => {
   assert.ok(document.getElementById('predicted-lap-card').classList.contains('norm-bad'));
   assert.strictEqual(document.getElementById('ref-sector-2-delta').textContent, 'Last -0.500s · Best -0.500s');
   assert.ok(document.getElementById('ref-sector2-card').classList.contains('norm-bad'));
+
+  await document.getElementById('edit-reference-lap').trigger('click');
+  const refEditor = document.getElementById('reference-lap-card').querySelector('.ref-edit-input');
+  assert.ok(refEditor, 'clicking the pen opens an inline reference editor');
+  refEditor.value = '2:06.000';
+  await refEditor.trigger('blur');
+  await flushAsync();
+  assert.strictEqual(lastSettingsPatch.referenceTimes.lapMs, 126000);
+
   assert.strictEqual(document.getElementById('best-d1-a').textContent, '2:03.000');
   assert.strictEqual(document.getElementById('last-d2').textContent, '2:06.500');
   assert.strictEqual(document.getElementById('delta-best-last').textContent, '-3.500s');

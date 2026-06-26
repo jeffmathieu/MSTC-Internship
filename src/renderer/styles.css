@@ -7,7 +7,7 @@
   --soft-line: #d8d8d2;
   --green: #1e9f67;
   --red: #d94c62;
-  --orange: #e2a93b;
+  --orange: #f2b100;
   --blue: #315fc7;
 }
 
@@ -128,8 +128,24 @@ button.primary { background: var(--ink); color: white; }
   color: var(--muted);
   font-size: 13px;
   line-height: 1;
+  transform: scaleY(-1);
 }
 .edit-ref:hover { border-color: var(--line); color: var(--ink); }
+.ref-edit-input {
+  position: absolute;
+  left: 12px;
+  right: 34px;
+  bottom: 10px;
+  width: auto;
+  height: 34px;
+  padding: 4px 8px;
+  border: 2px solid var(--line);
+  background: white;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 900;
+  z-index: 2;
+}
 .norm-card.norm-good { border-color: var(--green); box-shadow: 0 0 0 3px rgba(30,159,103,.14); }
 .norm-card.norm-warn { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(226,169,59,.18); }
 .norm-card.norm-bad { border-color: var(--red); box-shadow: 0 0 0 3px rgba(217,76,98,.17); }
