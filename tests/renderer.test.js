@@ -242,8 +242,7 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('delta-xic').textContent, '+0:01.000');
   assert.ok(document.getElementById('delta-xic-card').classList.contains('good'));
   assert.strictEqual(document.getElementById('pit-status').textContent, 'Pit window open');
-  assert.strictEqual(document.getElementById('pit-completed').textContent, '1');
-  assert.strictEqual(document.getElementById('pit-required').textContent, '2');
+  assert.strictEqual(document.getElementById('pit-stops-summary').textContent, '1/2');
   assert.strictEqual(document.getElementById('pit-next').textContent, 'Now');
   assert.ok(document.getElementById('pit-projection').textContent.includes('PIC 2'));
 

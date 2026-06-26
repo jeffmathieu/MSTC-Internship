@@ -285,8 +285,13 @@ function renderDriverAndClassComparisons(summary, rows) {
 function projectionLabel(projection) {
   if (!projection?.available) return projection?.reason || 'Waiting for class gaps';
   const position = projection.projectedClassPosition ? `PIC ${projection.projectedClassPosition}` : 'PIC ?';
-  const behind = projection.carAhead ? `${displayDelta(Math.abs(projection.carAhead.projectedGapToUsMs))} behind #${projection.carAhead.carNumber}` : 'class lead';
-  const ahead = projection.carBehind ? `${displayDelta(Math.abs(projection.carBehind.projectedGapToUsMs))} ahead #${projection.carBehind.carNumber}` : 'no car behind';
+  const gapLabel = (item) => {
+    if (!item) return '';
+    if (Number.isFinite(item.lapDeltaToUs) && item.lapDeltaToUs !== 0) return `${Math.abs(item.lapDeltaToUs)}L`;
+    return displayDelta(Math.abs(item.projectedGapToUsMs));
+  };
+  const behind = projection.carAhead ? `${gapLabel(projection.carAhead)} behind #${projection.carAhead.carNumber}` : 'class lead';
+  const ahead = projection.carBehind ? `${gapLabel(projection.carBehind)} ahead #${projection.carBehind.carNumber}` : 'no car behind';
   return `${position} · ${behind} · ${ahead}`;
 }
 
@@ -296,21 +301,20 @@ function renderPitstopPlan(plan) {
     setText('pit-status', 'Waiting');
     setText('pit-next', '—');
     setText('pit-projection', '—');
-    setText('pit-completed', '0');
-    setText('pit-required', $('pit-required-input')?.value || '2');
+    setText('pit-stops-summary', `0/${$('pit-required-input')?.value || '2'}`);
     setText('pit-detail', 'Waiting for race clock and class gaps.');
     if (pitWindow) pitWindow.classList.remove('open', 'soon', 'closed', 'urgent');
     return;
   }
 
   setText('pit-status', plan.label || plan.status);
-  setText('pit-completed', plan.completedPitStops);
-  setText('pit-required', plan.rules?.requiredPitStops ?? $('pit-required-input')?.value ?? '2');
+  setText('pit-stops-summary', `${plan.completedPitStops}/${plan.rules?.requiredPitStops ?? $('pit-required-input')?.value ?? '2'}`);
   setText('pit-next', plan.canPitNow ? 'Now' : (Number.isFinite(plan.waitMs) ? pitstopPlanner.formatDuration(plan.waitMs) : 'Closed'));
   setText('pit-projection', projectionLabel(plan.projection));
   const detailParts = [
     Number.isFinite(plan.clock?.elapsedMs) ? `Elapsed ${pitstopPlanner.formatDuration(plan.clock.elapsedMs)}` : '',
     Number.isFinite(plan.clock?.remainingMs) ? `remaining ${pitstopPlanner.formatDuration(plan.clock.remainingMs)}` : '',
+    Number.isFinite(plan.totalPitStops) && plan.totalPitStops !== plan.completedPitStops ? `total pits ${plan.totalPitStops}, valid ${plan.completedPitStops}` : '',
     Number.isFinite(plan.mustPitSoonMs) ? `latest safe stop in ${pitstopPlanner.formatDuration(plan.mustPitSoonMs)}` : '',
     `pit loss ${pitstopPlanner.formatDuration(plan.rules?.pitStopDurationMs)}`
   ].filter(Boolean);

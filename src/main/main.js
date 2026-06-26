@@ -25,8 +25,8 @@ const {
 } = require('../shared/lapAnalytics');
 const {
   DEFAULT_RULES: DEFAULT_PIT_RULES,
-  pitCountFromRow,
-  buildPitstopPlan
+  buildPitstopPlan,
+  nextPitStateFromRow
 } = require('../shared/pitstopPlanner');
 
 // Main-process references. Electron keeps UI windows and timers alive through
@@ -337,30 +337,17 @@ function averageLapForPitPlan(settings) {
 function updatePitState(settings, rows, context) {
   const followedCar = String(settings.followedCar || '');
   const row = (rows || []).find((candidate) => String(candidate.carNumber) === followedCar);
-  if (!followedCar || !row) return latestPitStateByCar.get(followedCar) || { completedPitStops: 0 };
+  if (!followedCar || !row) return latestPitStateByCar.get(followedCar) || { completedPitStops: 0, validCompletedPitStops: 0 };
 
-  const previous = latestPitStateByCar.get(followedCar) || { completedPitStops: 0, lastPitAt: '', lastPitElapsedMs: null };
-  const nextCount = pitCountFromRow(row);
-  const completedPitStops = Math.max(previous.completedPitStops || 0, nextCount);
-  const clock = buildPitstopPlan({
-    rows,
+  const previous = latestPitStateByCar.get(followedCar) || { completedPitStops: 0, validCompletedPitStops: 0, rawPitCount: null, lastPitAt: '', lastPitElapsedMs: null };
+  const next = nextPitStateFromRow({
+    previous,
+    row,
     session: context?.session || {},
-    followedCarNumber: followedCar,
-    pitState: previous,
-    rules: settings.pitRules
-  }).clock;
-
-  const pitCountIncreased = nextCount > (previous.rawPitCount || 0);
-  const next = {
-    ...previous,
-    completedPitStops,
-    rawPitCount: nextCount,
-    averageLapMs: averageLapForPitPlan(settings)
-  };
-  if (pitCountIncreased) {
-    next.lastPitAt = context?.collectedAt || new Date().toISOString();
-    next.lastPitElapsedMs = clock.elapsedMs;
-  }
+    rules: settings.pitRules,
+    averageLapMs: averageLapForPitPlan(settings),
+    collectedAt: context?.collectedAt || new Date().toISOString()
+  });
   latestPitStateByCar.set(followedCar, next);
   return next;
 }

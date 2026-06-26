@@ -103,6 +103,43 @@ function pitCountFromRow(row = {}) {
   return 0;
 }
 
+function nextPitStateFromRow({ previous = {}, row = {}, session = {}, rules = {}, averageLapMs = null, collectedAt = '' } = {}) {
+  const normalizedRules = normalizeRules(rules);
+  const previousState = {
+    completedPitStops: 0,
+    validCompletedPitStops: 0,
+    rawPitCount: null,
+    lastPitAt: '',
+    lastPitElapsedMs: null,
+    ...previous
+  };
+  const nextCount = pitCountFromRow(row);
+  const completedPitStops = Math.max(previousState.completedPitStops || 0, nextCount);
+  const clock = raceClockFromSession(session, normalizedRules);
+  const windowAtPit = timeUntilNextAllowedPit({ clock, rules: normalizedRules, pitState: previousState });
+  const isFirstPitSample = previousState.rawPitCount === null || previousState.rawPitCount === undefined;
+  const pitCountIncreased = !isFirstPitSample && nextCount > (previousState.rawPitCount || 0);
+  // Existing stops that are already present on the first sample are accepted as
+  // baseline stops because the app cannot reconstruct when they happened. Every
+  // new increase after that must happen in a green/open window to count.
+  const baselineValidPitStops = isFirstPitSample ? nextCount : (previousState.validCompletedPitStops || 0);
+  const validIncrement = pitCountIncreased && windowAtPit.allowed ? nextCount - (previousState.rawPitCount || 0) : 0;
+  const next = {
+    ...previousState,
+    completedPitStops,
+    validCompletedPitStops: Math.min(completedPitStops, baselineValidPitStops + validIncrement),
+    rawPitCount: nextCount,
+    averageLapMs: numberOrNull(averageLapMs)
+  };
+  if (pitCountIncreased) {
+    next.lastPitAt = collectedAt || new Date().toISOString();
+    next.lastPitElapsedMs = clock.elapsedMs;
+    next.lastPitCountedAsValid = windowAtPit.allowed;
+    next.lastPitValidityReason = windowAtPit.allowed ? 'Pitstop counted: pit window was open.' : `Pitstop not counted: ${windowAtPit.reason}.`;
+  }
+  return next;
+}
+
 function lapNumber(row = {}) {
   const n = Number(row.lapNumber);
   return Number.isFinite(n) ? n : null;
@@ -133,6 +170,17 @@ function intervalForRow(row) {
   return parseGapToMs(row.interval) ?? parseGapToMs(row.diff) ?? parseGapToMs(row.gap);
 }
 
+function estimateAverageLapMs(rows, fallback = null) {
+  const explicit = numberOrNull(fallback);
+  if (explicit !== null) return explicit;
+  const lapTimes = (rows || [])
+    .map((row) => numberOrNull(row.lastLapMs) ?? parseTimeToMs(row.lastLap))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => a - b);
+  if (!lapTimes.length) return null;
+  return lapTimes[Math.floor(lapTimes.length / 2)];
+}
+
 function relativeGapsFromClassIntervals(rowsInClass) {
   let totalMs = 0;
   let reliable = true;
@@ -149,29 +197,49 @@ function relativeGapsFromClassIntervals(rowsInClass) {
   });
 }
 
-function projectClassAfterPit(rows, followedCarNumber, pitLossMs) {
+function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) {
   const { followed, rows: rowsInClass } = classRows(rows, followedCarNumber);
   if (!followed || !rowsInClass.length) return { available: false, reason: 'No class data yet', items: [] };
   const relative = relativeGapsFromClassIntervals(rowsInClass);
   const our = relative.find((item) => String(item.row.carNumber) === String(followedCarNumber));
-  if (!our || !Number.isFinite(our.gapToClassLeaderMs)) {
-    return { available: false, reason: 'Class gaps are not reliable yet', items: [] };
+  const averageLapMs = estimateAverageLapMs(rowsInClass, options.averageLapMs);
+  const ourLap = lapNumber(followed);
+  const canUseLapAwareProjection = Number.isFinite(averageLapMs) && Number.isFinite(ourLap);
+
+  if ((!our || !Number.isFinite(our.gapToClassLeaderMs)) && !canUseLapAwareProjection) {
+    return { available: false, reason: 'Class gaps/laps are not reliable yet', items: [] };
   }
 
-  const projectedOurGapMs = our.gapToClassLeaderMs + pitLossMs;
+  const scoreFor = (item, extraLossMs = 0) => {
+    const lap = lapNumber(item.row);
+    if (canUseLapAwareProjection && Number.isFinite(lap)) {
+      const knownGapMs = Number.isFinite(item.gapToClassLeaderMs) ? item.gapToClassLeaderMs : 0;
+      return (lap * averageLapMs) - knownGapMs - extraLossMs;
+    }
+    if (Number.isFinite(item.gapToClassLeaderMs)) return -item.gapToClassLeaderMs - extraLossMs;
+    return null;
+  };
+
+  const ourScore = scoreFor(our, pitLossMs);
+  if (!Number.isFinite(ourScore)) return { available: false, reason: 'Our projected race distance is not reliable yet', items: [] };
+
   const projected = relative
-    .filter((item) => Number.isFinite(item.gapToClassLeaderMs))
     .map((item) => {
       const isOurCar = String(item.row.carNumber) === String(followedCarNumber);
+      const score = isOurCar ? ourScore : scoreFor(item, 0);
+      if (!Number.isFinite(score)) return null;
+      const lapDeltaToUs = Number.isFinite(lapNumber(item.row)) && Number.isFinite(ourLap) ? lapNumber(item.row) - ourLap : null;
       return {
         carNumber: String(item.row.carNumber),
         team: item.row.team || '',
         driver: item.row.driver || '',
         currentClassPosition: item.row.classPosition || null,
-        projectedGapToUsMs: isOurCar ? 0 : item.gapToClassLeaderMs - projectedOurGapMs,
+        lapDeltaToUs,
+        projectedGapToUsMs: isOurCar ? 0 : ourScore - score,
         isOurCar
       };
     })
+    .filter(Boolean)
     .sort((a, b) => a.projectedGapToUsMs - b.projectedGapToUsMs);
 
   const ourProjectedIndex = projected.findIndex((item) => item.isOurCar);
@@ -181,7 +249,7 @@ function projectClassAfterPit(rows, followedCarNumber, pitLossMs) {
   return {
     available: true,
     projectedClassPosition: ourProjectedIndex >= 0 ? ourProjectedIndex + 1 : null,
-    projectedOurGapMs,
+    averageLapMs,
     carAhead,
     carBehind,
     items: projected
@@ -210,7 +278,7 @@ function timeUntilNextAllowedPit({ clock, rules, pitState = {} }) {
 
 function latestSafePitElapsedMsForRemainingStops({ clock, rules, pitState = {} }) {
   if (clock.elapsedMs === null || clock.remainingMs === null) return null;
-  const completed = Math.max(0, Number(pitState.completedPitStops) || 0);
+  const completed = Math.max(0, Number(pitState.validCompletedPitStops ?? pitState.completedPitStops) || 0);
   const remainingStops = Math.max(0, rules.requiredPitStops - completed);
   if (remainingStops <= 0) return clock.raceDurationMs - rules.pitClosedEndMs;
   return clock.raceDurationMs - rules.pitClosedEndMs - ((remainingStops - 1) * rules.pitCooldownMs);
@@ -220,7 +288,8 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
   const normalizedRules = normalizeRules(rules);
   const clock = raceClockFromSession(session, normalizedRules);
   const windowState = timeUntilNextAllowedPit({ clock, rules: normalizedRules, pitState });
-  const completedPitStops = Math.max(0, Number(pitState.completedPitStops) || 0);
+  const totalPitStops = Math.max(0, Number(pitState.completedPitStops) || 0);
+  const completedPitStops = Math.max(0, Number(pitState.validCompletedPitStops ?? pitState.completedPitStops) || 0);
   const remainingRequiredStops = Math.max(0, normalizedRules.requiredPitStops - completedPitStops);
   const averageLapMs = normalizedRules.averageLapMs || numberOrNull(pitState.averageLapMs);
   const nearWindowMs = averageLapMs ? averageLapMs * normalizedRules.nearWindowLaps : null;
@@ -228,7 +297,7 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
   const latestSafePitElapsedMs = latestSafePitElapsedMsForRemainingStops({ clock, rules: normalizedRules, pitState });
   const mustPitSoonMs = latestSafePitElapsedMs !== null && clock.elapsedMs !== null ? latestSafePitElapsedMs - clock.elapsedMs : null;
   const isStrategyUrgent = remainingRequiredStops > 0 && Number.isFinite(mustPitSoonMs) && mustPitSoonMs <= 0;
-  const projection = projectClassAfterPit(rows, followedCarNumber, normalizedRules.pitStopDurationMs);
+  const projection = projectClassAfterPit(rows, followedCarNumber, normalizedRules.pitStopDurationMs, { averageLapMs });
 
   let status = 'unknown';
   if (isStrategyUrgent) status = 'urgent';
@@ -253,6 +322,7 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
     isNearlyOpen,
     waitMs: windowState.waitMs,
     completedPitStops,
+    totalPitStops,
     remainingRequiredStops,
     latestSafePitElapsedMs,
     mustPitSoonMs,
@@ -267,6 +337,8 @@ return {
   parseTimeToMs,
   formatDuration,
   pitCountFromRow,
+  nextPitStateFromRow,
+  estimateAverageLapMs,
   raceClockFromSession,
   projectClassAfterPit,
   timeUntilNextAllowedPit,
