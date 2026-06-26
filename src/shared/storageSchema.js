@@ -50,22 +50,30 @@ const LAP_HISTORY_COLUMNS = [
   'sector3Eligible'
 ];
 
+// Converts any stored/exported field to the string form used in CSV and JSONL.
+// Empty string is the canonical "missing" value in storage files.
 function normalizeStorageField(value) {
   if (value === null || value === undefined) return '';
   return String(value).trim();
 }
 
+// Parses a timing string and stores milliseconds as a string. CSV consumers then
+// see one consistent numeric representation independent of provider formatting.
 function normalizeMsField(value) {
   const ms = parseLapTimeToMs(value);
   return ms === null || ms === undefined ? '' : String(ms);
 }
 
+// Escapes one CSV cell. Keep this tiny and dependency-free because export code
+// uses it frequently during live polling.
 function csvEscape(value) {
   const s = normalizeStorageField(value);
   if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
 
+// Serializes rows to CSV with a stable column order. Pass LAP_HISTORY_COLUMNS
+// when writing completed-lap history.
 function toCsvRows(rows, columns = NORMALIZED_ROW_COLUMNS) {
   return [
     columns.join(','),
@@ -73,6 +81,8 @@ function toCsvRows(rows, columns = NORMALIZED_ROW_COLUMNS) {
   ].join('\n');
 }
 
+// Labels data with the timing provider. Add new providers here when the parser
+// gains support for another timing website.
 function detectSourceProvider(context = {}) {
   if (context.sourceProvider) return context.sourceProvider;
   const url = String(context.timingUrl || '').toLowerCase();
@@ -81,6 +91,8 @@ function detectSourceProvider(context = {}) {
   return 'unknown';
 }
 
+// Reads the first non-empty value from a row. This lets provider adapters use
+// aliases such as team/teamName without duplicating mapping code.
 function valueAt(row, ...keys) {
   for (const key of keys) {
     if (row && row[key] !== null && row[key] !== undefined && row[key] !== '') return row[key];
@@ -88,11 +100,14 @@ function valueAt(row, ...keys) {
   return '';
 }
 
+// Picks the best available session label for storage metadata.
 function normalizedSessionName(context = {}) {
   const session = context.session || {};
   return normalizeStorageField(session.sessionName || session.statusText || session.pageTitle || context.sessionName || '');
 }
 
+// Converts one parsed live row into the provider-independent latest-row schema.
+// All exported latest_live_rows files should pass through this function first.
 function normalizeForStorage(row, context = {}) {
   const raw = row?.raw && typeof row.raw === 'object' ? row.raw : {};
   const normalized = {
@@ -142,6 +157,9 @@ function normalizeForStorage(row, context = {}) {
   return normalized;
 }
 
+// Converts a normalized live row into a completed lap record. The app stores lap
+// time strings and parsed millisecond values so humans and calculations can use
+// the same file.
 function lapRecordFromNormalizedRow(row) {
   return {
     ...row,
@@ -162,6 +180,9 @@ function lapRecordFromNormalizedRow(row) {
   };
 }
 
+// Builds a duplicate-detection key for completed laps. Lap number is preferred;
+// when missing, driver + last lap is the fallback because some providers do not
+// expose lap numbers reliably.
 function lapIdentity(row) {
   const base = [row.sourceProvider, row.timingUrl, row.sessionName, row.carNumber];
   if (row.lapNumber) return [...base, row.lapNumber, row.lastLap].join('|');

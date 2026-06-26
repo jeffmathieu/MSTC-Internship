@@ -326,6 +326,9 @@ function storageContext(settings, normalized, collectedAt = new Date().toISOStri
   };
 }
 
+// Chooses the best available lap average for pit projections. Current-stint pace
+// is preferred because it reflects the car/driver right now; full-car average is
+// the fallback while stint data is still building.
 function averageLapForPitPlan(settings) {
   const analysis = collectorState.analyticsSummary?.dashboardAnalysis;
   const fromCurrentStint = analysis?.classComparison?.ourCurrentStint?.averageLapMs;
@@ -334,6 +337,9 @@ function averageLapForPitPlan(settings) {
   return Number.isFinite(n) ? n : null;
 }
 
+// Maintains the in-memory pit state for the followed car. The shared planner
+// owns the rule for whether a new PIT-count increase is valid; main.js keeps the
+// resulting state between polls.
 function updatePitState(settings, rows, context) {
   const followedCar = String(settings.followedCar || '');
   const row = (rows || []).find((candidate) => String(candidate.carNumber) === followedCar);
@@ -352,6 +358,9 @@ function updatePitState(settings, rows, context) {
   return next;
 }
 
+// Builds and persists the pitstop plan after each successful poll. The renderer
+// receives this same object through collectorState, while pitstop_plan.json lets
+// external/debug tools inspect the current strategy state.
 function writePitstopPlan(settings, context, rows) {
   const folder = ensureStorage(settings);
   const pitState = updatePitState(settings, rows, context);
@@ -382,6 +391,9 @@ function writeLatestRows(settings, normalizedRows) {
   fs.writeFileSync(path.join(folder, 'latest_live_rows.csv'), toCsvRows(normalizedRows));
 }
 
+// Appends newly completed laps to JSONL and CSV. If the CSV header changed
+// between versions, it rewrites the CSV from JSONL so older stored data remains
+// readable after schema changes.
 function appendLapHistory(settings, lapRecords) {
   if (!lapRecords.length) return;
   const folder = ensureStorage(settings);
@@ -406,11 +418,16 @@ function appendLapHistory(settings, lapRecords) {
   if (!rewroteCsv && currentHeader === expectedHeader) fs.appendFileSync(csvPath, lapRecords.map((entry) => toCsvRows([entry], LAP_HISTORY_COLUMNS).split('\n')[1]).join('\n') + '\n');
 }
 
+// Stores parser diagnostics that explain which timing table was selected and
+// how rows were normalized. Inspect this first when a timing provider changes
+// its HTML/column names.
 function writeParserDebug(settings, debugInfo) {
   const folder = ensureStorage(settings);
   fs.writeFileSync(path.join(folder, 'parser_debug.json'), JSON.stringify(debugInfo, null, 2));
 }
 
+// Writes session-level metadata beside the latest rows/history so every session
+// folder is self-describing.
 function writeSessionMetadata(settings, context) {
   const folder = ensureStorage(settings);
   fs.writeFileSync(path.join(folder, 'session_metadata.json'), JSON.stringify({
@@ -426,12 +443,15 @@ function writeSessionMetadata(settings, context) {
   }, null, 2));
 }
 
+// Removes heavy raw lap arrays before writing analytics_summary.json. Full lap
+// history stays in lap_history.jsonl; dashboard summaries only need aggregates.
 function compactStats(stats) {
   if (!stats) return null;
   const { laps, ...compact } = stats;
   return compact;
 }
 
+// Compacts nested dashboard analysis for the renderer/storage summary.
 function compactDashboardAnalysis(analysis) {
   if (!analysis) return null;
   return {
@@ -451,6 +471,8 @@ function compactDashboardAnalysis(analysis) {
   };
 }
 
+// Rebuilds all aggregate analytics from stored lap history. This runs after
+// every poll, but the output stays compact enough for renderer state and disk.
 function buildAnalyticsSummary(settings, context) {
   const history = collectorState.lapHistory || [];
   const laps = completedLaps(history);
@@ -482,6 +504,7 @@ function buildAnalyticsSummary(settings, context) {
   };
 }
 
+// Writes analytics_summary.json and mirrors it into collectorState for the UI.
 function writeAnalyticsSummary(settings, context) {
   const folder = ensureStorage(settings);
   const summary = buildAnalyticsSummary(settings, context);
@@ -490,6 +513,7 @@ function writeAnalyticsSummary(settings, context) {
   return summary;
 }
 
+// Converts parser + storage context into a small debug object for disk/UI.
 function parserDebugFromNormalized(normalized, storageRows, context, lastError = '') {
   return {
     timingUrl: context.timingUrl || '',
@@ -529,6 +553,8 @@ function liveRowKey(row) {
   return [row.sourceProvider, row.timingUrl, row.sessionName, row.carNumber].join('|');
 }
 
+// Clears live sector fields when the previous row is unavailable. This avoids
+// assigning current in-progress sectors to a completed lap with no evidence.
 function withoutCurrentSectors(row) {
   return {
     ...row,
@@ -544,6 +570,9 @@ function withoutCurrentSectors(row) {
   };
 }
 
+// Builds the completed-lap row from the newly changed LAST value. The previous
+// live row carries the sector values for that lap because live timing sector
+// columns normally describe the lap currently being driven.
 function completedLapRowFromLiveRow(row, previousRow) {
   if (!previousRow) return withoutCurrentSectors(row);
   return {
@@ -588,6 +617,8 @@ function updateLapHistory(settings, storageRows) {
 // Writes the latest table/session snapshot to predictable filenames. These files
 // are overwritten on every successful poll/tick so external tools can read the
 // current state without searching for timestamps.
+// It returns both storage rows and context because history/analytics/pit logic
+// all need to use the exact same timestamp/session metadata.
 function saveLatestSnapshot(settings, normalized) {
   try {
     const collectedAt = new Date().toISOString();

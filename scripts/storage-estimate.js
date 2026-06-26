@@ -41,10 +41,14 @@ function lapsPerCar({ raceHours, averageLapSeconds }) {
   return Math.floor((raceHours * 60 * 60) / averageLapSeconds);
 }
 
+// Poll count estimates how often latest/debug files are overwritten. It does
+// not multiply append-only lap history because completed laps are only stored
+// once per car/lap.
 function pollCount({ raceHours, pollIntervalSeconds }) {
   return Math.ceil((raceHours * 60 * 60) / pollIntervalSeconds);
 }
 
+// Estimates append-only storage for completed lap history.
 function bytesForScenario(carCount, lapsEach, config = CONFIG) {
   const lapRecords = carCount * lapsEach;
   const csvBytes = config.overheadBytesPerFile + lapRecords * config.csvBytesPerLap;
@@ -58,6 +62,8 @@ function bytesForScenario(carCount, lapsEach, config = CONFIG) {
   };
 }
 
+// Estimates files that are overwritten during the race. These do not grow with
+// poll count, but they do matter for total session folder size.
 function latestSnapshotBytes(carCount, config = CONFIG) {
   const latestCsvBytes = config.overheadBytesPerFile + carCount * config.csvBytesPerLap;
   const latestJsonBytes = config.overheadBytesPerFile + carCount * config.latestJsonBytesPerCar;
@@ -74,6 +80,8 @@ function latestSnapshotBytes(carCount, config = CONFIG) {
   };
 }
 
+// Estimates analytics_summary.json size. It stores aggregates for cars/drivers,
+// not every individual lap again.
 function analyticsSummarySizeBytes(carCount, config = CONFIG) {
   const driverCount = Math.ceil(carCount * config.averageDriversPerCar);
   return config.analyticsSummaryBaseBytes
@@ -81,6 +89,7 @@ function analyticsSummarySizeBytes(carCount, config = CONFIG) {
     + driverCount * config.analyticsSummaryBytesPerDriver;
 }
 
+// Breaks analytics estimate into parts so CONFIG can be tuned from real files.
 function analyticsSummaryBreakdown(carCount, config = CONFIG) {
   const driverCount = Math.ceil(carCount * config.averageDriversPerCar);
   const baseBytes = config.analyticsSummaryBaseBytes;
@@ -96,6 +105,7 @@ function analyticsSummaryBreakdown(carCount, config = CONFIG) {
   };
 }
 
+// Human-readable byte formatting for command output.
 function formatBytes(bytes) {
   const units = ['B', 'KB', 'MB', 'GB'];
   let value = bytes;
@@ -107,20 +117,25 @@ function formatBytes(bytes) {
   return `${value.toFixed(value >= 10 || unit === 0 ? 1 : 2)} ${units[unit]}`;
 }
 
+// Prints one append-only history scenario line.
 function printScenario(label, result) {
   console.log(`${label.padEnd(24)} cars=${String(result.carCount).padStart(2)} laps=${String(result.lapRecords).padStart(6)} CSV=${formatBytes(result.csvBytes).padStart(9)} JSONL=${formatBytes(result.jsonlBytes).padStart(9)} total=${formatBytes(result.totalBytes).padStart(9)}`);
 }
 
+// Prints one overwritten/latest-files scenario line.
 function printLatestScenario(label, carCount, config) {
   const result = latestSnapshotBytes(carCount, config);
   console.log(`${label.padEnd(24)} cars=${String(carCount).padStart(2)} latestCSV=${formatBytes(result.latestCsvBytes).padStart(9)} latestJSON=${formatBytes(result.latestJsonBytes).padStart(9)} debug=${formatBytes(result.parserDebugBytes).padStart(9)} analytics=${formatBytes(result.analyticsSummaryBytes).padStart(9)} total=${formatBytes(result.totalBytes).padStart(9)}`);
 }
 
+// Prints analytics-summary details so driver-count assumptions are visible.
 function printAnalyticsBreakdown(label, carCount, config) {
   const result = analyticsSummaryBreakdown(carCount, config);
   console.log(`${label.padEnd(24)} cars=${String(result.carCount).padStart(2)} drivers=${String(result.driverCount).padStart(3)} base=${formatBytes(result.baseBytes).padStart(8)} carStats=${formatBytes(result.carStatsBytes).padStart(9)} driverStats=${formatBytes(result.driverStatsBytes).padStart(9)} total=${formatBytes(result.totalBytes).padStart(9)}`);
 }
 
+// CLI entry point. Tests call this with injected config; normal users edit
+// CONFIG and run the script directly.
 function main(config = CONFIG) {
   const lapsEach = lapsPerCar(config);
   const polls = pollCount(config);

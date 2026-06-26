@@ -12,39 +12,52 @@
 // older in-memory fields (driver, team, lastLapMs), so existing dashboard state
 // and future storage exports can use the same calculations.
 
+// Safely reads numeric storage values. Empty strings are common in CSV/JSONL
+// exports and must mean "missing", not zero.
 function numberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
+// Averages only valid numeric values. Returning null makes the UI show "—" until
+// there is enough usable race data.
 function average(values) {
   const usable = values.map(numberOrNull).filter((value) => value !== null);
   if (!usable.length) return null;
   return usable.reduce((sum, value) => sum + value, 0) / usable.length;
 }
 
+// Finds the minimum valid value for best laps/sectors.
 function min(values) {
   const usable = values.map(numberOrNull).filter((value) => value !== null);
   return usable.length ? Math.min(...usable) : null;
 }
 
+// Reads booleans stored as booleans, numbers, or CSV strings.
 function boolOrNull(value) {
   if (value === true || value === 'true' || value === 1 || value === '1') return true;
   if (value === false || value === 'false' || value === 0 || value === '0') return false;
   return null;
 }
 
+// Detects race-control states where lap times should be stored but excluded
+// from pace averages.
 function isNeutralizedFlag(value) {
   const text = String(value || '').toLowerCase();
   return /safety\s*car|full\s*course\s*yellow|\bfcy\b|code\s*60|yellow/.test(text);
 }
 
+// Treats empty flags as green because most timing pages only show exceptional
+// states. Explicit sector/lap flags can still override this.
 function isGreenFlag(value) {
   const text = String(value || '').toLowerCase();
   return !text || /green/.test(text);
 }
 
+// Converts any saved lap-like object into the canonical analytics shape. This
+// keeps old exports, current memory state, and future storage schema changes
+// compatible with the same calculations.
 function normalizeLap(entry) {
   const lapTimeMs = numberOrNull(entry.lapTimeMs ?? entry.lastLapMs);
   const sessionFlag = String(entry.sessionFlag ?? entry.flagState ?? entry.lapFlag ?? '');
@@ -73,12 +86,17 @@ function normalizeLap(entry) {
   };
 }
 
+// Decides whether a full lap should count for lap-time pace statistics. Explicit
+// paceEligible fields win; otherwise neutralized race-control flags exclude it.
 function lapPaceEligible(lap) {
   const explicit = boolOrNull(lap.paceEligible);
   if (explicit !== null) return explicit;
   return !isNeutralizedFlag(lap.lapFlag || lap.sessionFlag);
 }
 
+// Decides whether one sector should count for sector averages/bests. This is
+// deliberately more granular than lapPaceEligible: a lap can become FCY in S3
+// while S1/S2 remain valid.
 function sectorPaceEligible(lap, sectorNumber) {
   const explicit = boolOrNull(lap[`sector${sectorNumber}Eligible`]);
   if (explicit !== null) return explicit;
@@ -92,6 +110,8 @@ function sectorPaceEligible(lap, sectorNumber) {
   return lapPaceEligible(lap);
 }
 
+// Returns all completed laps sorted chronologically enough for averages and
+// "last lap" values. Invalid/no-car rows are dropped here.
 function completedLaps(history) {
   return (history || [])
     .map(normalizeLap)
@@ -103,14 +123,18 @@ function completedLaps(history) {
     });
 }
 
+// Convenience filter for all completed laps of one car.
 function lapsForCar(history, carNumber) {
   return completedLaps(history).filter((lap) => lap.carNumber === String(carNumber));
 }
 
+// Convenience filter for one driver's laps in one car.
 function lapsForDriver(history, carNumber, driverName) {
   return lapsForCar(history, carNumber).filter((lap) => lap.driverName === driverName);
 }
 
+// Calculates all lap/sector statistics from a set of laps. Full-lap averages
+// use only pace-eligible laps; sector averages use sector-level eligibility.
 function statsForLaps(laps) {
   const sorted = [...laps].sort((a, b) => {
     const lapDelta = (a.lapNumber ?? 0) - (b.lapNumber ?? 0);
@@ -138,6 +162,7 @@ function statsForLaps(laps) {
   };
 }
 
+// Groups one car's laps by driver name and returns stats for each driver/stint.
 function driverStats(history, carNumber) {
   const groups = new Map();
   lapsForCar(history, carNumber).forEach((lap) => {
@@ -153,12 +178,16 @@ function driverStats(history, carNumber) {
   }));
 }
 
+// Chooses the current driver from the explicit live row when available, or from
+// the latest stored lap as a fallback.
 function currentDriverName(history, carNumber, explicitDriverName = '') {
   if (explicitDriverName) return explicitDriverName;
   const laps = lapsForCar(history, carNumber);
   return laps.length ? laps.at(-1).driverName : '';
 }
 
+// Finds the driver with the lowest average lap time in one car. This is used as
+// D1/reference driver in the dashboard comparison boxes.
 function bestDriverByAverage(history, carNumber) {
   return driverStats(history, carNumber)
     .filter((stats) => stats.averageLapMs !== null)
@@ -185,6 +214,8 @@ function compareBestDriverToCurrentDriver(history, carNumber, explicitCurrentDri
   };
 }
 
+// Returns aggregate pace statistics for one car, including class/team metadata
+// from its first stored lap.
 function carStats(history, carNumber) {
   const laps = lapsForCar(history, carNumber);
   const base = statsForLaps(laps);
@@ -196,17 +227,21 @@ function carStats(history, carNumber) {
   };
 }
 
+// Returns stats for every car with at least one completed lap in the class.
 function carsInClass(history, className) {
   const carNumbers = new Set(completedLaps(history).filter((lap) => lap.className === className).map((lap) => lap.carNumber));
   return [...carNumbers].map((carNumber) => carStats(history, carNumber));
 }
 
+// Finds the best-in-class car by average lap time.
 function bestCarInClassByAverage(history, className) {
   return carsInClass(history, className)
     .filter((stats) => stats.averageLapMs !== null)
     .sort((a, b) => a.averageLapMs - b.averageLapMs)[0] || null;
 }
 
+// Current stint is currently approximated as all laps for the active driver in
+// the car. If stint IDs become reliable later, narrow the filter here.
 function currentStintStats(history, carNumber, currentDriver = '') {
   const driver = currentDriverName(history, carNumber, currentDriver);
   return {
@@ -242,6 +277,8 @@ function compareCarToClassTargets(history, ourCarNumber, selectedCarNumber = '')
   };
 }
 
+// Builds the compact analytics object consumed by main.js/renderer. Keeping this
+// shape stable makes UI changes possible without touching calculation details.
 function buildDashboardAnalysis(history, options = {}) {
   const ourCarNumber = options.ourCarNumber || '';
   if (!ourCarNumber) return null;

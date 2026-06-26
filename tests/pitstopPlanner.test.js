@@ -30,6 +30,8 @@ const classRows = [
   { position: 3, classPosition: 3, carNumber: 56, className: 'CC', team: 'Chaser', lapNumber: 20, interval: '20.000' }
 ];
 
+// Parsing and formatting helpers: these protect the input/output contract used
+// by both the UI and the planner.
 assert.strictEqual(parseTimeToMs('1:35:00'), 5700000);
 assert.strictEqual(parseTimeToMs('55:54 / 1'), 3354000);
 assert.strictEqual(parseTimeToMs('90'), 90000);
@@ -45,6 +47,8 @@ assert.strictEqual(pitCountFromRow({ pit: '--' }), 0);
 assert.strictEqual(estimateAverageLapMs([{ lastLap: '2:06.000' }, { lastLapMs: 124000 }, { lastLap: '2:05.000' }]), 125000);
 assert.strictEqual(estimateAverageLapMs([{ lastLap: '--' }, { lastLapMs: 0 }]), null);
 
+// Existing pit count on the first app sample is accepted as baseline because
+// the app cannot know when that stop happened before it started.
 const baselinePitState = nextPitStateFromRow({
   previous: {},
   row: { pit: 'P1' },
@@ -55,6 +59,8 @@ const baselinePitState = nextPitStateFromRow({
 assert.strictEqual(baselinePitState.completedPitStops, 1);
 assert.strictEqual(baselinePitState.validCompletedPitStops, 1);
 
+// A later PIT-counter increase inside the green window counts toward required
+// pitstops.
 const validPitIncrease = nextPitStateFromRow({
   previous: baselinePitState,
   row: { pit: 'P2' },
@@ -66,6 +72,8 @@ assert.strictEqual(validPitIncrease.completedPitStops, 2);
 assert.strictEqual(validPitIncrease.validCompletedPitStops, 2);
 assert.strictEqual(validPitIncrease.lastPitCountedAsValid, true);
 
+// A later PIT-counter increase during a red/closed window is stored as a real
+// pitstop but does not count toward the mandatory valid-stop total.
 const invalidPitIncrease = nextPitStateFromRow({
   previous: { completedPitStops: 0, validCompletedPitStops: 0, rawPitCount: 0 },
   row: { pit: 'P1' },
@@ -77,6 +85,7 @@ assert.strictEqual(invalidPitIncrease.completedPitStops, 1);
 assert.strictEqual(invalidPitIncrease.validCompletedPitStops, 0);
 assert.strictEqual(invalidPitIncrease.lastPitCountedAsValid, false);
 
+// Race clock parsing drives all open/closed window rules.
 const clock = raceClockFromSession({ timeToGo: '1:30:00' }, rules);
 assert.strictEqual(clock.elapsedMs, 30 * 60 * 1000);
 assert.strictEqual(clock.remainingMs, 90 * 60 * 1000);
@@ -95,6 +104,7 @@ assert.strictEqual(sanitizedRules.raceDurationMs, 24 * 60 * 60 * 1000);
 assert.strictEqual(sanitizedRules.requiredPitStops, 2);
 assert.strictEqual(sanitizedRules.nearWindowLaps, 2);
 
+// First 25 minutes are closed.
 const startClosed = buildPitstopPlan({
   rows: classRows,
   session: { timeToGo: '1:40:00' },
@@ -106,6 +116,8 @@ assert.strictEqual(startClosed.status, 'closed');
 assert.strictEqual(startClosed.canPitNow, false);
 assert.strictEqual(startClosed.waitMs, 5 * 60 * 1000);
 
+// The dashboard should warn when the window opens within the configured
+// near-window lap count.
 const nearlyOpen = buildPitstopPlan({
   rows: classRows,
   session: { timeToGo: '1:37:00' },
@@ -116,6 +128,7 @@ const nearlyOpen = buildPitstopPlan({
 assert.strictEqual(nearlyOpen.status, 'soon');
 assert.strictEqual(nearlyOpen.isNearlyOpen, true);
 
+// Normal green/open window.
 const open = buildPitstopPlan({
   rows: classRows,
   session: { timeToGo: '1:20:00' },
@@ -127,6 +140,7 @@ assert.strictEqual(open.status, 'open');
 assert.strictEqual(open.canPitNow, true);
 assert.strictEqual(open.remainingRequiredStops, 2);
 
+// Required stops use valid stops, not raw total pit entries.
 const onlyValidStopsCountForRequirement = buildPitstopPlan({
   rows: classRows,
   session: { timeToGo: '1:20:00' },
@@ -138,6 +152,7 @@ assert.strictEqual(onlyValidStopsCountForRequirement.totalPitStops, 2);
 assert.strictEqual(onlyValidStopsCountForRequirement.completedPitStops, 1);
 assert.strictEqual(onlyValidStopsCountForRequirement.remainingRequiredStops, 1);
 
+// A valid previous pitstop closes the next 25 minutes.
 const cooldown = buildPitstopPlan({
   rows: classRows,
   session: { timeToGo: '1:10:00' },
@@ -148,6 +163,7 @@ const cooldown = buildPitstopPlan({
 assert.strictEqual(cooldown.status, 'closed');
 assert.strictEqual(cooldown.waitMs, 15 * 60 * 1000);
 
+// Last 25 minutes are closed.
 const finishClosed = buildPitstopPlan({
   rows: classRows,
   session: { timeToGo: '0:20:00' },
@@ -158,6 +174,8 @@ const finishClosed = buildPitstopPlan({
 assert.strictEqual(finishClosed.status, 'closed');
 assert.strictEqual(finishClosed.canPitNow, false);
 
+// Strategy can become urgent before the final red zone if there is no longer
+// enough time to complete all required stops with cooldown spacing.
 const urgent = buildPitstopPlan({
   rows: classRows,
   session: { timeToGo: '0:50:00' },
@@ -168,6 +186,7 @@ const urgent = buildPitstopPlan({
 assert.strictEqual(urgent.status, 'urgent');
 assert.strictEqual(urgent.canPitNow, true);
 
+// Basic after-pit projection with all cars on the same lap.
 const projection = projectClassAfterPit(classRows, '33', 75000);
 assert.strictEqual(projection.available, true);
 assert.strictEqual(projection.projectedClassPosition, 3);
@@ -180,6 +199,7 @@ assert.deepStrictEqual(projectClassAfterPit([{ carNumber: 33, className: '', lap
   items: []
 });
 
+// When class positions tie, overall position is used as stable fallback order.
 const positionFallbackProjection = projectClassAfterPit([
   { position: 3, classPosition: 1, carNumber: 33, className: 'CC', interval: '--' },
   { position: 2, classPosition: 2, carNumber: 7, className: 'CC', interval: '1.000' },
@@ -189,6 +209,7 @@ assert.strictEqual(positionFallbackProjection.available, true);
 assert.strictEqual(positionFallbackProjection.items[1].carNumber, '8');
 assert.strictEqual(positionFallbackProjection.items[2].carNumber, '7');
 
+// Invalid pit loss should not produce a projection.
 const impossibleProjection = projectClassAfterPit([
   { position: 1, classPosition: 1, carNumber: 33, className: 'CC', interval: '--' },
   { position: 2, classPosition: 2, carNumber: 7, className: 'CC', interval: '1.000' }
@@ -196,6 +217,8 @@ const impossibleProjection = projectClassAfterPit([
 assert.strictEqual(impossibleProjection.available, false);
 assert.strictEqual(impossibleProjection.reason, 'Our projected race distance is not reliable yet');
 
+// Other cars with unusable score data are filtered out rather than shown with a
+// fake gap.
 const filteredUnscoredCarProjection = projectClassAfterPit([
   { position: 1, classPosition: 1, carNumber: 33, className: 'CC', interval: '--' },
   { position: 2, classPosition: 2, carNumber: 7, className: 'CC', interval: '1L' }
@@ -204,6 +227,8 @@ assert.strictEqual(filteredUnscoredCarProjection.available, true);
 assert.strictEqual(filteredUnscoredCarProjection.items.length, 1);
 assert.strictEqual(filteredUnscoredCarProjection.items[0].carNumber, '33');
 
+// Regression test for the important lapped-car bug: 75 seconds of pit loss must
+// not place us behind a car that is four completed laps down.
 const lappedCarProjection = projectClassAfterPit([
   { position: 1, classPosition: 1, carNumber: 10, className: 'CC', team: 'Leader', lapNumber: 20, interval: '--', lastLapMs: 125000 },
   { position: 2, classPosition: 2, carNumber: 33, className: 'CC', team: 'Us', lapNumber: 20, interval: '10.000', lastLapMs: 125000 },
@@ -215,6 +240,8 @@ assert.strictEqual(lappedCarProjection.carBehind.carNumber, '65');
 assert.strictEqual(lappedCarProjection.carBehind.lapDeltaToUs, -4);
 assert.ok(lappedCarProjection.carBehind.projectedGapToUsMs > 3 * 120000);
 
+// Tight same-lap scenario: after losing 5.050s we should stay only 50ms ahead
+// of car #18. This protects millisecond-level after-pit gap math.
 const CarProjectionExtra = projectClassAfterPit([
   { position: 1, classPosition: 1, carNumber: 33, className: 'CC', team: 'Leader', lapNumber: 20, interval: '--', lastLapMs: 125000 },
   { position: 2, classPosition: 2, carNumber: 10, className: 'CC', team: 'Us', lapNumber: 20, interval: '4.500', lastLapMs: 125000 },

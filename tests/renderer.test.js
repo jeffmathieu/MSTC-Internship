@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
+// Minimal classList implementation for running app.js without a browser. The
+// renderer only needs add/remove/contains/toggle for these tests.
 class FakeClassList {
   constructor() { this.values = new Set(); }
   add(...names) { names.forEach((name) => this.values.add(name)); }
@@ -16,6 +18,8 @@ class FakeClassList {
   }
 }
 
+// Minimal DOM element used by the renderer test. It intentionally implements
+// only the APIs app.js touches, so missing browser assumptions fail loudly.
 class FakeElement {
   constructor(id = '', tagName = 'div') {
     this.id = id;
@@ -53,6 +57,8 @@ class FakeElement {
   }
 }
 
+// Builds a fake document from the real index.html IDs. This catches accidental
+// ID drift between markup and renderer code.
 function createFakeDocument() {
   const elements = new Map();
   const html = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'index.html'), 'utf8');
@@ -101,6 +107,8 @@ function createFakeDocument() {
   };
 }
 
+// Settings and collector states below model one normal dashboard update: initial
+// blank analytics, then a live update with sectors, comparisons, and pit data.
 const settings = {
   timingUrl: 'https://example.com/live',
   followedCar: '13',
@@ -203,8 +211,11 @@ const context = {
   clearTimeout
 };
 
+// app.js is written for the browser, so the test loads it into a VM with our
+// fake window/document/preload bridge.
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'app.js'), 'utf8'), context);
 
+// init() is async; flushAsync waits for the promises scheduled during load.
 async function flushAsync() {
   await Promise.resolve();
   await new Promise((resolve) => setImmediate(resolve));

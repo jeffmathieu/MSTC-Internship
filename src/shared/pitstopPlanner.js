@@ -19,21 +19,32 @@ const DEFAULT_RULES = {
   averageLapMs: null
 };
 
+// Converts optional numeric inputs into a real number or null. Most planner
+// inputs come from UI fields or parsed timing text, so this keeps callers from
+// accidentally treating empty strings as zero.
 function numberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
+// Bounds race-clock progress so impossible timing input cannot move the UI
+// marker outside the pit window bar.
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+// Reads a non-negative numeric rule value and falls back to the default when the
+// UI/settings contain invalid data. Change this if negative offsets ever become
+// meaningful for a future rule variant.
 function positiveNumber(value, fallback) {
   const n = numberOrNull(value);
   return n !== null && n >= 0 ? n : fallback;
 }
 
+// Merges user-configurable pit rules with defaults. This is the main place to
+// adjust rule defaults such as first/last closed minutes, cooldown duration,
+// mandatory stop count, or minimum pit loss.
 function normalizeRules(rules = {}) {
   const merged = { ...DEFAULT_RULES, ...rules };
   return {
@@ -48,6 +59,8 @@ function normalizeRules(rules = {}) {
   };
 }
 
+// Parses race-clock and timing strings to milliseconds. It accepts seconds,
+// mm:ss, hh:mm:ss, and values like "55:54 / 1" from the dashboard header.
 function parseTimeToMs(value) {
   const text = String(value || '').trim().replace(',', '.');
   if (!text || /^(—|-|--|\?)$/i.test(text)) return null;
@@ -60,6 +73,9 @@ function parseTimeToMs(value) {
   return null;
 }
 
+// Formats milliseconds for compact dashboard labels. It intentionally omits
+// milliseconds because pit window/cooldown information is strategic timing, not
+// lap timing precision.
 function formatDuration(ms) {
   if (!Number.isFinite(ms)) return '—';
   const sign = ms < 0 ? '-' : '';
@@ -73,6 +89,9 @@ function formatDuration(ms) {
   return `${sign}${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
+// Converts session "time left" into elapsed/remaining/progress. If the timing
+// page does not expose a clock yet, the planner returns null values instead of
+// guessing and possibly counting an invalid pitstop as valid.
 function raceClockFromSession(session = {}, rules = {}) {
   const normalized = normalizeRules(rules);
   const remainingMs = parseTimeToMs(session.timeToGo || session.remaining || '');
@@ -94,6 +113,8 @@ function raceClockFromSession(session = {}, rules = {}) {
   };
 }
 
+// Extracts the pitstop count from provider fields. RIS/GetRaceResults may expose
+// this as "P2", "stops 2", or similar text, so we only keep the first number.
 function pitCountFromRow(row = {}) {
   const candidates = [row.pit, row.pitInfo, row.pitStops];
   for (const candidate of candidates) {
@@ -103,6 +124,15 @@ function pitCountFromRow(row = {}) {
   return 0;
 }
 
+// Updates the remembered pit state for our car using one fresh live row.
+//
+// Important behavior:
+// - the first sample is accepted as baseline because the app cannot know when
+//   earlier stops happened before it started;
+// - every later increase in the PIT counter only counts as a required/valid
+//   stop when the pit window was open at that moment;
+// - invalid stops remain visible in completedPitStops but do not reduce the
+//   remaining mandatory stop count.
 function nextPitStateFromRow({ previous = {}, row = {}, session = {}, rules = {}, averageLapMs = null, collectedAt = '' } = {}) {
   const normalizedRules = normalizeRules(rules);
   const previousState = {
@@ -140,17 +170,23 @@ function nextPitStateFromRow({ previous = {}, row = {}, session = {}, rules = {}
   return next;
 }
 
+// Normalizes lap numbers from live rows. Null means "unknown", which is safer
+// than assuming two cars are on the same lap.
 function lapNumber(row = {}) {
   const n = Number(row.lapNumber);
   return Number.isFinite(n) ? n : null;
 }
 
+// Orders cars by race distance first and timing table position second. This is
+// used when class positions are duplicated or missing.
 function compareRaceOrder(a, b) {
   const lapDelta = (lapNumber(b) ?? 0) - (lapNumber(a) ?? 0);
   if (lapDelta) return lapDelta;
   return (Number(a.position) || 999999) - (Number(b.position) || 999999);
 }
 
+// Returns our followed row plus all rows in the same class, sorted by class
+// position. Future UI filters for class can be added here.
 function classRows(rows, followedCarNumber) {
   const followed = (rows || []).find((row) => String(row.carNumber) === String(followedCarNumber));
   if (!followed?.className) return { followed: followed || null, rows: [] };
@@ -160,16 +196,25 @@ function classRows(rows, followedCarNumber) {
   return { followed, rows: sorted };
 }
 
+// Parses gap/interval text while rejecting lap gaps such as "1L". Lap gaps must
+// be handled through lapNumber, otherwise a car several laps behind can look
+// only a few seconds away.
 function parseGapToMs(value) {
   const text = String(value || '').trim();
   if (!text || text === '--' || text === '?' || /\d+\s*l/i.test(text)) return null;
   return parseTimeToMs(text.replace(/^\+/, ''));
 }
 
+// Chooses the best available short gap source for a row. Providers disagree on
+// whether "INT", "DIFF", or "GAP" means the nearest-car interval, so this keeps
+// the priority in one place.
 function intervalForRow(row) {
   return parseGapToMs(row.interval) ?? parseGapToMs(row.diff) ?? parseGapToMs(row.gap);
 }
 
+// Estimates a representative lap time for converting lap differences into race
+// distance. A provided average wins; otherwise the median live last-lap value is
+// used because it is less sensitive to one bad/slow car than a mean.
 function estimateAverageLapMs(rows, fallback = null) {
   const explicit = numberOrNull(fallback);
   if (explicit !== null) return explicit;
@@ -181,6 +226,9 @@ function estimateAverageLapMs(rows, fallback = null) {
   return lapTimes[Math.floor(lapTimes.length / 2)];
 }
 
+// Builds cumulative gaps from class leader using adjacent class intervals. When
+// any interval becomes unreliable, later cumulative gaps are marked unreliable
+// instead of silently producing a false after-pit prediction.
 function relativeGapsFromClassIntervals(rowsInClass) {
   let totalMs = 0;
   let reliable = true;
@@ -197,6 +245,12 @@ function relativeGapsFromClassIntervals(rowsInClass) {
   });
 }
 
+// Predicts where our car would rejoin the class after losing pitLossMs.
+//
+// The key detail is that this is lap-aware: cars with fewer completed laps are
+// treated as one or more laps behind, not as a nearby interval. This prevents the
+// dashboard from saying we would fall behind a car that is actually several laps
+// down.
 function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) {
   const { followed, rows: rowsInClass } = classRows(rows, followedCarNumber);
   if (!followed || !rowsInClass.length) return { available: false, reason: 'No class data yet', items: [] };
@@ -256,6 +310,9 @@ function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) 
   };
 }
 
+// Applies the green/red pit-window rules at the current race clock. This checks
+// only whether a pitstop is allowed by time windows/cooldown; strategic urgency
+// is added in buildPitstopPlan().
 function timeUntilNextAllowedPit({ clock, rules, pitState = {} }) {
   if (clock.elapsedMs === null || clock.remainingMs === null) {
     return { allowed: false, reason: 'Waiting for race clock', waitMs: null };
@@ -276,6 +333,9 @@ function timeUntilNextAllowedPit({ clock, rules, pitState = {} }) {
   return { allowed: true, reason: 'Pit window open', waitMs: 0 };
 }
 
+// Calculates the latest elapsed race time at which the next required stop can
+// happen while still leaving enough cooldown-separated windows for remaining
+// mandatory stops.
 function latestSafePitElapsedMsForRemainingStops({ clock, rules, pitState = {} }) {
   if (clock.elapsedMs === null || clock.remainingMs === null) return null;
   const completed = Math.max(0, Number(pitState.validCompletedPitStops ?? pitState.completedPitStops) || 0);
@@ -284,6 +344,9 @@ function latestSafePitElapsedMsForRemainingStops({ clock, rules, pitState = {} }
   return clock.raceDurationMs - rules.pitClosedEndMs - ((remainingStops - 1) * rules.pitCooldownMs);
 }
 
+// Produces the full dashboard-facing pitstop object. Callers pass live rows,
+// session clock, current pit state, and rules; the returned object contains all
+// status labels, required-stop counts, timing windows, and after-pit projection.
 function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pitState = {}, rules = {} } = {}) {
   const normalizedRules = normalizeRules(rules);
   const clock = raceClockFromSession(session, normalizedRules);

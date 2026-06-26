@@ -29,11 +29,16 @@ function setStatus(status, message) {
 // Displays missing table values consistently.
 function rowValue(value) { return value === null || value === undefined || value === '' ? '—' : value; }
 
+// Writes plain text into one dashboard element, always converting missing values
+// through rowValue() so all panels display the same placeholder.
 function setText(id, value) {
   const el = $(id);
   if (el) el.textContent = String(rowValue(value));
 }
 
+// Writes a metric value and optionally flashes its containing card when the
+// value changes. This is used for best/last times where changes should catch the
+// engineer's eye without changing layout.
 function setMetric(id, value, { flash = false } = {}) {
   const el = $(id);
   if (!el) return;
@@ -70,22 +75,30 @@ function numericMs(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+// Formats a signed delta. Positive/negative meaning depends on the caller, so
+// setDelta() is responsible for assigning good/bad styling.
 function displayDelta(ms) {
   if (!Number.isFinite(ms)) return '—';
   const sign = ms > 0 ? '+' : ms < 0 ? '-' : '';
   return `${sign}${formatMs(Math.abs(ms))}`;
 }
 
+// Reads pit duration inputs as seconds. Invalid values fall back so one bad UI
+// input cannot break the pitstop planner.
 function secondsFromInput(id, fallbackSeconds) {
   const value = Number($(id)?.value);
   return Number.isFinite(value) && value >= 0 ? value : fallbackSeconds;
 }
 
+// Reads race duration inputs as hours. Race length is editable because short
+// demos and 24h races use the same dashboard.
 function hoursFromInput(id, fallbackHours) {
   const value = Number($(id)?.value);
   return Number.isFinite(value) && value > 0 ? value : fallbackHours;
 }
 
+// Builds the pit rule object saved to settings. If new pit rules become
+// configurable, add their input mapping here and the planner default.
 function pitRulesFromInputs() {
   return {
     raceDurationMs: hoursFromInput('pit-race-hours', 24) * 60 * 60 * 1000,
@@ -98,6 +111,9 @@ function pitRulesFromInputs() {
   };
 }
 
+// Updates a delta card and applies semantic border color. In this UI positive
+// means good for the displayed comparison because backend deltas are inverted
+// before they arrive here when needed.
 function setDelta(cardId, textId, deltaMs) {
   const card = $(cardId);
   const numeric = Number.isFinite(deltaMs) ? deltaMs : null;
@@ -108,6 +124,8 @@ function setDelta(cardId, textId, deltaMs) {
   else card.classList.add(numeric > 0 ? 'good' : 'bad');
 }
 
+// Backend driver deltas are stored as current minus reference. The UI wants
+// green when we are faster/better, so driver deltas are inverted before display.
 function invertedDelta(value) {
   const n = numericMs(value);
   return n === null ? null : -n;
@@ -142,17 +160,22 @@ function historySortTime(entry) {
   return Number.isFinite(ms) ? ms : 0;
 }
 
+// Reads lap numbers while treating missing/zero as unknown. This keeps debug
+// history labels stable for providers that do not expose lap numbers.
 function lapSortNumber(entry) {
   const n = Number(entry.lapNumber);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// Chooses a display label for stored laps, falling back to row index when lap
+// number is missing.
 function lapDisplayLabel(entry, fallbackIndex = null) {
   const lapNumber = lapSortNumber(entry);
   if (lapNumber !== null) return String(lapNumber);
   return fallbackIndex === null ? '—' : String(fallbackIndex + 1);
 }
 
+// Returns stored laps for one car in chronological order for debug tables.
 function lapsForCar(history, carNumber) {
   return (history || [])
     .map(historyLapForUi)
@@ -220,6 +243,8 @@ function getOurCarAnalytics(summary) {
   return (summary?.cars || []).find((car) => String(car.carNumber) === wanted) || null;
 }
 
+// Renders best sector values and ideal time from analytics_summary.json. Ref and
+// prediction fields are placeholders until those rules are defined later.
 function renderSectorAnalytics(summary) {
   const ourCar = getOurCarAnalytics(summary);
   const bestS1 = numericMs(ourCar?.bestSector1Ms);
@@ -238,6 +263,8 @@ function renderSectorAnalytics(summary) {
   setMetric('predicted-lap-time', '—');
 }
 
+// Looks up the current live driver for a car and then finds that driver's stored
+// analytics. This prevents comparing the BIC/XIC car against the wrong driver.
 function driverStatsForLiveCar(summary, rows, carNumber) {
   const row = (rows || []).find((candidate) => String(candidate.carNumber) === String(carNumber));
   const driverName = row?.driver || '';
@@ -245,6 +272,8 @@ function driverStatsForLiveCar(summary, rows, carNumber) {
   return { row, driverName, stats };
 }
 
+// Fills the D1/D2, BIC, and XIC comparison boxes from precomputed analytics.
+// Renderer only formats values; lap/sector math stays in shared modules/main.
 function renderDriverAndClassComparisons(summary, rows) {
   const driverComparison = summary?.dashboardAnalysis?.driverComparison;
   const classComparison = summary?.dashboardAnalysis?.classComparison;
@@ -282,6 +311,8 @@ function renderDriverAndClassComparisons(summary, rows) {
   setDelta('delta-xic-card', 'delta-xic', xicDelta);
 }
 
+// Converts the structured after-pit projection into one compact label. Lap gaps
+// are shown as "1L", "4L", etc. instead of fake seconds.
 function projectionLabel(projection) {
   if (!projection?.available) return projection?.reason || 'Waiting for class gaps';
   const position = projection.projectedClassPosition ? `PIC ${projection.projectedClassPosition}` : 'PIC ?';
@@ -295,6 +326,8 @@ function projectionLabel(projection) {
   return `${position} · ${behind} · ${ahead}`;
 }
 
+// Renders pit window status, required-stop progress, next allowed pit time, and
+// after-pit class projection. All rule calculations come from pitstopPlanner.
 function renderPitstopPlan(plan) {
   const pitWindow = document.querySelector('.pit-window');
   if (!plan) {

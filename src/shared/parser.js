@@ -187,6 +187,8 @@ function valueAt(cells, headerMap, key) {
 
 // Converts one raw HTML table row into the normalized shape consumed by the app.
 // If the UI needs a new column, add the canonical header above and map it here.
+// Keep raw/headerMap in the result: parser_debug.json depends on that extra
+// context when a timing provider changes its table layout.
 function parseTimingRow(headers, cells) {
   const headerMap = buildHeaderMap(headers);
   // Preserve original header/cell data for parser debugging. This makes it
