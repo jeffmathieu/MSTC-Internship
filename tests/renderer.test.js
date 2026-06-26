@@ -311,6 +311,8 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('pit-stops-summary').textContent, '1/2');
   assert.strictEqual(document.getElementById('pit-next').textContent, 'Now');
   assert.ok(document.getElementById('pit-projection').textContent.includes('PIC 2'));
+  assert.ok(document.getElementById('pit-projection').textContent.includes('0:05.000 behind #2'));
+  assert.ok(document.getElementById('pit-projection').textContent.includes('0:10.000 ahead #56'));
   assert.strictEqual(document.getElementById('pit-bar').style.gridTemplateColumns, '1500000fr 4950000fr 1500000fr 4950000fr 1500000fr');
 
   document.getElementById('comparison-car').value = '56';

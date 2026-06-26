@@ -270,6 +270,24 @@ assert.strictEqual(lappedCarProjection.carBehind.carNumber, '65');
 assert.strictEqual(lappedCarProjection.carBehind.lapDeltaToUs, -4);
 assert.ok(lappedCarProjection.carBehind.projectedGapToUsMs > 3 * 120000);
 
+// Regression for an Asian LMS-style table: a lapped other-class car can sit
+// visually between us and the next same-class car. Its "-- 65 laps --" gap must
+// not be added as 65 laps of time before reaching the next LMP3 row.
+const lappedInterloperProjection = projectClassAfterPit([
+  { position: 8, classPosition: 1, carNumber: 13, className: 'LMP3', team: 'Us', lapNumber: 100, gap: '1:05.031', diff: '1:05.031', interval: '1:05.031', lastLapMs: 125000 },
+  { position: 9, classPosition: 2, carNumber: 59, className: 'LMP2 AM', team: 'Other class lapped', lapNumber: 35, gap: '-- 65 laps --', diff: '1:55.519', interval: '1:55.519', lastLapMs: 119621 },
+  { position: 10, classPosition: 2, carNumber: 12, className: 'LMP3', team: 'Next LMP3', lapNumber: 100, gap: '0.171', diff: '0.171', interval: '0.171', lastLapMs: 126413 },
+  { position: 11, classPosition: 3, carNumber: 2, className: 'LMP3', team: 'Third LMP3', lapNumber: 100, gap: '1.857', diff: '1.686', interval: '1.686', lastLapMs: 124245 },
+  { position: 12, classPosition: 4, carNumber: 9, className: 'LMP3', team: 'Fourth LMP3', lapNumber: 100, gap: '30.512', diff: '28.655', interval: '28.655', lastLapMs: 128208 },
+  { position: 16, classPosition: 5, carNumber: 65, className: 'LMP3', team: 'Fifth LMP3', lapNumber: 100, gap: '1:08.573', diff: '52.642', interval: '52.642', lastLapMs: 133001 },
+  { position: 22, classPosition: 6, carNumber: 3, className: 'LMP3', team: 'Lapped LMP3', lapNumber: 38, gap: '-- 62 laps --', diff: '57.342', interval: '57.342', lastLapMs: 127053 }
+], '13', 75000, { averageLapMs: 125000 });
+assert.strictEqual(lappedInterloperProjection.available, true);
+assert.strictEqual(lappedInterloperProjection.projectedClassPosition, 4);
+assert.strictEqual(lappedInterloperProjection.carAhead.carNumber, '9');
+assert.strictEqual(lappedInterloperProjection.carBehind.carNumber, '65');
+assert.ok(Math.abs(lappedInterloperProjection.carBehind.projectedGapToUsMs) < 10000);
+
 // Tight same-lap scenario: after losing 5.050s we should stay only 50ms ahead
 // of car #18. This protects millisecond-level after-pit gap math.
 const CarProjectionExtra = projectClassAfterPit([

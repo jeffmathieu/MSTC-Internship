@@ -284,6 +284,7 @@ function overallGapsBehindFollowed(rows, followedCarNumber, averageLapMs = null)
   if (startIndex < 0) return [];
   const followed = ordered[startIndex];
   const followedLap = lapNumber(followed);
+  const followedClass = followed.className || '';
   const lapMs = numberOrNull(averageLapMs) || estimateAverageLapMs(rows);
   let totalMs = 0;
   const gaps = [];
@@ -296,7 +297,16 @@ function overallGapsBehindFollowed(rows, followedCarNumber, averageLapMs = null)
     const crossedLapBoundary = Number.isFinite(followedLap) && Number.isFinite(currentLap) && currentLap < followedLap;
     const lapDropFromPrevious = Number.isFinite(previousLap) && Number.isFinite(currentLap) && currentLap < previousLap;
 
-    if ((explicitLapGap || crossedLapBoundary || lapDropFromPrevious) && Number.isFinite(lapMs)) {
+    const crossesLapBoundary = explicitLapGap || crossedLapBoundary || lapDropFromPrevious;
+    if (crossesLapBoundary && row.className !== followedClass) {
+      // Other-class cars can appear between same-class rivals while being many
+      // laps down/up. Their lap gap is not a seconds interval between our car
+      // and the next class car, so counting it creates absurd projections such
+      // as "+8000s ahead". Same-class lapped cars are still handled below.
+      continue;
+    }
+
+    if (crossesLapBoundary && Number.isFinite(lapMs)) {
       totalMs += lapMs * Math.max(1, explicitLapGap || (Number.isFinite(followedLap) && Number.isFinite(currentLap) ? followedLap - currentLap : 1));
     } else {
       const intervalMs = intervalForRow(row);

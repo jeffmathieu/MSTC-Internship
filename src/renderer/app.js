@@ -407,7 +407,7 @@ function projectionLabel(projection) {
   const gapLabel = (item) => {
     if (!item) return '';
     if (Number.isFinite(item.lapDeltaToUs) && item.lapDeltaToUs !== 0) return `${Math.abs(item.lapDeltaToUs)}L`;
-    return displayDelta(Math.abs(item.projectedGapToUsMs));
+    return formatMs(Math.abs(item.projectedGapToUsMs));
   };
   const behind = projection.carAhead ? `${gapLabel(projection.carAhead)} behind #${projection.carAhead.carNumber}` : 'class lead';
   const ahead = projection.carBehind ? `${gapLabel(projection.carBehind)} ahead #${projection.carBehind.carNumber}` : 'no car behind';
