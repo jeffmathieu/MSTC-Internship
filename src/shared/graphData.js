@@ -40,11 +40,14 @@
       if (!lapAnalytics.lapPaceEligible(lap)) return;
       const driver = lap.driverName || 'Unknown';
       if (!groups.has(driver)) groups.set(driver, []);
+      const driverLapNumber = groups.get(driver).length + 1;
+      const raceLapNumber = chartLapNumber(lap, index);
       groups.get(driver).push({
-        x: chartLapNumber(lap, index),
+        x: driverLapNumber,
         y: lap.lapTimeMs,
         eligible: true,
-        label: `Lap ${chartLapNumber(lap, index)} · ${driver}`
+        raceLapNumber,
+        label: `Driver lap ${driverLapNumber} · race lap ${raceLapNumber}`
       });
     });
     return {
@@ -52,6 +55,7 @@
       title: 'Lap times per driver',
       subtitle: 'Green-flag race laps only; pit, FCY and Safety Car laps are excluded.',
       yFormat: 'time',
+      xLabel: 'Driver lap',
       series: [...groups.entries()].map(([name, points]) => ({ name, points }))
     };
   }
@@ -125,6 +129,7 @@
       title: 'Class pace comparison',
       subtitle: 'Actual valid lap times for every car in our class.',
       yFormat: 'time',
+      xLabel: 'Race lap',
       series: classCars.map((car) => ({
         name: `#${car.carNumber}${car.teamName ? ` ${car.teamName}` : ''}`,
         carNumber: car.carNumber,
@@ -148,6 +153,40 @@
     return driverLapTimes(history, carNumber);
   }
 
+  // Zoom state is stored as normalized fractions of the complete x-axis. This
+  // survives incoming live laps and works for graphs with different lap ranges.
+  function normalizeViewport(viewport = {}) {
+    const rawStart = Number(viewport.start);
+    const rawEnd = Number(viewport.end);
+    const start = Number.isFinite(rawStart) ? Math.max(0, Math.min(1, rawStart)) : 0;
+    const end = Number.isFinite(rawEnd) ? Math.max(start, Math.min(1, rawEnd)) : 1;
+    return end > start ? { start, end } : { start: 0, end: 1 };
+  }
+
+  function zoomViewport(viewport, factor, anchor = 0.5, minimumSpan = 0.08) {
+    const current = normalizeViewport(viewport);
+    const span = current.end - current.start;
+    const nextSpan = Math.max(minimumSpan, Math.min(1, span * factor));
+    const safeAnchor = Math.max(0, Math.min(1, Number(anchor) || 0));
+    const focus = current.start + span * safeAnchor;
+    let start = focus - nextSpan * safeAnchor;
+    let end = start + nextSpan;
+    if (start < 0) { end -= start; start = 0; }
+    if (end > 1) { start -= end - 1; end = 1; }
+    return normalizeViewport({ start, end });
+  }
+
+  function panViewport(viewport, direction, fraction = 0.3) {
+    const current = normalizeViewport(viewport);
+    const span = current.end - current.start;
+    const offset = span * Math.max(0, Number(fraction) || 0) * Math.sign(direction || 0);
+    let start = current.start + offset;
+    let end = current.end + offset;
+    if (start < 0) { end -= start; start = 0; }
+    if (end > 1) { start -= end - 1; end = 1; }
+    return normalizeViewport({ start, end });
+  }
+
   return {
     GRAPH_OPTIONS,
     average,
@@ -157,6 +196,9 @@
     driverSectorComparison,
     rollingAveragePoints,
     classPaceComparison,
-    buildGraph
+    buildGraph,
+    normalizeViewport,
+    zoomViewport,
+    panViewport
   };
 });

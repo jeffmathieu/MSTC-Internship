@@ -101,6 +101,29 @@ select {
   font-size: 12px;
   font-weight: 800;
 }
+.chart-actions { display: grid; gap: 5px; }
+.zoom-controls {
+  height: 28px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.zoom-controls.hidden { visibility: hidden; }
+.zoom-controls button {
+  width: 31px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid var(--line);
+  background: white;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 900;
+  cursor: pointer;
+}
+.zoom-controls button:hover { background: #eeeeea; }
+.zoom-controls button:focus-visible { outline: 3px solid var(--blue); outline-offset: 1px; }
 
 .chart-stage { position: relative; min-height: 0; overflow: hidden; }
 canvas { display: block; width: 100%; height: 100%; }

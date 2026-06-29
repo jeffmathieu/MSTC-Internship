@@ -14,7 +14,16 @@ const driverLaps = graphData.driverLapTimes(history, 33);
 assert.strictEqual(driverLaps.type, 'line');
 assert.deepStrictEqual(driverLaps.series.map((series) => series.name), ['Driver 1', 'Driver 2', 'Driver 3']);
 assert.strictEqual(driverLaps.series[0].points.length, 20);
-assert.strictEqual(driverLaps.series[2].points.at(-1).x, 50);
+assert.strictEqual(driverLaps.series[2].points.at(-1).x, 10);
+assert.strictEqual(driverLaps.series[0].points[2].x, 3);
+assert.strictEqual(driverLaps.series[1].points[2].x, 3, 'third valid lap of every driver shares the same x-position');
+assert.strictEqual(driverLaps.series[1].points[2].raceLapNumber, 23, 'tooltip data retains the real race lap');
+const driverLapsWithScGap = graphData.driverLapTimes([
+  lap({ carNumber: 44, teamName: 'Gap Team', driverName: 'Gap Driver', lapNumber: 1, lapTimeMs: 100000, sector1Ms: 30000, sector2Ms: 40000, sector3Ms: 30000 }),
+  lap({ carNumber: 44, teamName: 'Gap Team', driverName: 'Gap Driver', lapNumber: 2, lapTimeMs: 160000, sector1Ms: 50000, sector2Ms: 60000, sector3Ms: 50000, sessionFlag: 'Safety car' }),
+  lap({ carNumber: 44, teamName: 'Gap Team', driverName: 'Gap Driver', lapNumber: 3, lapTimeMs: 101000, sector1Ms: 30000, sector2Ms: 40000, sector3Ms: 31000 })
+], 44);
+assert.deepStrictEqual(driverLapsWithScGap.series[0].points.map((point) => point.x), [1, 2], 'excluded laps leave no gap in valid-lap comparison numbering');
 
 const driverPace = graphData.driverPaceComparison(history, 33, 10);
 assert.strictEqual(driverPace.type, 'bar');
@@ -73,5 +82,18 @@ assert.strictEqual(graphData.buildGraph('unknown', history, 33).title, 'Lap time
 assert.strictEqual(graphData.buildGraph('driver-pace', history, 33).title, 'Driver pace comparison');
 assert.strictEqual(graphData.buildGraph('driver-sectors', history, 33).title, 'Sector comparison');
 assert.strictEqual(graphData.buildGraph('class-pace', history, 33).title, 'Class pace comparison');
+
+assert.deepStrictEqual(graphData.normalizeViewport(), { start: 0, end: 1 });
+assert.deepStrictEqual(graphData.normalizeViewport({ start: -2, end: 4 }), { start: 0, end: 1 });
+const zoomed = graphData.zoomViewport({ start: 0, end: 1 }, 0.5);
+assert.deepStrictEqual(zoomed, { start: 0.25, end: 0.75 });
+assert.deepStrictEqual(graphData.panViewport(zoomed, -1), { start: 0.1, end: 0.6 });
+assert.deepStrictEqual(graphData.panViewport(zoomed, 1), { start: 0.4, end: 0.9 });
+assert.deepStrictEqual(graphData.panViewport({ start: 0, end: 0.5 }, -1), { start: 0, end: 0.5 });
+const rightBounded = graphData.panViewport({ start: 0.5, end: 1 }, 1);
+assert.ok(Math.abs(rightBounded.start - 0.5) < 1e-12);
+assert.strictEqual(rightBounded.end, 1);
+const minimumZoom = graphData.zoomViewport({ start: 0.49, end: 0.51 }, 0.01);
+assert.ok(minimumZoom.end - minimumZoom.start >= 0.08 - Number.EPSILON);
 
 console.log('Graph data tests passed.');

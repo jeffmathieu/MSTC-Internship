@@ -71,15 +71,20 @@ function paddedRange(values) {
   return { min: Math.max(0, rawMin - padding), max: rawMax + padding };
 }
 
-function drawLineChart(context, width, height, chart) {
+function drawLineChart(context, width, height, chart, viewport = { start: 0, end: 1 }) {
   const bounds = { left: 72, top: 10, right: Math.max(90, width - 12), bottom: Math.max(40, height - 30) };
   const allPoints = chart.series.flatMap((series) => series.points.map((point) => ({ ...point, series })));
-  const scalePoints = allPoints.filter((point) => point.eligible !== false);
-  const yRange = paddedRange((scalePoints.length ? scalePoints : allPoints).map((point) => point.y));
   const xValues = finiteValues(allPoints.map((point) => point.x));
-  let xMin = xValues.length ? Math.min(...xValues) : 0;
-  let xMax = xValues.length ? Math.max(...xValues) : 1;
-  if (xMin === xMax) { xMin -= 1; xMax += 1; }
+  let fullXMin = xValues.length ? Math.min(...xValues) : 0;
+  let fullXMax = xValues.length ? Math.max(...xValues) : 1;
+  if (fullXMin === fullXMax) { fullXMin -= 1; fullXMax += 1; }
+  const normalizedViewport = graphApi.normalizeViewport(viewport);
+  const fullSpan = fullXMax - fullXMin;
+  const xMin = fullXMin + fullSpan * normalizedViewport.start;
+  const xMax = fullXMin + fullSpan * normalizedViewport.end;
+  const visiblePoints = allPoints.filter((point) => point.x >= xMin && point.x <= xMax);
+  const scalePoints = visiblePoints.filter((point) => point.eligible !== false);
+  const yRange = paddedRange((scalePoints.length ? scalePoints : visiblePoints).map((point) => point.y));
   drawAxes(context, bounds, yRange.min, yRange.max, chart.yFormat);
   const xAt = (value) => bounds.left + ((value - xMin) / (xMax - xMin)) * (bounds.right - bounds.left);
   const yAt = (value) => bounds.bottom - ((value - yRange.min) / (yRange.max - yRange.min)) * (bounds.bottom - bounds.top);
@@ -87,7 +92,7 @@ function drawLineChart(context, width, height, chart) {
 
   chart.series.forEach((series, seriesIndex) => {
     const color = colorForSeries(series, seriesIndex);
-    const valid = series.points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+    const valid = series.points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y) && point.x >= xMin && point.x <= xMax);
     context.strokeStyle = color;
     context.lineWidth = series.highlight ? 3 : 2;
     context.beginPath();
@@ -117,9 +122,10 @@ function drawLineChart(context, width, height, chart) {
   context.font = '700 10px system-ui';
   context.textBaseline = 'top';
   context.textAlign = 'left';
-  context.fillText(`Lap ${Math.round(xMin)}`, bounds.left, bounds.bottom + 8);
+  const xLabel = chart.xLabel || 'Lap';
+  context.fillText(`${xLabel} ${Math.max(1, Math.ceil(xMin))}`, bounds.left, bounds.bottom + 8);
   context.textAlign = 'right';
-  context.fillText(`Lap ${Math.round(xMax)}`, bounds.right, bounds.bottom + 8);
+  context.fillText(`${xLabel} ${Math.max(1, Math.floor(xMax))}`, bounds.right, bounds.bottom + 8);
   return hitPoints;
 }
 
@@ -207,6 +213,8 @@ function renderPanel(panel) {
   panel.querySelector('p').textContent = chart.subtitle;
   const canvas = panel.querySelector('canvas');
   const empty = panel.querySelector('.chart-empty');
+  const zoomControls = panel.querySelector('.zoom-controls');
+  zoomControls.classList.toggle('hidden', chart.type !== 'line');
   const { context, width, height } = setCanvasSize(canvas);
   context.clearRect(0, 0, width, height);
   const hasData = chartHasData(chart);
@@ -218,7 +226,7 @@ function renderPanel(panel) {
   }
   const hitPoints = chart.type === 'bar'
     ? drawBarChart(context, width, height, chart)
-    : drawLineChart(context, width, height, chart);
+    : drawLineChart(context, width, height, chart, panel._viewport);
   wireTooltip(panel, canvas, hitPoints);
 }
 
@@ -235,6 +243,7 @@ async function initGraphs() {
   const settings = await window.liveTiming.getSettings();
   followedCarNumber = String(settings.followedCar || '');
   document.querySelectorAll('.chart-panel').forEach((panel, index) => {
+    panel._viewport = { start: 0, end: 1 };
     const select = panel.querySelector('select');
     graphApi.GRAPH_OPTIONS.forEach((option) => {
       const element = document.createElement('option');
@@ -243,7 +252,31 @@ async function initGraphs() {
       select.appendChild(element);
     });
     select.value = DEFAULT_GRAPHS[index];
-    select.addEventListener('change', () => renderPanel(panel));
+    select.addEventListener('change', () => {
+      panel._viewport = { start: 0, end: 1 };
+      renderPanel(panel);
+    });
+    panel.querySelectorAll('.zoom-controls button').forEach((button) => {
+      button.addEventListener('click', () => {
+        const action = button.dataset.view;
+        if (action === 'in') panel._viewport = graphApi.zoomViewport(panel._viewport, 0.65);
+        if (action === 'out') panel._viewport = graphApi.zoomViewport(panel._viewport, 1 / 0.65);
+        if (action === 'left') panel._viewport = graphApi.panViewport(panel._viewport, -1);
+        if (action === 'right') panel._viewport = graphApi.panViewport(panel._viewport, 1);
+        if (action === 'reset') panel._viewport = { start: 0, end: 1 };
+        renderPanel(panel);
+      });
+    });
+    const canvas = panel.querySelector('canvas');
+    canvas.addEventListener('wheel', (event) => {
+      if (!panel.querySelector('.zoom-controls').classList.contains('hidden')) {
+        event.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const anchor = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0.5;
+        panel._viewport = graphApi.zoomViewport(panel._viewport, event.deltaY < 0 ? 0.8 : 1.25, anchor);
+        renderPanel(panel);
+      }
+    }, { passive: false });
   });
   window.liveTiming.onCollectorUpdate(renderGraphs);
   renderGraphs(await window.liveTiming.getCollectorState());
