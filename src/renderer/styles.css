@@ -80,6 +80,32 @@ button {
   font-weight: 900;
 }
 button.primary { background: var(--ink); color: white; }
+.icon-button {
+  width: 42px;
+  height: 39px;
+  padding: 7px;
+  display: inline-grid;
+  place-items: center;
+}
+.graph-glyph {
+  width: 22px;
+  height: 19px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  margin: 0;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+}
+.graph-glyph i {
+  display: block;
+  width: 4px;
+  background: currentColor;
+}
+.graph-glyph i:nth-child(1) { height: 6px; }
+.graph-glyph i:nth-child(2) { height: 13px; }
+.graph-glyph i:nth-child(3) { height: 9px; }
 
 .main-times {
   display: grid;

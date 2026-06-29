@@ -223,6 +223,7 @@ const updatedState = {
 const document = createFakeDocument();
 let collectorUpdate = null;
 let lastSettingsPatch = null;
+let graphsOpenCount = 0;
 const liveTiming = {
   getSettings: async () => settings,
   setSettings: async (patch) => {
@@ -235,6 +236,7 @@ const liveTiming = {
   stopCollector: async () => true,
   getCollectorState: async () => initialState,
   openLiveWindow: async () => true,
+  openGraphsWindow: async () => { graphsOpenCount += 1; return true; },
   exportCurrent: async () => ({ csvPath: 'rows.csv', jsonPath: 'rows.json', historyPath: 'history.json' }),
   onCollectorUpdate: (callback) => { collectorUpdate = callback; return () => {}; }
 };
@@ -318,6 +320,9 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('pit-cooldown-overlay').style.left, '25%');
   assert.ok(document.getElementById('pit-cooldown-overlay').style.width.startsWith('10.416'));
   assert.strictEqual(document.getElementById('pit-cooldown-overlay').style.display, 'block');
+
+  await document.getElementById('open-graphs').trigger('click');
+  assert.strictEqual(graphsOpenCount, 1, 'graph icon opens the detachable graphs window');
 
   document.getElementById('comparison-car').value = '56';
   await document.getElementById('comparison-car').trigger('change');

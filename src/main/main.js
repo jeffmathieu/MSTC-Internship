@@ -34,6 +34,7 @@ const { buildLapPrediction } = require('../shared/lapPrediction');
 // these variables, so every start/stop function below updates them carefully.
 let mainWindow;
 let liveWindow;
+let graphsWindow;
 let pollTimer;
 let shouldCloseLiveWindow = false;
 
@@ -150,6 +151,34 @@ function createMainWindow() {
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
 
+// Creates a separate analysis window so four graphs can remain available
+// without taking permanent space from the race dashboard. Closing this window
+// destroys only the graph UI; collection continues in the main process and a
+// later click creates a fresh window with the current collector state.
+function openGraphsWindow() {
+  if (graphsWindow && !graphsWindow.isDestroyed()) {
+    graphsWindow.show();
+    graphsWindow.focus();
+    return true;
+  }
+  graphsWindow = new BrowserWindow({
+    width: 1450,
+    height: 920,
+    minWidth: 760,
+    minHeight: 620,
+    backgroundColor: '#f7f7f4',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+  graphsWindow.on('closed', () => { graphsWindow = null; });
+  graphsWindow.loadFile(path.join(__dirname, '../renderer/graphs.html'));
+  return true;
+}
+
 // Creates the hidden browser window used to load the live timing website.
 // show:false keeps it invisible during normal collection; the debug button can
 // reveal it through collector:openLiveWindow. Closing the debug window only
@@ -178,6 +207,7 @@ function createLiveWindow() {
 // collectorState first; the whole object is sent as-is.
 function broadcastState() {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('collector:update', collectorState);
+  if (graphsWindow && !graphsWindow.isDestroyed()) graphsWindow.webContents.send('collector:update', collectorState);
 }
 
 // Adds a compact error entry for the Debug panel. Only the latest 20 errors are
@@ -790,6 +820,7 @@ ipcMain.handle('collector:start', (_event, url) => startCollector(url));
 ipcMain.handle('collector:stop', () => stopCollector(true));
 ipcMain.handle('collector:getState', () => collectorState);
 ipcMain.handle('collector:openLiveWindow', () => { if (liveWindow && !liveWindow.isDestroyed()) { liveWindow.show(); liveWindow.focus(); return true; } return false; });
+ipcMain.handle('graphs:open', () => openGraphsWindow());
 
 // Creates timestamped exports of the current rows and in-memory lap history.
 // The always-overwritten "latest_*" files are written by saveLatestSnapshot().

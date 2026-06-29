@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('liveTiming', {
   stopCollector: () => ipcRenderer.invoke('collector:stop'),
   getCollectorState: () => ipcRenderer.invoke('collector:getState'),
   openLiveWindow: () => ipcRenderer.invoke('collector:openLiveWindow'),
+  openGraphsWindow: () => ipcRenderer.invoke('graphs:open'),
 
   // Creates timestamped export files from the current main-process state.
   exportCurrent: () => ipcRenderer.invoke('export:current'),
