@@ -55,6 +55,27 @@ function isGreenFlag(value) {
   return !text || /green/.test(text);
 }
 
+// Captures the global race-control flag when a sector value first appears in a
+// live row. Unchanged values keep their original flag until the completed lap
+// is stored, even if race control changes later in the same lap.
+function captureSectorFlags(row, previous = null, currentFlag = '') {
+  const sameLapObservation = previous && previous.lastLap === row.lastLap;
+  const annotated = { ...row };
+  [1, 2, 3].forEach((sectorNumber) => {
+    const valueKey = `sector${sectorNumber}`;
+    const flagKey = `sector${sectorNumber}Flag`;
+    const eligibleKey = `sector${sectorNumber}Eligible`;
+    if (!row[valueKey]) return;
+    const unchangedSector = sameLapObservation && previous[valueKey] === row[valueKey];
+    const observedFlag = row[flagKey] || (unchangedSector ? previous[flagKey] : currentFlag);
+    annotated[flagKey] = observedFlag || '';
+    if (row[eligibleKey] === '' || row[eligibleKey] === null || row[eligibleKey] === undefined) {
+      annotated[eligibleKey] = observedFlag ? String(!isNeutralizedFlag(observedFlag)) : '';
+    }
+  });
+  return annotated;
+}
+
 // Converts any saved lap-like object into the canonical analytics shape. This
 // keeps old exports, current memory state, and future storage schema changes
 // compatible with the same calculations.
@@ -82,26 +103,72 @@ function normalizeLap(entry) {
     sector1Eligible: boolOrNull(entry.sector1Eligible),
     sector2Eligible: boolOrNull(entry.sector2Eligible),
     sector3Eligible: boolOrNull(entry.sector3Eligible),
+    pitInfo: String(entry.pitInfo ?? entry.pit ?? ''),
+    lapPhase: String(entry.lapPhase ?? ''),
+    isPitLap: boolOrNull(entry.isPitLap),
     recordedAt: entry.recordedAt || entry.collectedAt || ''
   };
+}
+
+// Reads the cumulative PIT counter saved with each lap. Text such as "P2" or
+// "stops 2" is accepted; status-only values remain unknown.
+function pitCountFromLap(lap) {
+  const match = String(lap?.pitInfo ?? lap?.pit ?? '').match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+
+function pitAffectedLap(lap) {
+  return lap?.isPitLap === true || /^(inlap|outlap)$/i.test(String(lap?.lapPhase || ''));
+}
+
+// Annotates old and new history without requiring a storage migration. A PIT
+// counter increase marks the just-completed lap as the pit/inlap and the next
+// completed lap as the outlap. Both remain stored but are excluded from pace.
+function annotatePitPhases(laps) {
+  const stateByCar = new Map();
+  return laps.map((lap) => {
+    const state = stateByCar.get(lap.carNumber) || { previousPitCount: null, nextIsOutlap: false };
+    const pitCount = pitCountFromLap(lap);
+    let lapPhase = lap.lapPhase;
+    let isPitLap = lap.isPitLap;
+
+    if (!lapPhase && state.nextIsOutlap) {
+      lapPhase = 'outlap';
+      isPitLap = true;
+      state.nextIsOutlap = false;
+    }
+    if (pitCount !== null && state.previousPitCount !== null && pitCount > state.previousPitCount) {
+      lapPhase = lapPhase || 'inlap';
+      isPitLap = true;
+      state.nextIsOutlap = true;
+    }
+    if (pitCount !== null) state.previousPitCount = pitCount;
+    stateByCar.set(lap.carNumber, state);
+    return { ...lap, lapPhase, isPitLap: isPitLap === true };
+  });
 }
 
 // Decides whether a full lap should count for lap-time pace statistics. Explicit
 // paceEligible fields win; otherwise neutralized race-control flags exclude it.
 function lapPaceEligible(lap) {
+  // Hard exclusions always win over a stale/incorrect explicit true value.
+  // One neutralized sector means the complete lap was not fully green.
+  if (pitAffectedLap(lap)) return false;
+  if ([lap.lapFlag, lap.sessionFlag, lap.sector1Flag, lap.sector2Flag, lap.sector3Flag].some(isNeutralizedFlag)) return false;
   const explicit = boolOrNull(lap.paceEligible);
   if (explicit !== null) return explicit;
-  return !isNeutralizedFlag(lap.lapFlag || lap.sessionFlag);
+  return true;
 }
 
 // Decides whether one sector should count for sector averages/bests. This is
 // deliberately more granular than lapPaceEligible: a lap can become FCY in S3
 // while S1/S2 remain valid.
 function sectorPaceEligible(lap, sectorNumber) {
+  if (pitAffectedLap(lap)) return false;
   const explicit = boolOrNull(lap[`sector${sectorNumber}Eligible`]);
-  if (explicit !== null) return explicit;
-
   const sectorFlag = lap[`sector${sectorNumber}Flag`];
+  if (isNeutralizedFlag(sectorFlag)) return false;
+  if (explicit !== null) return explicit;
   if (sectorFlag) return isGreenFlag(sectorFlag) && !isNeutralizedFlag(sectorFlag);
 
   // If the exact sector flag is unknown, fall back to the lap/session flag. This
@@ -113,7 +180,7 @@ function sectorPaceEligible(lap, sectorNumber) {
 // Returns all completed laps sorted chronologically enough for averages and
 // "last lap" values. Invalid/no-car rows are dropped here.
 function completedLaps(history) {
-  return (history || [])
+  const sorted = (history || [])
     .map(normalizeLap)
     .filter((lap) => lap.carNumber && lap.lapTimeMs !== null)
     .sort((a, b) => {
@@ -121,6 +188,7 @@ function completedLaps(history) {
       if (lapDelta) return lapDelta;
       return new Date(a.recordedAt || 0) - new Date(b.recordedAt || 0);
     });
+  return annotatePitPhases(sorted);
 }
 
 // Convenience filter for all completed laps of one car.
@@ -296,9 +364,13 @@ return {
   numberOrNull,
   average,
   isNeutralizedFlag,
+  captureSectorFlags,
   lapPaceEligible,
   sectorPaceEligible,
   normalizeLap,
+  pitCountFromLap,
+  pitAffectedLap,
+  annotatePitPhases,
   completedLaps,
   lapsForCar,
   lapsForDriver,

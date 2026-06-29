@@ -58,7 +58,10 @@
           <button id="stop" class="secondary">Stop</button>
           <button id="show-live" class="secondary">Page</button>
           <button id="open-graphs" class="secondary icon-button" title="Open graphs" aria-label="Open graphs">
-            <span class="graph-glyph" aria-hidden="true"><i></i><i></i><i></i></span>
+            <svg class="graph-icon" aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M3 3v18h18"></path>
+              <path d="m7 15 4-4 3 3 5-6"></path>
+            </svg>
           </button>
           <button id="open-setup" class="secondary">Setup</button>
         </div>
@@ -154,6 +157,19 @@
         </article>
       </section>
 
+      <section class="battle-strip">
+        <article class="metric-box battle-card" id="battle-ahead-card">
+          <span>Car ahead in class</span>
+          <strong id="battle-ahead-main">—</strong>
+          <small id="battle-ahead-detail">Waiting for class gap and pace</small>
+        </article>
+        <article class="metric-box battle-card" id="battle-behind-card">
+          <span>Car behind in class</span>
+          <strong id="battle-behind-main">—</strong>
+          <small id="battle-behind-detail">Waiting for class gap and pace</small>
+        </article>
+      </section>
+
       <section class="pit-window board-box">
         <div class="pit-header">
           <div>
@@ -189,7 +205,7 @@
           <span class="pit-segment pit-start-closed"></span>
           <span class="pit-segment pit-open"></span>
           <span class="pit-segment pit-end-closed"></span>
-          <b id="pit-cooldown-overlay"></b>
+          <b id="pit-cooldown-overlays"></b>
           <i id="pit-progress"></i>
         </div>
         <p id="pit-detail" class="pit-detail">Waiting for race clock and class gaps.</p>

@@ -50,7 +50,8 @@ const neutralizedHistory = [
 ];
 const combined = [...history, ...neutralizedHistory];
 const combinedLaps = graphData.driverLapTimes(combined, 33);
-assert.strictEqual(combinedLaps.series[0].points.at(-1).eligible, false, 'FCY lap stays visible as an ineligible point');
+assert.strictEqual(combinedLaps.series[0].points.length, 20, 'FCY laps are omitted from the graph entirely');
+assert.strictEqual(combinedLaps.series[0].points.at(-1).x, 20);
 const combinedPace = graphData.driverPaceComparison(combined, 33);
 assert.strictEqual(combinedPace.series[1].values[0], 100095, 'FCY laps do not affect driver lap averages');
 const combinedSectors = graphData.driverSectorComparison(combined, 33);
@@ -62,7 +63,8 @@ assert.strictEqual(classGraph.type, 'line');
 assert.deepStrictEqual(classGraph.series.map((series) => series.carNumber), ['33', '2', '9']);
 assert.strictEqual(classGraph.series.find((series) => series.carNumber === '33').highlight, true);
 assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').highlight, false);
-assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').points.at(-1).sampleCount, 5);
+assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').points.length, 20);
+assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').points[0].y, 99000);
 
 const otherClass = lap({ carNumber: 77, className: 'GT', teamName: 'GT Team', driverName: 'GT Driver', lapNumber: 1, lapTimeMs: 110000, sector1Ms: 35000, sector2Ms: 40000, sector3Ms: 35000 });
 assert.strictEqual(graphData.classPaceComparison([...history, otherClass], 33).series.some((series) => series.carNumber === '77'), false);

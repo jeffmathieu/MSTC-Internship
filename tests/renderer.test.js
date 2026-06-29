@@ -25,7 +25,7 @@ class FakeElement {
     this.id = id;
     this.tagName = tagName.toUpperCase();
     this.textContent = '';
-    this.innerHTML = '';
+    this._innerHTML = '';
     this.value = '';
     this.children = [];
     this.dataset = {};
@@ -40,6 +40,12 @@ class FakeElement {
     this._className.split(/\s+/).filter(Boolean).forEach((name) => this.classList.add(name));
   }
   get className() { return this._className || ''; }
+  set innerHTML(value) {
+    this._innerHTML = String(value || '');
+    this.children.forEach((child) => { child.parentElement = null; });
+    this.children = [];
+  }
+  get innerHTML() { return this._innerHTML; }
   appendChild(child) {
     child.parentElement = this;
     this.children.push(child);
@@ -183,6 +189,7 @@ const updatedState = {
     waitMs: 0,
     completedPitStops: 1,
     lastPitElapsedMs: 3600000,
+    validPitElapsedHistoryMs: [3600000, 7200000],
     remainingRequiredStops: 1,
     mustPitSoonMs: 1800000,
     clock: { elapsedMs: 3600000, remainingMs: 3600000, progress: 0.5 },
@@ -199,6 +206,24 @@ const updatedState = {
     driversByCar: {
       2: [{ driverName: 'Fast Driver', averageLapMs: 123500 }],
       56: [{ driverName: 'X Driver', averageLapMs: 129000 }]
+    },
+    adjacentClassBattles: {
+      available: true,
+      lapWindow: 10,
+      ahead: {
+        row: { carNumber: '2' },
+        lastLapDeltaLabel: '+0.500s',
+        gapLabel: '5.000s',
+        catchInfo: 'we catch #2 · 0.500s/lap · 10.0 laps · 20.8 min',
+        trendState: 'good'
+      },
+      behind: {
+        row: { carNumber: '56' },
+        lastLapDeltaLabel: '-1.000s',
+        gapLabel: '10.000s',
+        catchInfo: '#56 catches us · 1.000s/lap · 10.0 laps · 20.8 min',
+        trendState: 'bad'
+      }
     },
     dashboardAnalysis: {
       driverComparison: {
@@ -317,9 +342,16 @@ module.exports = (async () => {
   assert.ok(document.getElementById('pit-projection').textContent.includes('0:05.000 behind #2'));
   assert.ok(document.getElementById('pit-projection').textContent.includes('0:10.000 ahead #56'));
   assert.strictEqual(document.getElementById('pit-bar').style.gridTemplateColumns, '1500000fr 11400000fr 1500000fr');
-  assert.strictEqual(document.getElementById('pit-cooldown-overlay').style.left, '25%');
-  assert.ok(document.getElementById('pit-cooldown-overlay').style.width.startsWith('10.416'));
-  assert.strictEqual(document.getElementById('pit-cooldown-overlay').style.display, 'block');
+  const cooldownPeriods = document.getElementById('pit-cooldown-overlays').children;
+  assert.strictEqual(cooldownPeriods.length, 2);
+  assert.strictEqual(cooldownPeriods[0].style.left, '25%');
+  assert.ok(cooldownPeriods[0].style.width.startsWith('10.416'));
+  assert.strictEqual(cooldownPeriods[1].style.left, '50%');
+  assert.strictEqual(document.getElementById('battle-ahead-main').textContent, '#2 · Last Δ +0.500s');
+  assert.ok(document.getElementById('battle-ahead-detail').textContent.includes('10.0 laps'));
+  assert.ok(document.getElementById('battle-ahead-card').classList.contains('good'));
+  assert.strictEqual(document.getElementById('battle-behind-main').textContent, '#56 · Last Δ -1.000s');
+  assert.ok(document.getElementById('battle-behind-card').classList.contains('bad'));
 
   await document.getElementById('open-graphs').trigger('click');
   assert.strictEqual(graphsOpenCount, 1, 'graph icon opens the detachable graphs window');

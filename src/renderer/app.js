@@ -399,6 +399,33 @@ function renderDriverAndClassComparisons(summary, rows) {
   setDelta('delta-xic-card', 'delta-xic', xicDelta);
 }
 
+// Renders the nearest same-class rivals from the precomputed class battle
+// summary. No gap or pace arithmetic lives here; classBattle.js supplies last-
+// lap deltas, the overall DIFF chain, and ten-lap catch estimates.
+function renderAdjacentClassBattles(summary) {
+  const battles = summary?.adjacentClassBattles;
+  const renderSide = (side, item) => {
+    const card = $(`battle-${side}-card`);
+    if (!item) {
+      setText(`battle-${side}-main`, side === 'ahead' && battles?.available ? 'Class leader' : side === 'behind' && battles?.available ? 'No class car behind' : '—');
+      setText(`battle-${side}-detail`, battles?.available ? 'No adjacent rival' : 'Waiting for class gap and pace');
+      if (card) {
+        card.classList.remove('good', 'bad');
+        card.classList.add('neutral');
+      }
+      return;
+    }
+    setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · Last Δ ${item.lastLapDeltaLabel}`);
+    setText(`battle-${side}-detail`, `Gap ${item.gapLabel} · ${item.catchInfo}`);
+    if (card) {
+      card.classList.remove('good', 'bad', 'neutral');
+      card.classList.add(item.trendState || 'neutral');
+    }
+  };
+  renderSide('ahead', battles?.ahead || null);
+  renderSide('behind', battles?.behind || null);
+}
+
 // Converts the structured after-pit projection into one compact label. Lap gaps
 // are shown as "1L", "4L", etc. instead of fake seconds.
 function projectionLabel(projection) {
@@ -458,21 +485,28 @@ function renderPitstopPlan(plan) {
     const open = Math.max(0, race - start - end);
     bar.style.gridTemplateColumns = `${start}fr ${open}fr ${end}fr`;
   }
-  const cooldownOverlay = $('pit-cooldown-overlay');
-  if (cooldownOverlay && plan.rules?.raceDurationMs) {
+  const cooldownOverlays = $('pit-cooldown-overlays');
+  if (cooldownOverlays && plan.rules?.raceDurationMs) {
     const race = Math.max(1, Number(plan.rules.raceDurationMs));
-    const lastPitElapsedMs = numericMs(plan.lastPitElapsedMs ?? plan.pitState?.lastPitElapsedMs);
     const cooldownMs = Math.max(0, Number(plan.rules.pitCooldownMs || 0));
-    if (Number.isFinite(lastPitElapsedMs) && cooldownMs > 0) {
-      const startPct = Math.max(0, Math.min(100, (lastPitElapsedMs / race) * 100));
-      const endPct = Math.max(startPct, Math.min(100, ((lastPitElapsedMs + cooldownMs) / race) * 100));
-      cooldownOverlay.style.left = `${startPct}%`;
-      cooldownOverlay.style.width = `${endPct - startPct}%`;
-      cooldownOverlay.style.display = endPct > startPct ? 'block' : 'none';
-    } else {
-      cooldownOverlay.style.display = 'none';
-      cooldownOverlay.style.width = '0%';
+    const history = (plan.validPitElapsedHistoryMs || plan.pitState?.validPitElapsedHistoryMs || [])
+      .map(numericMs)
+      .filter(Number.isFinite);
+    if (!history.length && plan.pitState?.lastPitCountedAsValid) {
+      const latest = numericMs(plan.lastPitElapsedMs ?? plan.pitState?.lastPitElapsedMs);
+      if (Number.isFinite(latest)) history.push(latest);
     }
+    cooldownOverlays.innerHTML = '';
+    history.forEach((pitElapsedMs) => {
+      const startPct = Math.max(0, Math.min(100, (pitElapsedMs / race) * 100));
+      const endPct = Math.max(startPct, Math.min(100, ((pitElapsedMs + cooldownMs) / race) * 100));
+      if (endPct <= startPct) return;
+      const overlay = document.createElement('i');
+      overlay.className = 'pit-cooldown-period';
+      overlay.style.left = `${startPct}%`;
+      overlay.style.width = `${endPct - startPct}%`;
+      cooldownOverlays.appendChild(overlay);
+    });
   }
 }
 
@@ -546,6 +580,7 @@ function render(state) {
   renderFollowed(rows);
   renderSectorAnalytics(currentState.analyticsSummary || null, rows);
   renderDriverAndClassComparisons(currentState.analyticsSummary || null, rows);
+  renderAdjacentClassBattles(currentState.analyticsSummary || null);
   renderPitstopPlan(currentState.pitstopPlan || null);
   renderAllRowsTable(rows);
   renderDetails(currentState);

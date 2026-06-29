@@ -71,6 +71,16 @@ const validPitIncrease = nextPitStateFromRow({
 assert.strictEqual(validPitIncrease.completedPitStops, 2);
 assert.strictEqual(validPitIncrease.validCompletedPitStops, 2);
 assert.strictEqual(validPitIncrease.lastPitCountedAsValid, true);
+assert.deepStrictEqual(validPitIncrease.validPitElapsedHistoryMs, [40 * 60 * 1000]);
+
+const secondValidPitIncrease = nextPitStateFromRow({
+  previous: validPitIncrease,
+  row: { pit: 'P3' },
+  session: { timeToGo: '0:50:00' },
+  rules,
+  collectedAt: '2026-06-26T08:35:00.000Z'
+});
+assert.deepStrictEqual(secondValidPitIncrease.validPitElapsedHistoryMs, [40 * 60 * 1000, 70 * 60 * 1000], 'older cooldown periods remain stored');
 
 // A later PIT-counter increase during a red/closed window is stored as a real
 // pitstop but does not count toward the mandatory valid-stop total.
@@ -84,6 +94,7 @@ const invalidPitIncrease = nextPitStateFromRow({
 assert.strictEqual(invalidPitIncrease.completedPitStops, 1);
 assert.strictEqual(invalidPitIncrease.validCompletedPitStops, 0);
 assert.strictEqual(invalidPitIncrease.lastPitCountedAsValid, false);
+assert.deepStrictEqual(invalidPitIncrease.validPitElapsedHistoryMs, []);
 
 // Race clock parsing drives all open/closed window rules.
 const clock = raceClockFromSession({ timeToGo: '1:30:00' }, rules);

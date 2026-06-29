@@ -5,9 +5,11 @@ const {
   classSortedRows,
   classGapToPrevious,
   relativeClassGap,
+  overallRelativeGap,
   lapsForCar,
   recentAverageForCar,
-  buildClassBattleSummary
+  buildClassBattleSummary,
+  buildAdjacentClassBattles
 } = require('../src/shared/classBattle');
 
 const rowsWithOtherClassBetween = [
@@ -53,12 +55,32 @@ assert.ok(unsafeItem.battle.catchInfo.includes('#2 gaining'));
 assert.ok(unsafeItem.battle.catchInfo.includes('1.000s/lap'));
 assert.ok(!unsafeItem.battle.catchInfo.includes('laps ·'));
 
+const numericOtherClassChain = [
+  { position: 1, carNumber: 13, className: 'LMP3', classPosition: 1, lapNumber: 20, lastLap: '2:05.000', diff: '' },
+  { position: 2, carNumber: 77, className: 'GT', classPosition: 1, lapNumber: 20, lastLap: '2:07.000', diff: '4.000' },
+  { position: 3, carNumber: 2, className: 'LMP3', classPosition: 2, lapNumber: 20, lastLap: '2:04.000', diff: '6.000' }
+];
+assert.strictEqual(overallRelativeGap(numericOtherClassChain, numericOtherClassChain[0], numericOtherClassChain[2]), 10000);
+const numericChainBattle = buildAdjacentClassBattles(numericOtherClassChain, history, 13, { lapWindow: 10 });
+assert.strictEqual(numericChainBattle.behind.relativeGap, 10000);
+assert.strictEqual(numericChainBattle.behind.lastLapDeltaMs, -1000);
+assert.strictEqual(numericChainBattle.behind.trendState, 'bad');
+assert.strictEqual(numericChainBattle.lapWindow, 10);
+assert.strictEqual(overallRelativeGap(numericOtherClassChain, numericOtherClassChain[0], { ...numericOtherClassChain[2], lapNumber: 19 }), null);
+
 const classRows = classSortedRows(sameClassRows, 'LMP3');
 const reliableGap = classGapToPrevious(sameClassRows, classRows, sameClassRows[1]);
 assert.strictEqual(reliableGap.reliable, true);
 assert.strictEqual(reliableGap.ms, 12000);
 assert.strictEqual(relativeClassGap(sameClassRows, classRows, sameClassRows[0], sameClassRows[2]), 15000);
 assert.strictEqual(recentAverageForCar(history, 2), 125000);
+assert.strictEqual(recentAverageForCar([
+  { carNumber: 2, lapNumber: 1, lapTimeMs: 125000, pitInfo: '0' },
+  { carNumber: 2, lapNumber: 2, lapTimeMs: 180000, pitInfo: 'P1' },
+  { carNumber: 2, lapNumber: 3, lapTimeMs: 150000, pitInfo: 'P1' },
+  { carNumber: 2, lapNumber: 4, lapTimeMs: 126000, pitInfo: 'P1' },
+  { carNumber: 2, lapNumber: 5, lapTimeMs: 200000, sessionFlag: 'Safety car', pitInfo: 'P1' }
+], 2, 10), 125500, 'recent battle pace excludes pit, outlap and Safety Car laps');
 assert.deepStrictEqual(lapsForCar([
   { carNumber: 5, lapNumber: '', lapTimeMs: 102000, collectedAt: '2026-06-23T12:02:00.000Z' },
   { carNumber: 5, lapNumber: '', lapTimeMs: 101000, collectedAt: '2026-06-23T12:01:00.000Z' },
@@ -89,5 +111,6 @@ assert.strictEqual(slowerLeaderItem.battle.estimate, 'we are not catching');
 const missingSummary = buildClassBattleSummary(sameClassRows, history, 999);
 assert.strictEqual(missingSummary.followed, null);
 assert.deepStrictEqual(missingSummary.items, []);
+assert.strictEqual(buildAdjacentClassBattles(sameClassRows, history, 999).available, false);
 
 console.log('Class battle tests passed.');

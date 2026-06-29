@@ -5,10 +5,13 @@
 // followed car number; this module returns data that any dashboard view can
 // render.
 (function initClassBattle(root, factory) {
-  const api = factory();
+  const analytics = typeof module === 'object' && module.exports
+    ? require('./lapAnalytics')
+    : root?.lapAnalytics;
+  const api = factory(analytics);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.classBattle = api;
-})(typeof globalThis !== 'undefined' ? globalThis : null, function createClassBattleApi() {
+})(typeof globalThis !== 'undefined' ? globalThis : null, function createClassBattleApi(lapAnalytics) {
 // Shared numeric helper for live rows and stored history. Empty values should
 // stay unknown instead of becoming 0-second gaps or lap times.
 function numberOrNull(value) {
@@ -66,6 +69,11 @@ function parseGapToMs(value) {
 // Formats gap deltas for compact class-table cells.
 function formatSeconds(ms) {
   return Number.isFinite(ms) ? `${(ms / 1000).toFixed(3)}s` : '—';
+}
+
+function formatSignedSeconds(ms) {
+  if (!Number.isFinite(ms)) return '—';
+  return `${ms >= 0 ? '+' : '-'}${(Math.abs(ms) / 1000).toFixed(3)}s`;
 }
 
 // Converts row ordering values into sortable numbers, pushing unknown values to
@@ -134,6 +142,27 @@ function relativeClassGap(rows, classRows, fromRow, toRow) {
   return totalMs;
 }
 
+// Adds the provider's DIFF/INT chain through the complete overall table. This
+// remains correct when other classes sit between two class rivals because each
+// row contributes its interval to the immediately preceding overall car.
+function overallRelativeGap(rows, fromRow, toRow) {
+  const ordered = overallSortedRows(rows);
+  const fromIndex = ordered.findIndex((row) => String(row.carNumber) === String(fromRow?.carNumber));
+  const toIndex = ordered.findIndex((row) => String(row.carNumber) === String(toRow?.carNumber));
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return null;
+  const fromLap = numberOrNull(fromRow?.lapNumber);
+  const toLap = numberOrNull(toRow?.lapNumber);
+  if (fromLap !== null && toLap !== null && fromLap !== toLap) return null;
+  let totalMs = 0;
+  for (let index = Math.min(fromIndex, toIndex) + 1; index <= Math.max(fromIndex, toIndex); index += 1) {
+    const row = ordered[index];
+    const intervalMs = parseGapToMs(row.diff) ?? parseGapToMs(row.interval) ?? parseGapToMs(row.gap);
+    if (!Number.isFinite(intervalMs)) return null;
+    totalMs += intervalMs;
+  }
+  return totalMs;
+}
+
 // Normalizes stored history rows to the small shape needed by catch estimates.
 function historyLapForAnalysis(entry) {
   const lastLapMs = numberOrNull(entry.lastLapMs ?? entry.lapTimeMs);
@@ -147,38 +176,31 @@ function historyLapForAnalysis(entry) {
   };
 }
 
-// Sort helper for stored laps when lap numbers are missing.
-function historySortTime(entry) {
-  const ms = new Date(entry.recordedAt || 0).getTime();
-  return Number.isFinite(ms) ? ms : 0;
-}
-
 // Returns sorted completed laps for one car, used for recent-average pace.
 function lapsForCar(history, carNumber) {
-  return (history || [])
-    .map(historyLapForAnalysis)
-    .filter((entry) => entry.carNumber === String(carNumber) && Number.isFinite(entry.lastLapMs))
-    .sort((a, b) => {
-      const lapDelta = (a.lapNumber ?? 0) - (b.lapNumber ?? 0);
-      if (lapDelta) return lapDelta;
-      return historySortTime(a) - historySortTime(b);
-    });
+  return lapAnalytics.lapsForCar(history, carNumber).map(historyLapForAnalysis);
 }
 
 // Averages the last N valid laps for one car. This makes catch estimates react
 // to current pace instead of full-race averages.
-function recentAverageForCar(history, carNumber, lapWindow = 5) {
-  const laps = lapsForCar(history, carNumber).slice(-lapWindow);
+function recentAverageForCar(history, carNumber, lapWindow = 10) {
+  const laps = lapAnalytics.lapsForCar(history, carNumber)
+    .filter(lapAnalytics.lapPaceEligible)
+    .slice(-lapWindow)
+    .map(historyLapForAnalysis);
   return average(laps.map((entry) => entry.lastLapMs));
 }
 
 // Builds one catch/being-caught estimate versus a class rival. The output keeps
 // raw numbers and a display string so future UI can choose either.
 function buildBattleItem({ rows, classRows, followed, row, history, lapWindow }) {
-  const ourAvg = recentAverageForCar(history, followed.carNumber, lapWindow) ?? numberOrNull(followed.lastLapMs);
-  const theirAvg = recentAverageForCar(history, row.carNumber, lapWindow) ?? numberOrNull(row.lastLapMs);
+  const ourAvg = recentAverageForCar(history, followed.carNumber, lapWindow) ?? parseTimeToMs(followed.lastLap);
+  const theirAvg = recentAverageForCar(history, row.carNumber, lapWindow) ?? parseTimeToMs(row.lastLap);
   const relation = rowSortNumber(row.classPosition) < rowSortNumber(followed.classPosition) ? 'ahead' : 'behind';
-  const relativeGap = relativeClassGap(rows, classRows, followed, row);
+  const relativeGap = overallRelativeGap(rows, followed, row);
+  const ourLastLapMs = parseTimeToMs(followed.lastLap) ?? numberOrNull(followed.lastLapMs);
+  const theirLastLapMs = parseTimeToMs(row.lastLap) ?? numberOrNull(row.lastLapMs);
+  const lastLapDeltaMs = Number.isFinite(ourLastLapMs) && Number.isFinite(theirLastLapMs) ? theirLastLapMs - ourLastLapMs : null;
   let deltaPerLap = null;
   let lapsToCatch = null;
   let minutesToCatch = null;
@@ -211,19 +233,28 @@ function buildBattleItem({ rows, classRows, followed, row, history, lapWindow })
     Number.isFinite(lapsToCatch) ? `${lapsToCatch.toFixed(1)} laps` : '',
     Number.isFinite(minutesToCatch) ? `${minutesToCatch.toFixed(1)} min` : ''
   ].filter(Boolean).join(' · ');
+  const trendState = !Number.isFinite(deltaPerLap) || deltaPerLap === 0
+    ? 'neutral'
+    : relation === 'ahead'
+      ? (deltaPerLap > 0 ? 'good' : 'bad')
+      : (deltaPerLap > 0 ? 'bad' : 'good');
 
   return {
     key: `${followed.carNumber}|${row.carNumber}`,
     relation,
     row,
     relativeGap,
+    gapLabel: Number.isFinite(relativeGap) ? formatSeconds(relativeGap) : 'gap unknown',
+    lastLapDeltaMs,
+    lastLapDeltaLabel: formatSignedSeconds(lastLapDeltaMs),
     ourAvg,
     theirAvg,
     deltaPerLap,
     lapsToCatch,
     minutesToCatch,
     estimate,
-    catchInfo
+    catchInfo,
+    trendState
   };
 }
 
@@ -236,7 +267,7 @@ function buildClassBattleSummary(rows, history, followedCarNumber, options = {})
     return { followed: null, className: '', classRows: [], items: [] };
   }
 
-  const lapWindow = options.lapWindow || 5;
+  const lapWindow = options.lapWindow || 10;
   const classRows = classSortedRows(rows, followed.className);
   const items = classRows.map((row) => {
     const classGap = classGapToPrevious(rows, classRows, row);
@@ -249,21 +280,42 @@ function buildClassBattleSummary(rows, history, followedCarNumber, options = {})
   return { followed, className: followed.className, classRows, items };
 }
 
+// Returns only the class cars immediately ahead of and behind us. This compact
+// object is persisted in analytics_summary.json and can be rendered by any UI
+// without repeating gap or catch calculations.
+function buildAdjacentClassBattles(rows, history, followedCarNumber, options = {}) {
+  const summary = buildClassBattleSummary(rows, history, followedCarNumber, options);
+  if (!summary.followed) return { available: false, ahead: null, behind: null, lapWindow: options.lapWindow || 10 };
+  const ourIndex = summary.classRows.findIndex((row) => String(row.carNumber) === String(followedCarNumber));
+  const itemFor = (row) => summary.items.find((item) => String(item.row.carNumber) === String(row?.carNumber))?.battle || null;
+  return {
+    available: true,
+    className: summary.className,
+    followedCarNumber: String(followedCarNumber),
+    lapWindow: options.lapWindow || 10,
+    ahead: itemFor(ourIndex > 0 ? summary.classRows[ourIndex - 1] : null),
+    behind: itemFor(ourIndex >= 0 && ourIndex < summary.classRows.length - 1 ? summary.classRows[ourIndex + 1] : null)
+  };
+}
+
 return {
   numberOrNull,
   average,
   parseTimeToMs,
   parseGapToMs,
   formatSeconds,
+  formatSignedSeconds,
   rowSortNumber,
   classSortedRows,
   overallSortedRows,
   previousOverallRow,
   classGapToPrevious,
   relativeClassGap,
+  overallRelativeGap,
   lapsForCar,
   recentAverageForCar,
   buildBattleItem,
-  buildClassBattleSummary
+  buildClassBattleSummary,
+  buildAdjacentClassBattles
 };
 });

@@ -3,9 +3,13 @@ const {
   numberOrNull,
   average,
   isNeutralizedFlag,
+  captureSectorFlags,
   lapPaceEligible,
   sectorPaceEligible,
   normalizeLap,
+  pitCountFromLap,
+  pitAffectedLap,
+  annotatePitPhases,
   completedLaps,
   lapsForCar,
   lapsForDriver,
@@ -33,6 +37,15 @@ assert.strictEqual(isNeutralizedFlag('Full Course Yellow'), true);
 assert.strictEqual(isNeutralizedFlag('FCY'), true);
 assert.strictEqual(isNeutralizedFlag('Code 60'), true);
 assert.strictEqual(isNeutralizedFlag('Green flag'), false);
+
+const firstGreenSector = captureSectorFlags({ lastLap: '2:05.000', sector1: '40.000', sector1Flag: '', sector1Eligible: '' }, null, 'Green flag');
+assert.strictEqual(firstGreenSector.sector1Flag, 'Green flag');
+assert.strictEqual(firstGreenSector.sector1Eligible, 'true');
+const sameSectorAfterFcy = captureSectorFlags({ lastLap: '2:05.000', sector1: '40.000', sector2: '45.000', sector1Flag: '', sector2Flag: '', sector1Eligible: '', sector2Eligible: '' }, firstGreenSector, 'Full Course Yellow');
+assert.strictEqual(sameSectorAfterFcy.sector1Flag, 'Green flag');
+assert.strictEqual(sameSectorAfterFcy.sector1Eligible, 'true');
+assert.strictEqual(sameSectorAfterFcy.sector2Flag, 'Full Course Yellow');
+assert.strictEqual(sameSectorAfterFcy.sector2Eligible, 'false');
 
 const oldShapeLap = normalizeLap({
   carNumber: 7,
@@ -122,6 +135,35 @@ assert.strictEqual(lapPaceEligible(normalizedNeutralized[2]), false);
 assert.strictEqual(sectorPaceEligible(normalizedNeutralized[2], 1), true);
 assert.strictEqual(sectorPaceEligible(normalizedNeutralized[2], 2), false);
 assert.strictEqual(sectorPaceEligible(normalizedNeutralized[2], 3), false);
+
+const oneNeutralizedSector = normalizeLap({
+  carNumber: 33,
+  lapTimeMs: 100000,
+  paceEligible: true,
+  sessionFlag: 'Green flag',
+  sector1Flag: 'Green flag',
+  sector2Flag: 'Safety car',
+  sector3Flag: 'Green flag'
+});
+assert.strictEqual(lapPaceEligible(oneNeutralizedSector), false, 'one SC/FCY sector excludes the complete lap');
+assert.strictEqual(sectorPaceEligible(oneNeutralizedSector, 1), true, 'green sectors remain valid individually');
+assert.strictEqual(sectorPaceEligible(oneNeutralizedSector, 2), false);
+
+const pitSequence = [
+  normalizeLap({ carNumber: 33, lapNumber: 1, lapTimeMs: 100000, pitInfo: '0' }),
+  normalizeLap({ carNumber: 33, lapNumber: 2, lapTimeMs: 150000, pitInfo: 'P1' }),
+  normalizeLap({ carNumber: 33, lapNumber: 3, lapTimeMs: 120000, pitInfo: 'P1' }),
+  normalizeLap({ carNumber: 33, lapNumber: 4, lapTimeMs: 101000, pitInfo: 'P1' })
+];
+const annotatedPitSequence = annotatePitPhases(pitSequence);
+assert.strictEqual(pitCountFromLap(annotatedPitSequence[1]), 1);
+assert.strictEqual(annotatedPitSequence[1].lapPhase, 'inlap');
+assert.strictEqual(annotatedPitSequence[2].lapPhase, 'outlap');
+assert.strictEqual(pitAffectedLap(annotatedPitSequence[2]), true);
+assert.strictEqual(lapPaceEligible(annotatedPitSequence[1]), false);
+assert.strictEqual(lapPaceEligible(annotatedPitSequence[2]), false);
+assert.strictEqual(lapPaceEligible(annotatedPitSequence[3]), true);
+assert.strictEqual(sectorPaceEligible(annotatedPitSequence[2], 1), false, 'outlap sectors do not affect sector averages');
 
 const neutralizedStats = statsForLaps(normalizedNeutralized);
 assert.strictEqual(neutralizedStats.lapCount, 4);

@@ -141,6 +141,7 @@ function nextPitStateFromRow({ previous = {}, row = {}, session = {}, rules = {}
     rawPitCount: null,
     lastPitAt: '',
     lastPitElapsedMs: null,
+    validPitElapsedHistoryMs: [],
     ...previous
   };
   const nextCount = pitCountFromRow(row);
@@ -166,6 +167,9 @@ function nextPitStateFromRow({ previous = {}, row = {}, session = {}, rules = {}
     next.lastPitElapsedMs = clock.elapsedMs;
     next.lastPitCountedAsValid = windowAtPit.allowed;
     next.lastPitValidityReason = windowAtPit.allowed ? 'Pitstop counted: pit window was open.' : `Pitstop not counted: ${windowAtPit.reason}.`;
+    if (windowAtPit.allowed && Number.isFinite(clock.elapsedMs)) {
+      next.validPitElapsedHistoryMs = [...(previousState.validPitElapsedHistoryMs || []), clock.elapsedMs];
+    }
   }
   return next;
 }
@@ -471,6 +475,7 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
     completedPitStops,
     totalPitStops,
     lastPitElapsedMs: numberOrNull(pitState.lastPitElapsedMs),
+    validPitElapsedHistoryMs: (pitState.validPitElapsedHistoryMs || []).map(numberOrNull).filter(Number.isFinite),
     remainingRequiredStops,
     latestSafePitElapsedMs,
     mustPitSoonMs,

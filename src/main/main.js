@@ -18,6 +18,7 @@ const {
 const {
   completedLaps,
   lapPaceEligible,
+  captureSectorFlags,
   driverStats,
   carStats,
   carsInClass,
@@ -29,6 +30,7 @@ const {
   nextPitStateFromRow
 } = require('../shared/pitstopPlanner');
 const { buildLapPrediction } = require('../shared/lapPrediction');
+const { buildAdjacentClassBattles } = require('../shared/classBattle');
 
 // Main-process references. Electron keeps UI windows and timers alive through
 // these variables, so every start/stop function below updates them carefully.
@@ -388,7 +390,7 @@ function updatePitState(settings, rows, context) {
   const row = (rows || []).find((candidate) => String(candidate.carNumber) === followedCar);
   if (!followedCar || !row) return latestPitStateByCar.get(followedCar) || { completedPitStops: 0, validCompletedPitStops: 0 };
 
-  const previous = latestPitStateByCar.get(followedCar) || { completedPitStops: 0, validCompletedPitStops: 0, rawPitCount: null, lastPitAt: '', lastPitElapsedMs: null };
+  const previous = latestPitStateByCar.get(followedCar) || { completedPitStops: 0, validCompletedPitStops: 0, rawPitCount: null, lastPitAt: '', lastPitElapsedMs: null, validPitElapsedHistoryMs: [] };
   const next = nextPitStateFromRow({
     previous,
     row,
@@ -426,6 +428,18 @@ function writePitstopPlan(settings, context, rows) {
 // intentionally provider-agnostic and only writes normalized storage rows.
 function normalizeRowsForStorage(rows, context) {
   return rows.map((row) => normalizeForStorage(row, context));
+}
+
+// Captures the race-control state when each live sector first appears. Timing
+// pages usually expose only the current global flag, so preserving the first
+// observation lets analytics later distinguish green S1/S2 from an S3 that was
+// completed after FCY/SC began.
+function annotateLiveSectorFlags(storageRows, context) {
+  const currentFlag = String(context?.session?.flag || context?.sessionFlag || '');
+  return storageRows.map((row) => {
+    const previous = latestLiveRowByCar.get(liveRowKey(row));
+    return captureSectorFlags(row, previous, currentFlag);
+  });
 }
 
 function writeLatestRows(settings, normalizedRows) {
@@ -516,7 +530,7 @@ function compactDashboardAnalysis(analysis) {
 
 // Rebuilds all aggregate analytics from stored lap history. This runs after
 // every poll, but the output stays compact enough for renderer state and disk.
-function buildAnalyticsSummary(settings, context) {
+function buildAnalyticsSummary(settings, context, rows = []) {
   const history = collectorState.lapHistory || [];
   const laps = completedLaps(history);
   const carNumbers = [...new Set(laps.map((lap) => lap.carNumber).filter(Boolean))];
@@ -540,6 +554,7 @@ function buildAnalyticsSummary(settings, context) {
       carNumber,
       driverStats(history, carNumber).map(compactStats)
     ])),
+    adjacentClassBattles: buildAdjacentClassBattles(rows, history, settings.followedCar || '', { lapWindow: 10 }),
     dashboardAnalysis: compactDashboardAnalysis(buildDashboardAnalysis(history, {
       ourCarNumber: settings.followedCar || '',
       selectedCarNumber
@@ -548,9 +563,9 @@ function buildAnalyticsSummary(settings, context) {
 }
 
 // Writes analytics_summary.json and mirrors it into collectorState for the UI.
-function writeAnalyticsSummary(settings, context) {
+function writeAnalyticsSummary(settings, context, rows = []) {
   const folder = ensureStorage(settings);
-  const summary = buildAnalyticsSummary(settings, context);
+  const summary = buildAnalyticsSummary(settings, context, rows);
   fs.writeFileSync(path.join(folder, 'analytics_summary.json'), JSON.stringify(summary, null, 2));
   collectorState.analyticsSummary = summary;
   return summary;
@@ -686,7 +701,7 @@ function saveLatestSnapshot(settings, normalized) {
   try {
     const collectedAt = new Date().toISOString();
     const context = storageContext(settings, normalized, collectedAt);
-    const storageRows = normalizeRowsForStorage(normalized.rows, context);
+    const storageRows = annotateLiveSectorFlags(normalizeRowsForStorage(normalized.rows, context), context);
     writeLatestRows(settings, storageRows);
     writeParserDebug(settings, parserDebugFromNormalized(normalized, storageRows, context));
     writeSessionMetadata(settings, context);
@@ -709,7 +724,7 @@ async function pollLivePage() {
     let analyticsSummary = collectorState.analyticsSummary;
     let lapPrediction = collectorState.lapPrediction;
     let pitstopPlan = collectorState.pitstopPlan;
-    try { analyticsSummary = writeAnalyticsSummary(settings, context); } catch (error) { addError(error, 'writeAnalyticsSummary'); }
+    try { analyticsSummary = writeAnalyticsSummary(settings, context, normalized.rows); } catch (error) { addError(error, 'writeAnalyticsSummary'); }
     try { lapPrediction = writeLapPrediction(settings, context, normalized.rows); } catch (error) { addError(error, 'writeLapPrediction'); }
     try { pitstopPlan = writePitstopPlan(settings, context, normalized.rows); } catch (error) { addError(error, 'writePitstopPlan'); }
     collectorState = {

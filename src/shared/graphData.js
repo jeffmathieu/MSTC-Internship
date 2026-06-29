@@ -32,24 +32,25 @@
     return lapAnalytics.lapsForCar(history, carNumber);
   }
 
-  // Shows every stored lap for our car. Neutralized laps remain visible but are
-  // tagged as ineligible so the renderer can draw them as isolated grey points.
+  // Shows only laps that are valid for pace analysis. FCY, Safety Car, inlaps,
+  // and outlaps remain stored but are deliberately absent from readable graphs.
   function driverLapTimes(history, carNumber) {
     const groups = new Map();
     followedCarLaps(history, carNumber).forEach((lap, index) => {
+      if (!lapAnalytics.lapPaceEligible(lap)) return;
       const driver = lap.driverName || 'Unknown';
       if (!groups.has(driver)) groups.set(driver, []);
       groups.get(driver).push({
         x: chartLapNumber(lap, index),
         y: lap.lapTimeMs,
-        eligible: lapAnalytics.lapPaceEligible(lap),
+        eligible: true,
         label: `Lap ${chartLapNumber(lap, index)} · ${driver}`
       });
     });
     return {
       type: 'line',
       title: 'Lap times per driver',
-      subtitle: 'FCY and Safety Car laps are shown in grey and excluded from pace statistics.',
+      subtitle: 'Green-flag race laps only; pit, FCY and Safety Car laps are excluded.',
       yFormat: 'time',
       series: [...groups.entries()].map(([name, points]) => ({ name, points }))
     };
@@ -122,13 +123,20 @@
     return {
       type: 'line',
       title: 'Class pace comparison',
-      subtitle: `${windowSize}-lap rolling average of valid green-flag laps.`,
+      subtitle: 'Actual valid lap times for every car in our class.',
       yFormat: 'time',
       series: classCars.map((car) => ({
         name: `#${car.carNumber}${car.teamName ? ` ${car.teamName}` : ''}`,
         carNumber: car.carNumber,
         highlight: String(car.carNumber) === String(carNumber),
-        points: rollingAveragePoints(car.laps, windowSize)
+        points: car.laps
+          .filter(lapAnalytics.lapPaceEligible)
+          .map((lap, index) => ({
+            x: chartLapNumber(lap, index),
+            y: lap.lapTimeMs,
+            eligible: true,
+            label: `Lap ${chartLapNumber(lap, index)}`
+          }))
       }))
     };
   }

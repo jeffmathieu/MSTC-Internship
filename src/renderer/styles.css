@@ -87,25 +87,15 @@ button.primary { background: var(--ink); color: white; }
   display: inline-grid;
   place-items: center;
 }
-.graph-glyph {
-  width: 22px;
-  height: 19px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 3px;
-  margin: 0;
-  border-left: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
+.graph-icon {
+  width: 23px;
+  height: 23px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
-.graph-glyph i {
-  display: block;
-  width: 4px;
-  background: currentColor;
-}
-.graph-glyph i:nth-child(1) { height: 6px; }
-.graph-glyph i:nth-child(2) { height: 13px; }
-.graph-glyph i:nth-child(3) { height: 9px; }
 
 .main-times {
   display: grid;
@@ -256,6 +246,26 @@ input {
   100% { background: var(--box); }
 }
 
+.battle-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.battle-card { min-height: 76px; }
+.battle-card strong {
+  font-size: clamp(18px, 1.8vw, 25px);
+  overflow: visible;
+  white-space: normal;
+}
+.battle-card small {
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.15;
+}
+.battle-card.good { border-color: var(--green); }
+.battle-card.bad { border-color: var(--red); }
+.battle-card.neutral { border-color: var(--line); }
+
 .pit-window {
   margin-top: 4px;
   padding: 10px 14px 12px;
@@ -320,16 +330,21 @@ input {
 .pit-green,
 .pit-open { background: #259a71; }
 .pit-bar b {
-  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.pit-bar .pit-cooldown-period {
   position: absolute;
   top: 0;
   bottom: 0;
+  display: block;
   background: rgba(216, 77, 101, .92);
   border-left: 2px solid rgba(0,0,0,.2);
   border-right: 2px solid rgba(0,0,0,.2);
-  z-index: 1;
 }
-.pit-bar i {
+.pit-bar > i {
   position: absolute;
   top: -2px;
   bottom: -2px;
@@ -448,6 +463,7 @@ pre {
   .main-times,
   .performance-grid,
   .comparison-grid,
+  .battle-strip,
   .pit-window { grid-template-columns: 1fr; }
   .pit-header { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .controls { justify-content: flex-start; flex-wrap: wrap; }
