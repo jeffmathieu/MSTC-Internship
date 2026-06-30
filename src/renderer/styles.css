@@ -80,6 +80,7 @@ button {
   font-weight: 900;
 }
 button.primary { background: var(--ink); color: white; }
+button:disabled { cursor: not-allowed; opacity: .38; }
 .icon-button {
   width: 42px;
   height: 39px;
@@ -444,6 +445,21 @@ pre {
   font-size: 12px;
   font-weight: 900;
   text-transform: uppercase;
+}
+.setup-cars-list { display: grid; gap: 7px; }
+.setup-car-row {
+  display: grid;
+  grid-template-columns: 1fr 42px;
+  gap: 8px;
+}
+#setup-extra-cars { display: grid; gap: 7px; }
+.setup-car-action {
+  width: 42px;
+  min-width: 42px;
+  height: 39px;
+  padding: 0;
+  font-size: 21px;
+  line-height: 1;
 }
 .subtitle, .eyebrow { color: var(--muted); }
 .folder-row {

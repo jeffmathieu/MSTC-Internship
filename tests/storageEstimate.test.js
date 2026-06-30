@@ -23,6 +23,8 @@ const config = {
   analyticsSummaryBytesPerCar: 40,
   analyticsSummaryBytesPerDriver: 25,
   lapPredictionBytes: 60,
+  pitPlanBytes: 70,
+  followedCars: 2,
   averageDriversPerCar: 2.5,
   overheadBytesPerFile: 5
 };
@@ -52,8 +54,9 @@ assert.strictEqual(latest.latestJsonBytes, 155);
 assert.strictEqual(latest.parserDebugBytes, 65);
 assert.strictEqual(latest.sessionMetadataBytes, 100);
 assert.strictEqual(latest.analyticsSummaryBytes, 520);
-assert.strictEqual(latest.lapPredictionBytes, 60);
-assert.strictEqual(latest.totalBytes, 935);
+assert.strictEqual(latest.lapPredictionBytes, 120);
+assert.strictEqual(latest.pitPlanBytes, 140);
+assert.strictEqual(latest.totalBytes, 1135);
 
 assert.strictEqual(formatBytes(999), '999.0 B');
 assert.strictEqual(formatBytes(1024), '1.00 KB');

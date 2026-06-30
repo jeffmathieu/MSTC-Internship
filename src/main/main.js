@@ -36,7 +36,8 @@ const { buildAdjacentClassBattles } = require('../shared/classBattle');
 // these variables, so every start/stop function below updates them carefully.
 let mainWindow;
 let liveWindow;
-let graphsWindow;
+const additionalDashboardWindows = new Map();
+const graphWindowsByCar = new Map();
 let pollTimer;
 let shouldCloseLiveWindow = false;
 
@@ -72,7 +73,9 @@ let collectorState = {
   storage: {},
   analyticsSummary: null,
   lapPrediction: null,
+  lapPredictionsByCar: {},
   pitstopPlan: null,
+  pitstopPlansByCar: {},
   storageSessionFolder: '',
   pollIntervalMs: 5000
 };
@@ -88,10 +91,20 @@ const DEFAULT_REFERENCE_TIMES = {
   sector2Ms: null,
   sector3Ms: null
 };
+const MAX_FOLLOWED_CARS = 3;
+
+function normalizeFollowedCars(settings = {}) {
+  const candidates = Array.isArray(settings.followedCars) ? settings.followedCars : [];
+  const primary = String(settings.followedCar || candidates[0] || '33').trim();
+  return [...new Set([primary, ...candidates].map((car) => String(car || '').trim()).filter(Boolean))].slice(0, MAX_FOLLOWED_CARS);
+}
 
 function normalizeSettings(settings) {
+  const followedCars = normalizeFollowedCars(settings);
   return {
     ...settings,
+    followedCar: followedCars[0] || '33',
+    followedCars,
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     referenceTimes: {
       ...DEFAULT_REFERENCE_TIMES,
@@ -117,6 +130,7 @@ function loadSettings() {
   return normalizeSettings({
     timingUrl: 'https://livetiming.getraceresults.com/demo#screen-results',
     followedCar: '33',
+    followedCars: ['33'],
     comparisonCar: '',
     referenceTimes: DEFAULT_REFERENCE_TIMES,
     storageFolder: defaultStorageFolder(),
@@ -153,17 +167,61 @@ function createMainWindow() {
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
 
+// Secondary dashboards load the same renderer with a fixed car query. They do
+// not create collectors or duplicate race storage; they only select their own
+// precomputed per-car view from collectorState.
+function createAdditionalDashboardWindow(carNumber) {
+  const key = String(carNumber || '').trim();
+  if (!key) return null;
+  const existing = additionalDashboardWindows.get(key);
+  if (existing && !existing.isDestroyed()) {
+    existing.show();
+    existing.focus();
+    return existing;
+  }
+  const win = new BrowserWindow({
+    width: 1600,
+    height: 990,
+    minWidth: 1150,
+    minHeight: 760,
+    backgroundColor: '#f7f7f4',
+    title: `Race Engineer Dashboard - Car #${key}`,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+  additionalDashboardWindows.set(key, win);
+  win.on('closed', () => additionalDashboardWindows.delete(key));
+  win.loadFile(path.join(__dirname, '../renderer/index.html'), { query: { car: key, secondary: '1' } });
+  return win;
+}
+
+function syncAdditionalDashboardWindows(settings = loadSettings()) {
+  const desiredCars = normalizeFollowedCars(settings).slice(1);
+  [...additionalDashboardWindows.entries()].forEach(([carNumber, win]) => {
+    if (desiredCars.includes(carNumber)) return;
+    if (!win.isDestroyed()) win.close();
+    additionalDashboardWindows.delete(carNumber);
+  });
+  desiredCars.forEach(createAdditionalDashboardWindow);
+}
+
 // Creates a separate analysis window so four graphs can remain available
 // without taking permanent space from the race dashboard. Closing this window
 // destroys only the graph UI; collection continues in the main process and a
 // later click creates a fresh window with the current collector state.
-function openGraphsWindow() {
-  if (graphsWindow && !graphsWindow.isDestroyed()) {
-    graphsWindow.show();
-    graphsWindow.focus();
+function openGraphsWindow(carNumber = loadSettings().followedCar) {
+  const key = String(carNumber || loadSettings().followedCar || '').trim();
+  const existing = graphWindowsByCar.get(key);
+  if (existing && !existing.isDestroyed()) {
+    existing.show();
+    existing.focus();
     return true;
   }
-  graphsWindow = new BrowserWindow({
+  const graphsWindow = new BrowserWindow({
     width: 1450,
     height: 920,
     minWidth: 760,
@@ -176,8 +234,9 @@ function openGraphsWindow() {
       sandbox: false
     }
   });
-  graphsWindow.on('closed', () => { graphsWindow = null; });
-  graphsWindow.loadFile(path.join(__dirname, '../renderer/graphs.html'));
+  graphWindowsByCar.set(key, graphsWindow);
+  graphsWindow.on('closed', () => graphWindowsByCar.delete(key));
+  graphsWindow.loadFile(path.join(__dirname, '../renderer/graphs.html'), { query: { car: key } });
   return true;
 }
 
@@ -209,7 +268,12 @@ function createLiveWindow() {
 // collectorState first; the whole object is sent as-is.
 function broadcastState() {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('collector:update', collectorState);
-  if (graphsWindow && !graphsWindow.isDestroyed()) graphsWindow.webContents.send('collector:update', collectorState);
+  additionalDashboardWindows.forEach((win) => {
+    if (!win.isDestroyed()) win.webContents.send('collector:update', collectorState);
+  });
+  graphWindowsByCar.forEach((win) => {
+    if (!win.isDestroyed()) win.webContents.send('collector:update', collectorState);
+  });
 }
 
 // Adds a compact error entry for the Debug panel. Only the latest 20 errors are
@@ -374,10 +438,12 @@ function storageContext(settings, normalized, collectedAt = new Date().toISOStri
 // Chooses the best available lap average for pit projections. Current-stint pace
 // is preferred because it reflects the car/driver right now; full-car average is
 // the fallback while stint data is still building.
-function averageLapForPitPlan(settings) {
-  const analysis = collectorState.analyticsSummary?.dashboardAnalysis;
+function averageLapForPitPlan(settings, carNumber = settings.followedCar) {
+  const key = String(carNumber || '');
+  const analysis = collectorState.analyticsSummary?.dashboardAnalysisByCar?.[key]
+    || (key === String(settings.followedCar || '') ? collectorState.analyticsSummary?.dashboardAnalysis : null);
   const fromCurrentStint = analysis?.classComparison?.ourCurrentStint?.averageLapMs;
-  const fromOurCar = collectorState.analyticsSummary?.cars?.find((car) => String(car.carNumber) === String(settings.followedCar || ''))?.averageLapMs;
+  const fromOurCar = collectorState.analyticsSummary?.cars?.find((car) => String(car.carNumber) === key)?.averageLapMs;
   const n = Number(fromCurrentStint ?? fromOurCar);
   return Number.isFinite(n) ? n : null;
 }
@@ -385,8 +451,8 @@ function averageLapForPitPlan(settings) {
 // Maintains the in-memory pit state for the followed car. The shared planner
 // owns the rule for whether a new PIT-count increase is valid; main.js keeps the
 // resulting state between polls.
-function updatePitState(settings, rows, context) {
-  const followedCar = String(settings.followedCar || '');
+function updatePitState(settings, rows, context, carNumber = settings.followedCar) {
+  const followedCar = String(carNumber || '');
   const row = (rows || []).find((candidate) => String(candidate.carNumber) === followedCar);
   if (!followedCar || !row) return latestPitStateByCar.get(followedCar) || { completedPitStops: 0, validCompletedPitStops: 0 };
 
@@ -396,7 +462,7 @@ function updatePitState(settings, rows, context) {
     row,
     session: context?.session || {},
     rules: settings.pitRules,
-    averageLapMs: averageLapForPitPlan(settings),
+    averageLapMs: averageLapForPitPlan(settings, followedCar),
     collectedAt: context?.collectedAt || new Date().toISOString()
   });
   latestPitStateByCar.set(followedCar, next);
@@ -406,22 +472,34 @@ function updatePitState(settings, rows, context) {
 // Builds and persists the pitstop plan after each successful poll. The renderer
 // receives this same object through collectorState, while pitstop_plan.json lets
 // external/debug tools inspect the current strategy state.
-function writePitstopPlan(settings, context, rows) {
+function buildAndWritePitstopPlan(settings, context, rows, carNumber) {
   const folder = ensureStorage(settings);
-  const pitState = updatePitState(settings, rows, context);
+  const followedCarNumber = String(carNumber || '');
+  const pitState = updatePitState(settings, rows, context, followedCarNumber);
   const plan = buildPitstopPlan({
     rows,
     session: context?.session || {},
-    followedCarNumber: settings.followedCar || '',
+    followedCarNumber,
     pitState,
     rules: {
       ...settings.pitRules,
-      averageLapMs: averageLapForPitPlan(settings)
+      averageLapMs: averageLapForPitPlan(settings, followedCarNumber)
     }
   });
-  fs.writeFileSync(path.join(folder, 'pitstop_plan.json'), JSON.stringify({ ...plan, pitState }, null, 2));
-  collectorState.pitstopPlan = { ...plan, pitState };
-  return collectorState.pitstopPlan;
+  const payload = { ...plan, pitState };
+  fs.writeFileSync(path.join(folder, `pitstop_plan_car-${slugPart(followedCarNumber, 'unknown')}.json`), JSON.stringify(payload, null, 2));
+  if (followedCarNumber === String(settings.followedCar || '')) fs.writeFileSync(path.join(folder, 'pitstop_plan.json'), JSON.stringify(payload, null, 2));
+  return payload;
+}
+
+function writePitstopPlans(settings, context, rows) {
+  const plans = Object.fromEntries(normalizeFollowedCars(settings).map((carNumber) => [
+    carNumber,
+    buildAndWritePitstopPlan(settings, context, rows, carNumber)
+  ]));
+  collectorState.pitstopPlansByCar = plans;
+  collectorState.pitstopPlan = plans[String(settings.followedCar || '')] || null;
+  return plans;
 }
 
 // Provider adapters produce app rows with canonical fields; the storage layer is
@@ -494,6 +572,7 @@ function writeSessionMetadata(settings, context) {
     startedAt: context.startedAt || '',
     lastUpdatedAt: context.collectedAt || '',
     followedCar: context.followedCar || '',
+    followedCars: normalizeFollowedCars(settings),
     baseStorageFolder: settings.storageFolder || defaultStorageFolder(),
     storageFolder: folder,
     storageSchemaVersion: 1
@@ -536,12 +615,26 @@ function buildAnalyticsSummary(settings, context, rows = []) {
   const carNumbers = [...new Set(laps.map((lap) => lap.carNumber).filter(Boolean))];
   const classNames = [...new Set(laps.map((lap) => lap.className).filter(Boolean))];
   const selectedCarNumber = settings.comparisonCar || settings.selectedComparisonCar || '';
+  const followedCars = normalizeFollowedCars(settings);
+  const dashboardAnalysisByCar = Object.fromEntries(followedCars.map((carNumber) => [
+    carNumber,
+    compactDashboardAnalysis(buildDashboardAnalysis(history, {
+      ourCarNumber: carNumber,
+      selectedCarNumber
+    }))
+  ]));
+  const adjacentClassBattlesByCar = Object.fromEntries(followedCars.map((carNumber) => [
+    carNumber,
+    buildAdjacentClassBattles(rows, history, carNumber, { lapWindow: 10 })
+  ]));
+  const primaryCar = String(settings.followedCar || followedCars[0] || '');
 
   return {
     storageSchemaVersion: 1,
     generatedFrom: 'lap_history',
     updatedAt: context?.collectedAt || new Date().toISOString(),
-    followedCar: settings.followedCar || '',
+    followedCar: primaryCar,
+    followedCars,
     selectedComparisonCar: selectedCarNumber,
     lapCount: laps.length,
     paceLapCount: laps.filter(lapPaceEligible).length,
@@ -554,11 +647,10 @@ function buildAnalyticsSummary(settings, context, rows = []) {
       carNumber,
       driverStats(history, carNumber).map(compactStats)
     ])),
-    adjacentClassBattles: buildAdjacentClassBattles(rows, history, settings.followedCar || '', { lapWindow: 10 }),
-    dashboardAnalysis: compactDashboardAnalysis(buildDashboardAnalysis(history, {
-      ourCarNumber: settings.followedCar || '',
-      selectedCarNumber
-    }))
+    adjacentClassBattlesByCar,
+    dashboardAnalysisByCar,
+    adjacentClassBattles: adjacentClassBattlesByCar[primaryCar] || null,
+    dashboardAnalysis: dashboardAnalysisByCar[primaryCar] || null
   };
 }
 
@@ -574,9 +666,9 @@ function writeAnalyticsSummary(settings, context, rows = []) {
 // Builds and stores the current-lap prediction from live sectors plus completed
 // lap history. The renderer only displays this object; all prediction rules stay
 // in src/shared/lapPrediction.js where they are covered by focused tests.
-function writeLapPrediction(settings, context, rows) {
+function buildAndWriteLapPrediction(settings, context, rows, carNumber) {
   const folder = ensureStorage(settings);
-  const followedCarNumber = settings.followedCar || '';
+  const followedCarNumber = String(carNumber || '');
   const liveRow = (rows || []).find((row) => String(row.carNumber) === String(followedCarNumber));
   const prediction = buildLapPrediction({
     history: collectorState.lapHistory || [],
@@ -586,9 +678,19 @@ function writeLapPrediction(settings, context, rows) {
     options: { sampleSize: 10 }
   });
   const payload = { ...prediction, updatedAt: context?.collectedAt || new Date().toISOString() };
-  fs.writeFileSync(path.join(folder, 'lap_prediction.json'), JSON.stringify(payload, null, 2));
-  collectorState.lapPrediction = payload;
+  fs.writeFileSync(path.join(folder, `lap_prediction_car-${slugPart(followedCarNumber, 'unknown')}.json`), JSON.stringify(payload, null, 2));
+  if (followedCarNumber === String(settings.followedCar || '')) fs.writeFileSync(path.join(folder, 'lap_prediction.json'), JSON.stringify(payload, null, 2));
   return payload;
+}
+
+function writeLapPredictions(settings, context, rows) {
+  const predictions = Object.fromEntries(normalizeFollowedCars(settings).map((carNumber) => [
+    carNumber,
+    buildAndWriteLapPrediction(settings, context, rows, carNumber)
+  ]));
+  collectorState.lapPredictionsByCar = predictions;
+  collectorState.lapPrediction = predictions[String(settings.followedCar || '')] || null;
+  return predictions;
 }
 
 // Converts parser + storage context into a small debug object for disk/UI.
@@ -722,18 +824,22 @@ async function pollLivePage() {
     const { storageRows, context } = saveLatestSnapshot(settings, normalized);
     const newLapCount = updateLapHistory(settings, storageRows);
     let analyticsSummary = collectorState.analyticsSummary;
-    let lapPrediction = collectorState.lapPrediction;
-    let pitstopPlan = collectorState.pitstopPlan;
+    let lapPredictionsByCar = collectorState.lapPredictionsByCar;
+    let pitstopPlansByCar = collectorState.pitstopPlansByCar;
     try { analyticsSummary = writeAnalyticsSummary(settings, context, normalized.rows); } catch (error) { addError(error, 'writeAnalyticsSummary'); }
-    try { lapPrediction = writeLapPrediction(settings, context, normalized.rows); } catch (error) { addError(error, 'writeLapPrediction'); }
-    try { pitstopPlan = writePitstopPlan(settings, context, normalized.rows); } catch (error) { addError(error, 'writePitstopPlan'); }
+    try { lapPredictionsByCar = writeLapPredictions(settings, context, normalized.rows); } catch (error) { addError(error, 'writeLapPredictions'); }
+    try { pitstopPlansByCar = writePitstopPlans(settings, context, normalized.rows); } catch (error) { addError(error, 'writePitstopPlans'); }
+    const primaryCar = String(settings.followedCar || '');
     collectorState = {
       ...collectorState,
       mode: 'live',
       status: normalized.status,
       message: newLapCount ? `${normalized.message} Stored ${newLapCount} new completed lap(s).` : normalized.message,
       lastSuccessAt: new Date().toISOString(), headers: normalized.headers, rows: normalized.rows, session: normalized.session, diagnostics: normalized.diagnostics,
-      storage: storageInfo(settings), analyticsSummary, lapPrediction, pitstopPlan, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS),
+      storage: storageInfo(settings), analyticsSummary, lapPredictionsByCar, pitstopPlansByCar,
+      lapPrediction: lapPredictionsByCar?.[primaryCar] || null,
+      pitstopPlan: pitstopPlansByCar?.[primaryCar] || null,
+      pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS),
       snapshots: [{ at: new Date().toISOString(), checksum: hashObject(normalized.rows), rowCount: normalized.rows.length, newLapCount }, ...collectorState.snapshots].slice(0, 20)
     };
   } catch (error) {
@@ -771,7 +877,7 @@ async function startCollector(url) {
   const startedAt = new Date().toISOString();
   const storageSessionFolder = createStorageSessionFolder(settings, url, startedAt);
   latestPitStateByCar.clear();
-  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, lapPrediction: null, pitstopPlan: null, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
+  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, lapPrediction: null, lapPredictionsByCar: {}, pitstopPlan: null, pitstopPlansByCar: {}, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
   collectorState = { ...collectorState, lapHistory: loadExistingHistory(settings), storage: storageInfo(settings) };
   broadcastState();
   try {
@@ -805,11 +911,12 @@ function stopCollector(closeLiveWindow = true) {
 ipcMain.handle('settings:get', () => loadSettings());
 ipcMain.handle('settings:set', (_event, settings) => {
   const previous = loadSettings();
-  const merged = { ...previous, ...settings };
+  const merged = normalizeSettings({ ...previous, ...settings });
   // Clamp user-editable timing values so accidental input cannot create an
   // unusably fast/slow collector.
   merged.pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
   saveSettings(merged);
+  syncAdditionalDashboardWindows(merged);
   if ((previous.storageFolder || '') !== (merged.storageFolder || '')) {
     collectorState = {
       ...collectorState,
@@ -835,7 +942,7 @@ ipcMain.handle('collector:start', (_event, url) => startCollector(url));
 ipcMain.handle('collector:stop', () => stopCollector(true));
 ipcMain.handle('collector:getState', () => collectorState);
 ipcMain.handle('collector:openLiveWindow', () => { if (liveWindow && !liveWindow.isDestroyed()) { liveWindow.show(); liveWindow.focus(); return true; } return false; });
-ipcMain.handle('graphs:open', () => openGraphsWindow());
+ipcMain.handle('graphs:open', (_event, carNumber) => openGraphsWindow(carNumber));
 
 // Creates timestamped exports of the current rows and in-memory lap history.
 // The always-overwritten "latest_*" files are written by saveLatestSnapshot().
@@ -856,5 +963,14 @@ ipcMain.handle('export:current', async () => {
 
 // Electron app lifecycle. On macOS the app remains open after all windows close,
 // matching normal platform behavior; other platforms quit immediately.
-app.whenReady().then(() => { createMainWindow(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createMainWindow(); }); });
+app.whenReady().then(() => {
+  createMainWindow();
+  syncAdditionalDashboardWindows(loadSettings());
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createMainWindow();
+      syncAdditionalDashboardWindows(loadSettings());
+    }
+  });
+});
 app.on('window-all-closed', () => { stopCollector(true); if (process.platform !== 'darwin') app.quit(); });

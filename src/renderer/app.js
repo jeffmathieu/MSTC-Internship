@@ -6,12 +6,18 @@ const $ = (id) => document.getElementById(id);
 // currentState mirrors collectorState from src/main/main.js.
 let currentSettings = null;
 let currentState = null;
+let configuredFollowedCars = [];
 const DEFAULT_POLL_INTERVAL_MS = 5000;
+const MAX_FOLLOWED_CARS = 3;
+const dashboardQuery = new URLSearchParams(window.location?.search || '');
+const fixedDashboardCar = String(dashboardQuery.get('car') || '').trim();
+const isSecondaryDashboard = dashboardQuery.get('secondary') === '1';
 
 const classBattle = window.classBattle;
 const lapAnalytics = window.lapAnalytics;
 const pitstopPlanner = window.pitstopPlanner;
 const normReference = window.normReference;
+const dashboardView = window.dashboardView;
 const previousMetricValues = new Map();
 
 // Maps collector states to the visual status pill classes in styles.css.
@@ -29,6 +35,29 @@ function setStatus(status, message) {
 
 // Displays missing table values consistently.
 function rowValue(value) { return value === null || value === undefined || value === '' ? '—' : value; }
+
+function normalizedCarList(cars, fallback = '33') {
+  const primary = String(fallback || '').trim();
+  return [...new Set([primary, ...(cars || [])].map((car) => String(car || '').trim()).filter(Boolean))].slice(0, MAX_FOLLOWED_CARS);
+}
+
+function activeCarNumber() {
+  return fixedDashboardCar || String($('followed-car')?.value || currentSettings?.followedCar || '').trim();
+}
+
+// Selects the precomputed backend analysis for this dashboard window. The
+// renderer changes object references only; all race calculations stay in main.
+function analyticsForActiveCar(summary) {
+  return dashboardView.analyticsForCar(summary, activeCarNumber());
+}
+
+function predictionForActiveCar(state) {
+  return dashboardView.predictionForCar(state, activeCarNumber());
+}
+
+function pitstopPlanForActiveCar(state) {
+  return dashboardView.pitstopPlanForCar(state, activeCarNumber());
+}
 
 // Writes plain text into one dashboard element, always converting missing values
 // through rowValue() so all panels display the same placeholder.
@@ -318,9 +347,8 @@ function renderRefSector(sectorNumber, refMs, lastMs, bestMs) {
   setNormCardState(`ref-sector${sectorNumber}-card`, status.state);
 }
 
-function renderSectorAnalytics(summary, rows = []) {
+function renderSectorAnalytics(summary, rows = [], prediction = null) {
   const ourCar = getOurCarAnalytics(summary);
-  const prediction = currentState?.lapPrediction || null;
   const refs = currentReferenceTimes();
   const row = followedRow(rows);
   const bestS1 = numericMs(ourCar?.bestSector1Ms);
@@ -578,10 +606,11 @@ function render(state) {
   $('history-count').textContent = String(history.length);
   $('last-update').textContent = currentState.lastSuccessAt ? new Date(currentState.lastSuccessAt).toLocaleTimeString() : '—';
   renderFollowed(rows);
-  renderSectorAnalytics(currentState.analyticsSummary || null, rows);
-  renderDriverAndClassComparisons(currentState.analyticsSummary || null, rows);
-  renderAdjacentClassBattles(currentState.analyticsSummary || null);
-  renderPitstopPlan(currentState.pitstopPlan || null);
+  const activeAnalytics = analyticsForActiveCar(currentState.analyticsSummary || null);
+  renderSectorAnalytics(activeAnalytics, rows, predictionForActiveCar(currentState));
+  renderDriverAndClassComparisons(activeAnalytics, rows);
+  renderAdjacentClassBattles(activeAnalytics);
+  renderPitstopPlan(pitstopPlanForActiveCar(currentState));
   renderAllRowsTable(rows);
   renderDetails(currentState);
 }
@@ -601,9 +630,12 @@ async function chooseAndSetFolder(targetInputId = 'storage-folder') {
 // Reads settings from hidden inputs and persists them in the main process.
 // Add new user settings to this patch and to main.js loadSettings/settings:set.
 async function saveSettingsFromInputs(setupComplete = false) {
+  const primaryCar = String(configuredFollowedCars[0] || currentSettings?.followedCar || $('followed-car').value || '33').trim();
+  const followedCars = normalizedCarList(configuredFollowedCars, primaryCar);
   const patch = {
     timingUrl: $('timing-url').value.trim(),
-    followedCar: $('followed-car').value.trim(),
+    followedCar: primaryCar,
+    followedCars,
     comparisonCar: $('comparison-car')?.value.trim() || '',
     referenceTimes: referenceTimesFromInputs(),
     storageFolder: $('storage-folder').value.trim(),
@@ -612,14 +644,50 @@ async function saveSettingsFromInputs(setupComplete = false) {
   };
   if (setupComplete) patch.setupComplete = true;
   currentSettings = await window.liveTiming.setSettings(patch);
+  configuredFollowedCars = normalizedCarList(currentSettings.followedCars, currentSettings.followedCar);
   return currentSettings;
 }
 
-// Copies hidden dashboard settings into the visible setup modal.
+function renderExtraCarInputs() {
+  const container = $('setup-extra-cars');
+  if (!container) return;
+  if ($('setup-add-car')) $('setup-add-car').disabled = configuredFollowedCars.length >= MAX_FOLLOWED_CARS;
+  container.innerHTML = '';
+  configuredFollowedCars.slice(1).forEach((carNumber, offset) => {
+    const index = offset + 1;
+    const row = document.createElement('div');
+    row.className = 'setup-car-row';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = carNumber;
+    input.className = 'setup-extra-car';
+    input.setAttribute('aria-label', `Additional car ${index + 1} number`);
+    input.addEventListener('input', () => { configuredFollowedCars[index] = input.value; });
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'secondary setup-car-action';
+    remove.textContent = '−';
+    remove.title = 'Remove this car dashboard';
+    remove.setAttribute('aria-label', `Remove additional car ${index + 1}`);
+    remove.addEventListener('click', () => {
+      configuredFollowedCars.splice(index, 1);
+      renderExtraCarInputs();
+    });
+    row.appendChild(input);
+    row.appendChild(remove);
+    container.appendChild(row);
+  });
+}
+
+// Copies global settings into the visible setup modal. Secondary dashboards
+// still edit the same shared list; their fixed display car does not become the
+// primary car accidentally.
 function syncSetupFromMain() {
   $('setup-url').value = $('timing-url').value;
-  $('setup-car').value = $('followed-car').value;
+  configuredFollowedCars = normalizedCarList(currentSettings?.followedCars, currentSettings?.followedCar || '33');
+  $('setup-car').value = configuredFollowedCars[0] || '33';
   $('setup-folder').value = $('storage-folder').value;
+  renderExtraCarInputs();
 }
 
 async function editReferenceTime(button) {
@@ -678,7 +746,9 @@ async function editReferenceTime(button) {
 // by the rest of app.js.
 function syncMainFromSetup() {
   $('timing-url').value = $('setup-url').value;
-  $('followed-car').value = $('setup-car').value;
+  configuredFollowedCars[0] = $('setup-car').value;
+  configuredFollowedCars = normalizedCarList(configuredFollowedCars, $('setup-car').value || '33');
+  if (!fixedDashboardCar) $('followed-car').value = configuredFollowedCars[0] || '33';
   $('storage-folder').value = $('setup-folder').value;
 }
 
@@ -704,8 +774,10 @@ function setupDetailTabs() {
 // preload API, subscribes to collector updates, and opens setup when required.
 async function init() {
   currentSettings = await window.liveTiming.getSettings();
+  configuredFollowedCars = normalizedCarList(currentSettings.followedCars, currentSettings.followedCar || '33');
   $('timing-url').value = currentSettings.timingUrl || 'https://livetiming.getraceresults.com/demo#screen-results';
-  $('followed-car').value = currentSettings.followedCar || '33';
+  $('followed-car').value = fixedDashboardCar || currentSettings.followedCar || '33';
+  if (fixedDashboardCar) document.title = `Race Engineer Dashboard - Car #${fixedDashboardCar}`;
   $('storage-folder').value = currentSettings.storageFolder || '';
   if ($('comparison-car')) $('comparison-car').value = currentSettings.comparisonCar || '';
   syncReferenceInputs(currentSettings);
@@ -721,9 +793,17 @@ async function init() {
   $('start')?.addEventListener('click', async () => { await saveSettingsFromInputs(true); await window.liveTiming.startCollector(currentSettings.timingUrl); });
   $('stop')?.addEventListener('click', () => window.liveTiming.stopCollector());
   $('show-live')?.addEventListener('click', () => window.liveTiming.openLiveWindow());
-  $('open-graphs')?.addEventListener('click', () => window.liveTiming.openGraphsWindow());
+  $('open-graphs')?.addEventListener('click', () => window.liveTiming.openGraphsWindow(activeCarNumber()));
   $('choose-folder')?.addEventListener('click', async () => { await chooseAndSetFolder('storage-folder'); await saveSettingsFromInputs(); });
   $('setup-choose-folder')?.addEventListener('click', async () => { await chooseAndSetFolder('setup-folder'); });
+  $('setup-add-car')?.addEventListener('click', () => {
+    if (configuredFollowedCars.length >= MAX_FOLLOWED_CARS) return;
+    configuredFollowedCars.push('');
+    renderExtraCarInputs();
+    const inputs = $('setup-extra-cars')?.querySelectorAll?.('.setup-extra-car') || [];
+    inputs[inputs.length - 1]?.focus();
+  });
+  $('setup-car')?.addEventListener('input', () => { configuredFollowedCars[0] = $('setup-car').value; });
   $('setup-save')?.addEventListener('click', async () => { syncMainFromSetup(); await saveSettingsFromInputs(true); showSetup(false); render(currentState || await window.liveTiming.getCollectorState()); });
   $('open-setup')?.addEventListener('click', () => showSetup(true));
   $('export')?.addEventListener('click', async () => { const result = await window.liveTiming.exportCurrent(); alert(`Exported:\n${result.csvPath}\n${result.jsonPath}\n${result.historyPath || ''}`); });

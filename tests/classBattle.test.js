@@ -1,7 +1,12 @@
 const assert = require('assert');
 const {
+  numberOrNull,
+  average,
   parseGapToMs,
   parseTimeToMs,
+  formatSeconds,
+  formatSignedSeconds,
+  rowSortNumber,
   classSortedRows,
   classGapToPrevious,
   relativeClassGap,
@@ -11,6 +16,18 @@ const {
   buildClassBattleSummary,
   buildAdjacentClassBattles
 } = require('../src/shared/classBattle');
+
+assert.strictEqual(numberOrNull('12'), 12);
+assert.strictEqual(numberOrNull(''), null);
+assert.strictEqual(numberOrNull('bad'), null);
+assert.strictEqual(average([]), null);
+assert.strictEqual(average([null, 'bad', 1000, '2000']), 1500);
+assert.strictEqual(formatSeconds(NaN), '—');
+assert.strictEqual(formatSignedSeconds(1250), '+1.250s');
+assert.strictEqual(formatSignedSeconds(-1250), '-1.250s');
+assert.strictEqual(formatSignedSeconds(null), '—');
+assert.strictEqual(rowSortNumber('2'), 2);
+assert.strictEqual(rowSortNumber('unknown'), 999999);
 
 const rowsWithOtherClassBetween = [
   { position: 6, carNumber: 13, className: 'LMP3', classPosition: 1, team: 'Inter Europol Competition', driver: 'Nigel Moore', lastLap: '2:06.516', lastLapMs: 126516, bestLap: '2:03.628', diff: '5:24.534', gap: '5:24.534' },
@@ -35,8 +52,12 @@ const history = [
 assert.strictEqual(parseGapToMs('12.000'), 12000);
 assert.strictEqual(parseGapToMs('+1:02.500'), 62500);
 assert.strictEqual(parseGapToMs('-- 106 laps --'), null);
+assert.strictEqual(parseGapToMs(''), null);
 assert.strictEqual(parseTimeToMs('1:02:034'), 62034);
 assert.strictEqual(parseTimeToMs('10:02:03.456'), 36123456);
+assert.strictEqual(parseTimeToMs('12.5'), 12500);
+assert.strictEqual(parseTimeToMs('1:02,500'), 62500);
+assert.strictEqual(parseTimeToMs(''), null);
 assert.strictEqual(parseTimeToMs('bad time'), null);
 
 assert.deepStrictEqual(classSortedRows(rowsWithOtherClassBetween, 'LMP3').map((row) => row.carNumber), [13, 2]);
@@ -69,10 +90,14 @@ assert.strictEqual(numericChainBattle.lapWindow, 10);
 assert.strictEqual(overallRelativeGap(numericOtherClassChain, numericOtherClassChain[0], { ...numericOtherClassChain[2], lapNumber: 19 }), null);
 
 const classRows = classSortedRows(sameClassRows, 'LMP3');
+assert.deepStrictEqual(classSortedRows(null, 'LMP3'), []);
+assert.strictEqual(classGapToPrevious(sameClassRows, classRows, sameClassRows[0]).ms, 0);
 const reliableGap = classGapToPrevious(sameClassRows, classRows, sameClassRows[1]);
 assert.strictEqual(reliableGap.reliable, true);
 assert.strictEqual(reliableGap.ms, 12000);
 assert.strictEqual(relativeClassGap(sameClassRows, classRows, sameClassRows[0], sameClassRows[2]), 15000);
+assert.strictEqual(relativeClassGap(sameClassRows, classRows, sameClassRows[0], sameClassRows[0]), null);
+assert.strictEqual(relativeClassGap(sameClassRows, classRows, sameClassRows[0], { carNumber: 999 }), null);
 assert.strictEqual(recentAverageForCar(history, 2), 125000);
 assert.strictEqual(recentAverageForCar([
   { carNumber: 2, lapNumber: 1, lapTimeMs: 125000, pitInfo: '0' },
@@ -112,5 +137,31 @@ const missingSummary = buildClassBattleSummary(sameClassRows, history, 999);
 assert.strictEqual(missingSummary.followed, null);
 assert.deepStrictEqual(missingSummary.items, []);
 assert.strictEqual(buildAdjacentClassBattles(sameClassRows, history, 999).available, false);
+
+const intervalFallbackRows = [
+  { position: 1, carNumber: 1, className: 'GT', classPosition: 1, lapNumber: 4, lastLap: '1:40.000' },
+  { position: 2, carNumber: 2, className: 'GT', classPosition: 2, lapNumber: 4, lastLap: '1:40.000', diff: '', interval: '2.000' },
+  { position: 3, carNumber: 3, className: 'GT', classPosition: 3, lapNumber: 4, lastLap: '1:40.000', diff: '', interval: '', gap: '3.000' }
+];
+assert.strictEqual(overallRelativeGap(intervalFallbackRows, intervalFallbackRows[0], intervalFallbackRows[2]), 5000);
+assert.strictEqual(overallRelativeGap(intervalFallbackRows, intervalFallbackRows[0], intervalFallbackRows[0]), null);
+assert.strictEqual(overallRelativeGap(intervalFallbackRows, intervalFallbackRows[0], { carNumber: 99 }), null);
+assert.strictEqual(overallRelativeGap([
+  intervalFallbackRows[0],
+  { ...intervalFallbackRows[1], diff: '?', interval: '?', gap: '?' }
+], intervalFallbackRows[0], intervalFallbackRows[1]), null);
+
+const singleCarBattle = buildAdjacentClassBattles([intervalFallbackRows[0]], [], 1);
+assert.strictEqual(singleCarBattle.available, true);
+assert.strictEqual(singleCarBattle.ahead, null);
+assert.strictEqual(singleCarBattle.behind, null);
+
+const noPaceSummary = buildClassBattleSummary([
+  { position: 1, carNumber: 1, className: 'GT', classPosition: 1, diff: '', lastLap: '--' },
+  { position: 2, carNumber: 2, className: 'GT', classPosition: 2, diff: '2.000', lastLap: '--' }
+], [], 1);
+const noPaceItem = noPaceSummary.items.find((item) => item.battle)?.battle;
+assert.strictEqual(noPaceItem.deltaPerLap, null);
+assert.strictEqual(noPaceItem.trendState, 'neutral');
 
 console.log('Class battle tests passed.');

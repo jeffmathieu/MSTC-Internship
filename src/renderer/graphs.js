@@ -241,7 +241,8 @@ function renderGraphs(state) {
 
 async function initGraphs() {
   const settings = await window.liveTiming.getSettings();
-  followedCarNumber = String(settings.followedCar || '');
+  const queryCar = new URLSearchParams(window.location.search).get('car');
+  followedCarNumber = String(queryCar || settings.followedCar || '');
   document.querySelectorAll('.chart-panel').forEach((panel, index) => {
     panel._viewport = { start: 0, end: 1 };
     const select = panel.querySelector('select');

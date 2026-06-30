@@ -38,6 +38,10 @@ prediction = buildLapPrediction({ history: [], rows: [], carNumber: 33 });
 assert.strictEqual(prediction.available, false);
 assert.strictEqual(prediction.reason, 'No live row for followed car');
 
+prediction = buildLapPrediction({ history: [], rows: [{ carNumber: '', driver: 'Nobody', sector1: '30.000' }], carNumber: '' });
+assert.strictEqual(prediction.available, false);
+assert.strictEqual(prediction.carNumber, '');
+
 prediction = buildLapPrediction({ history: [], rows: [liveRow({ driver: '', sector1: '30.000' })], carNumber: 33 });
 assert.strictEqual(prediction.available, false);
 assert.strictEqual(prediction.reason, 'No current driver yet');
@@ -51,6 +55,29 @@ prediction = buildLapPrediction({
 });
 assert.strictEqual(prediction.available, false);
 assert.match(prediction.reason, /Need sector 2 history/);
+
+const fallbackDriverHistory = [driverLap('History Driver', 1, [30000, 40000, 30000])];
+prediction = buildLapPrediction({
+  history: fallbackDriverHistory,
+  rows: [{ carNumber: '33', driverName: '', sector1Ms: 29500, sector1: '', sector2: '', sector3: '' }],
+  carNumber: 33,
+  currentDriver: 'History Driver',
+  options: { sampleSize: 1.9 }
+});
+assert.strictEqual(prediction.available, true);
+assert.strictEqual(prediction.driverName, 'History Driver');
+assert.strictEqual(prediction.predictedLapMs, 99500);
+assert.strictEqual(prediction.sampleSize, 1);
+
+const missingS3History = [driverLap('Missing S3', 1, [30000, 40000, 30000], { sector3Ms: '', sector3: '' })];
+prediction = buildLapPrediction({
+  history: missingS3History,
+  rows: [liveRow({ driver: 'Missing S3', sector1: '30.000', sector2: '40.000' })],
+  carNumber: 33,
+  options: { sampleSize: 0 }
+});
+assert.strictEqual(prediction.available, false);
+assert.match(prediction.reason, /Need sector 3 history/);
 
 // New-driver case: after one completed lap, lap two can be predicted from S1
 // plus that driver's single S2/S3 sample. More laps improve the average.
@@ -181,6 +208,22 @@ prediction = buildLapPrediction({
   carNumber: 33
 });
 assert.strictEqual(prediction.available, false);
+assert.strictEqual(prediction.reason, 'Waiting for sector 1');
+
+for (const explicitInvalid of [false, 'false', 0, '0']) {
+  prediction = buildLapPrediction({
+    history: [driverLap('Explicit Flag Driver', 1, [30000, 40000, 30000])],
+    rows: [liveRow({ driver: 'Explicit Flag Driver', sector1: '29.000', sector1Eligible: explicitInvalid })],
+    carNumber: 33
+  });
+  assert.strictEqual(prediction.reason, 'Waiting for sector 1');
+}
+
+prediction = buildLapPrediction({
+  history: [driverLap('Session Flag Driver', 1, [30000, 40000, 30000])],
+  rows: [liveRow({ driver: 'Session Flag Driver', sector1: '29.000', sessionFlag: 'Code 60' })],
+  carNumber: 33
+});
 assert.strictEqual(prediction.reason, 'Waiting for sector 1');
 
 console.log('Lap prediction tests passed.');

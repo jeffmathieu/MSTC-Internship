@@ -8,6 +8,7 @@ assert.strictEqual(graphData.average([null, NaN]), null);
 assert.strictEqual(graphData.average([100, 200, null]), 150);
 assert.strictEqual(graphData.chartLapNumber({ lapNumber: 12 }, 0), 12);
 assert.strictEqual(graphData.chartLapNumber({ lapNumber: null }, 4), 5);
+assert.strictEqual(graphData.chartLapNumber({ lapNumber: 0 }, 2), 3);
 
 const history = stintComparisonHistory();
 const driverLaps = graphData.driverLapTimes(history, 33);
@@ -78,6 +79,9 @@ assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').
 const otherClass = lap({ carNumber: 77, className: 'GT', teamName: 'GT Team', driverName: 'GT Driver', lapNumber: 1, lapTimeMs: 110000, sector1Ms: 35000, sector2Ms: 40000, sector3Ms: 35000 });
 assert.strictEqual(graphData.classPaceComparison([...history, otherClass], 33).series.some((series) => series.carNumber === '77'), false);
 assert.deepStrictEqual(graphData.classPaceComparison([], 33).series, []);
+assert.deepStrictEqual(graphData.driverLapTimes([], 33).series, []);
+assert.deepStrictEqual(graphData.driverPaceComparison([], 33).categories, []);
+assert.deepStrictEqual(graphData.driverSectorComparison([], 33).series[0].values, []);
 assert.strictEqual(graphData.buildGraph('unknown', history, 33).title, 'Lap times per driver');
 assert.strictEqual(graphData.buildGraph('driver-pace', history, 33).title, 'Driver pace comparison');
 assert.strictEqual(graphData.buildGraph('driver-sectors', history, 33).title, 'Sector comparison');
@@ -85,6 +89,8 @@ assert.strictEqual(graphData.buildGraph('class-pace', history, 33).title, 'Class
 
 assert.deepStrictEqual(graphData.normalizeViewport(), { start: 0, end: 1 });
 assert.deepStrictEqual(graphData.normalizeViewport({ start: -2, end: 4 }), { start: 0, end: 1 });
+assert.deepStrictEqual(graphData.normalizeViewport({ start: 0.8, end: 0.2 }), { start: 0, end: 1 });
+assert.deepStrictEqual(graphData.normalizeViewport({ start: 'bad', end: 'bad' }), { start: 0, end: 1 });
 const zoomed = graphData.zoomViewport({ start: 0, end: 1 }, 0.5);
 assert.deepStrictEqual(zoomed, { start: 0.25, end: 0.75 });
 assert.deepStrictEqual(graphData.panViewport(zoomed, -1), { start: 0.1, end: 0.6 });
@@ -95,5 +101,12 @@ assert.ok(Math.abs(rightBounded.start - 0.5) < 1e-12);
 assert.strictEqual(rightBounded.end, 1);
 const minimumZoom = graphData.zoomViewport({ start: 0.49, end: 0.51 }, 0.01);
 assert.ok(minimumZoom.end - minimumZoom.start >= 0.08 - Number.EPSILON);
+assert.deepStrictEqual(graphData.zoomViewport({ start: 0.2, end: 0.4 }, 20), { start: 0, end: 1 });
+const leftAnchoredZoom = graphData.zoomViewport({ start: 0, end: 1 }, 0.5, -5);
+assert.deepStrictEqual(leftAnchoredZoom, { start: 0, end: 0.5 });
+const rightAnchoredZoom = graphData.zoomViewport({ start: 0, end: 1 }, 0.5, 5);
+assert.deepStrictEqual(rightAnchoredZoom, { start: 0.5, end: 1 });
+assert.deepStrictEqual(graphData.panViewport({ start: 0.2, end: 0.6 }, 0), { start: 0.2, end: 0.6 });
+assert.deepStrictEqual(graphData.panViewport({ start: 0.2, end: 0.6 }, 1, -4), { start: 0.2, end: 0.6 });
 
 console.log('Graph data tests passed.');

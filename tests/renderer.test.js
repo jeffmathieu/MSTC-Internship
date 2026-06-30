@@ -34,6 +34,7 @@ class FakeElement {
     this.parentElement = null;
     this.offsetWidth = 100;
     this.style = {};
+    this.attributes = {};
   }
   set className(value) {
     this._className = String(value || '');
@@ -46,6 +47,7 @@ class FakeElement {
     this.children = [];
   }
   get innerHTML() { return this._innerHTML; }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
   appendChild(child) {
     child.parentElement = this;
     this.children.push(child);
@@ -66,6 +68,19 @@ class FakeElement {
     if (!selector.startsWith('.')) return null;
     const className = selector.slice(1);
     return this.children.find((child) => child.classList.contains(className)) || null;
+  }
+  querySelectorAll(selector) {
+    if (!selector.startsWith('.')) return [];
+    const className = selector.slice(1);
+    const matches = [];
+    const visit = (node) => {
+      node.children.forEach((child) => {
+        if (child.classList.contains(className)) matches.push(child);
+        visit(child);
+      });
+    };
+    visit(this);
+    return matches;
   }
   focus() {}
   select() {}
@@ -141,6 +156,7 @@ function createFakeDocument() {
 const settings = {
   timingUrl: 'https://example.com/live',
   followedCar: '13',
+  followedCars: ['13'],
   comparisonCar: '56',
   referenceTimes: {
     lapMs: 124500,
@@ -167,6 +183,7 @@ const initialState = {
     { position: 3, carNumber: 56, team: 'Chosen Class', car: 'Car', driver: 'X Driver', className: 'LMP3', classPosition: 3, gap: '10.000', diff: '5.000', lastLap: '2:10.000', bestLap: '2:06.554', lapNumber: 12, sector1: '', sector2: '', sector3: '', pit: '0' }
   ],
   analyticsSummary: {
+    followedCar: '13',
     cars: [{ carNumber: '13', bestSector1Ms: null, bestSector2Ms: '', bestSector3Ms: undefined }],
     driversByCar: {},
     dashboardAnalysis: null
@@ -202,6 +219,7 @@ const updatedState = {
     }
   },
   analyticsSummary: {
+    followedCar: '13',
     cars: [{ carNumber: '13', bestSector1Ms: 41000, bestSector2Ms: 46000, bestSector3Ms: 36000 }],
     driversByCar: {
       2: [{ driverName: 'Fast Driver', averageLapMs: 123500 }],
@@ -249,6 +267,7 @@ const document = createFakeDocument();
 let collectorUpdate = null;
 let lastSettingsPatch = null;
 let graphsOpenCount = 0;
+let lastGraphsCar = null;
 const liveTiming = {
   getSettings: async () => settings,
   setSettings: async (patch) => {
@@ -261,14 +280,15 @@ const liveTiming = {
   stopCollector: async () => true,
   getCollectorState: async () => initialState,
   openLiveWindow: async () => true,
-  openGraphsWindow: async () => { graphsOpenCount += 1; return true; },
+  openGraphsWindow: async (carNumber) => { graphsOpenCount += 1; lastGraphsCar = carNumber; return true; },
   exportCurrent: async () => ({ csvPath: 'rows.csv', jsonPath: 'rows.json', historyPath: 'history.json' }),
   onCollectorUpdate: (callback) => { collectorUpdate = callback; return () => {}; }
 };
 
 const context = {
-  window: { liveTiming, classBattle: {}, lapAnalytics: {}, pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference') },
+  window: { location: { search: '' }, liveTiming, classBattle: {}, lapAnalytics: {}, pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
   document,
+  URLSearchParams,
   console,
   alert: () => {},
   setTimeout,
@@ -355,6 +375,17 @@ module.exports = (async () => {
 
   await document.getElementById('open-graphs').trigger('click');
   assert.strictEqual(graphsOpenCount, 1, 'graph icon opens the detachable graphs window');
+  assert.strictEqual(lastGraphsCar, '13', 'graph window follows the car displayed by this dashboard');
+
+  await document.getElementById('setup-add-car').trigger('click');
+  const extraCars = document.getElementById('setup-extra-cars');
+  assert.strictEqual(extraCars.children.length, 1, 'plus button adds a second car field');
+  const secondCarInput = extraCars.children[0].children[0];
+  secondCarInput.value = '2';
+  await secondCarInput.trigger('input');
+  await document.getElementById('setup-save').trigger('click');
+  await flushAsync();
+  assert.deepStrictEqual(Array.from(lastSettingsPatch.followedCars), ['13', '2']);
 
   document.getElementById('comparison-car').value = '56';
   await document.getElementById('comparison-car').trigger('change');

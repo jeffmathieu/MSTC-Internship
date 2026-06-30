@@ -11,18 +11,24 @@
       <div class="setup-card">
         <p class="eyebrow">First setup</p>
         <h1>Race Engineer Dashboard</h1>
-        <p class="subtitle">Choose the timing page, followed car and data folder before starting. These settings are remembered.</p>
+        <p class="subtitle">Choose the timing page, up to three followed cars and the data folder before starting. These settings are remembered.</p>
         <label>Live timing URL</label>
         <input id="setup-url" type="text" value="https://livetiming.getraceresults.com/demo#screen-results" />
-        <label>Our car number</label>
-        <input id="setup-car" type="text" value="33" />
+        <label>Cars to follow</label>
+        <div id="setup-cars-list" class="setup-cars-list">
+          <div class="setup-car-row">
+            <input id="setup-car" type="text" value="33" aria-label="Primary car number" />
+            <button id="setup-add-car" class="secondary setup-car-action" title="Add another car dashboard" aria-label="Add another car dashboard">+</button>
+          </div>
+          <div id="setup-extra-cars"></div>
+        </div>
         <label>Data storage base folder</label>
         <div class="folder-row">
           <input id="setup-folder" type="text" readonly />
           <button id="setup-choose-folder" class="secondary">Choose folder</button>
         </div>
         <div class="button-row end">
-          <button id="setup-save" class="primary">Save and open dashboard</button>
+          <button id="setup-save" class="primary">Save and open dashboards</button>
         </div>
       </div>
     </div>
@@ -257,6 +263,7 @@
     <script src="../shared/classBattle.js"></script>
     <script src="../shared/pitstopPlanner.js"></script>
     <script src="../shared/normReference.js"></script>
+    <script src="../shared/dashboardView.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

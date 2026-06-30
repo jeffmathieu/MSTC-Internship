@@ -19,10 +19,14 @@ npm run dev
 The app opens a setup screen where you choose:
 
 1. live timing URL, for example `https://livetiming.getraceresults.com/demo#screen-results`
-2. our car number, default `33`
+2. one to three car numbers to follow, with the `+` button adding another dashboard
 3. data storage folder
 
-These settings are remembered. You can reopen the setup window with the **Setup** button.
+These settings are remembered. The first number uses the main dashboard; every
+additional number opens a separate dashboard window. All dashboards share one
+timing-page poll, one live table and one lap-history file, so following three
+cars does not fetch the website three times. You can reopen the setup window
+with the **Setup** button.
 
 ## Data storage
 
@@ -46,6 +50,8 @@ as it came in, and derived files that are recalculated from that source data.
 - `session_metadata.json`
 - `parser_debug.json`
 - `analytics_summary.json`
+- `lap_prediction_car-<number>.json`
+- `pitstop_plan_car-<number>.json`
 
 `latest_live_rows.csv` and `latest_live_rows.json` are overwritten on every
 successful poll. They contain the current timing table only: position, car
@@ -78,12 +84,19 @@ statistics from scratch every time. The app still keeps `lap_history` as the
 source of truth, so if the averaging rule changes later, the summary can be
 rebuilt from the saved laps.
 
+The analytics summary contains a separate dashboard analysis for every followed
+car. Current-lap predictions and pitstop plans are written to car-specific files
+so each dashboard can update independently while using the same source data.
+
 For neutralized laps, the storage keeps both the lap and its flag fields. A
 full lap under safety car or FCY is excluded from lap-time pace averages, but a
 sector can still count if that sector has its own green/eligible marker. For
 example: if sector 1 was completed under green and FCY starts during sector 2,
 sector 1 can still count for sector averages while the full lap does not count
 for lap-time averages.
+
+Pit/inlaps and the following outlaps also remain stored as race history, but are
+excluded from lap and sector pace averages.
 
 ## Live mode
 
