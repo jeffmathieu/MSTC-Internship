@@ -48,6 +48,18 @@ for team drivers, BIC, XIC and adjacent class cars. Each mode stores its own
 reference lap and sector times, so switching modes does not overwrite another
 mode's norm settings.
 
+## Light and dark themes
+
+Use the moon/sun button in the top information bar to switch themes. The choice
+is saved and synchronized across the main dashboard, extra car dashboards, and
+graph windows.
+
+All dashboard colors are grouped in the two variable blocks at the top of
+`src/renderer/styles.css`. Graph-window colors use the matching blocks at the
+top of `src/renderer/graphs.css`. Edit the `:root` block for light mode and the
+`:root[data-theme="dark"]` block for dark mode; component CSS does not need to
+change.
+
 ## Data storage
 
 The folder you select is a base storage folder. Every time you press **Start

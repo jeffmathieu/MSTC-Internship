@@ -1,11 +1,34 @@
 :root {
-  --page: #f7f7f4;
-  --ink: #171717;
-  --muted: #686864;
-  --line: #202020;
-  --soft-line: #d8d8d2;
-  --box: #ffffff;
+  /* Keep this palette aligned with styles.css for the detachable window. */
+  --page: #f1f3f0;
+  --ink: #1b201e;
+  --muted: #626a66;
+  --line: #242a27;
+  --soft-line: #d3d8d4;
+  --box: #fafbf9;
+  --control: #f7f8f6;
+  --grid: #dfe3df;
+  --axis: #737b77;
+  --neutral-series: #929a96;
   --blue: #315fc7;
+  --shadow: rgba(24, 31, 27, .14);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --page: #151b20;
+  --ink: #edf1ef;
+  --muted: #aab5b0;
+  --line: #c9d1cd;
+  --soft-line: #46525a;
+  --box: #20282e;
+  --control: #273139;
+  --grid: #39454c;
+  --axis: #899590;
+  --neutral-series: #899590;
+  --blue: #7ea8ff;
+  --shadow: rgba(0, 0, 0, .32);
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -95,7 +118,7 @@ select {
   padding: 5px 30px 5px 9px;
   border: 2px solid var(--line);
   border-radius: 0;
-  background: white;
+  background: var(--control);
   color: var(--ink);
   font: inherit;
   font-size: 12px;
@@ -114,7 +137,7 @@ select {
   height: 28px;
   padding: 0;
   border: 2px solid var(--line);
-  background: white;
+  background: var(--control);
   color: var(--ink);
   font: inherit;
   font-size: 15px;
@@ -122,7 +145,7 @@ select {
   font-weight: 900;
   cursor: pointer;
 }
-.zoom-controls button:hover { background: #eeeeea; }
+.zoom-controls button:hover { background: var(--soft-line); }
 .zoom-controls button:focus-visible { outline: 3px solid var(--blue); outline-offset: 1px; }
 
 .chart-stage { position: relative; min-height: 0; overflow: hidden; }
@@ -142,8 +165,8 @@ canvas { display: block; width: 100%; height: 100%; }
   max-width: 220px;
   padding: 6px 8px;
   border: 2px solid var(--line);
-  background: white;
-  box-shadow: 2px 2px 0 rgba(0,0,0,.14);
+  background: var(--control);
+  box-shadow: 2px 2px 0 var(--shadow);
   pointer-events: none;
   font-size: 11px;
   font-weight: 800;

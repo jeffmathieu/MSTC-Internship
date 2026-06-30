@@ -1,14 +1,55 @@
 :root {
-  --page: #f7f7f4;
-  --ink: #171717;
-  --muted: #646464;
-  --box: #ffffff;
-  --line: #1f1f1f;
-  --soft-line: #d8d8d2;
+  /* Light palette: edit these variables to tune the complete light theme. */
+  --page: #f1f3f0;
+  --ink: #1b201e;
+  --muted: #626a66;
+  --box: #fafbf9;
+  --control: #f7f8f6;
+  --line: #242a27;
+  --soft-line: #d3d8d4;
   --green: #1e9f67;
   --red: #d94c62;
-  --orange: #f2b100;
+  --orange: #dda321;
   --blue: #315fc7;
+  --primary-bg: #202522;
+  --primary-ink: #fafbf9;
+  --table-head: #e9ece8;
+  --followed-row: #e5edfb;
+  --code-bg: #ecefeb;
+  --flash-good: #d9f6e8;
+  --status-green-bg: #dff3e8;
+  --status-orange-bg: #faedc9;
+  --status-red-bg: #f8dde1;
+  --shadow: rgba(24, 31, 27, .10);
+  --modal-overlay: rgba(12, 17, 15, .48);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  /* Dark palette: all dark-mode colors are intentionally kept in one block. */
+  --page: #151b20;
+  --ink: #edf1ef;
+  --muted: #aab5b0;
+  --box: #20282e;
+  --control: #273139;
+  --line: #c9d1cd;
+  --soft-line: #46525a;
+  --green: #42c98c;
+  --red: #f06a7b;
+  --orange: #efb544;
+  --blue: #7ea8ff;
+  --primary-bg: #edf1ef;
+  --primary-ink: #182025;
+  --table-head: #2a343b;
+  --followed-row: #263b57;
+  --code-bg: #192127;
+  --flash-good: #234b3c;
+  --status-green-bg: #1e4938;
+  --status-orange-bg: #51411f;
+  --status-red-bg: #542d35;
+  --shadow: rgba(0, 0, 0, .28);
+  --modal-overlay: rgba(5, 8, 10, .72);
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -36,7 +77,7 @@ button { cursor: pointer; }
   background: var(--box);
   border: 3px solid var(--line);
   border-radius: 0;
-  box-shadow: 0 2px 0 rgba(0,0,0,.08);
+  box-shadow: 0 2px 0 var(--shadow);
 }
 
 .info-strip {
@@ -74,12 +115,12 @@ button { cursor: pointer; }
 }
 button {
   border: 2px solid var(--line);
-  background: white;
+  background: var(--control);
   color: var(--ink);
   padding: 8px 12px;
   font-weight: 900;
 }
-button.primary { background: var(--ink); color: white; }
+button.primary { background: var(--primary-bg); color: var(--primary-ink); }
 button:disabled { cursor: not-allowed; opacity: .38; }
 .icon-button {
   width: 42px;
@@ -97,6 +138,7 @@ button:disabled { cursor: not-allowed; opacity: .38; }
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+.theme-toggle { font-size: 22px; line-height: 1; }
 
 .main-times {
   display: grid;
@@ -141,7 +183,7 @@ button:disabled { cursor: not-allowed; opacity: .38; }
   height: 24px;
   padding: 0;
   border: 2px solid var(--soft-line);
-  background: white;
+  background: var(--control);
   color: var(--muted);
   font-size: 13px;
   line-height: 1;
@@ -157,7 +199,7 @@ button:disabled { cursor: not-allowed; opacity: .38; }
   height: 34px;
   padding: 4px 8px;
   border: 2px solid var(--line);
-  background: white;
+  background: var(--control);
   color: var(--ink);
   font-size: 18px;
   font-weight: 900;
@@ -169,6 +211,15 @@ button:disabled { cursor: not-allowed; opacity: .38; }
 .norm-text.norm-good { color: var(--green); }
 .norm-text.norm-warn { color: var(--orange); }
 .norm-text.norm-bad { color: var(--red); }
+
+/* Prediction warnings deserve more attention than the smaller reference
+   cards, so the same status also fills this complete panel. */
+#predicted-lap-card.norm-good { background: var(--status-green-bg); }
+#predicted-lap-card.norm-warn { background: var(--status-orange-bg); }
+#predicted-lap-card.norm-bad { background: var(--status-red-bg); }
+#predicted-lap-card.norm-good strong,
+#predicted-lap-card.norm-warn strong,
+#predicted-lap-card.norm-bad strong { color: var(--ink); }
 
 .performance-grid {
   display: grid;
@@ -209,7 +260,7 @@ input {
   min-width: 0;
   width: 100%;
   border: 2px solid var(--line);
-  background: white;
+  background: var(--control);
   color: var(--ink);
   padding: 8px 10px;
   font-weight: 900;
@@ -243,7 +294,7 @@ input {
   animation: flashGood 1.6s ease-out;
 }
 @keyframes flashGood {
-  0% { background: #d9f6e8; border-color: var(--green); }
+  0% { background: var(--flash-good); border-color: var(--green); }
   100% { background: var(--box); }
 }
 
@@ -327,9 +378,9 @@ input {
 .pit-bar span:last-child { border-right: 0; }
 .pit-red,
 .pit-start-closed,
-.pit-end-closed { background: #d84d65; }
+.pit-end-closed { background: var(--red); }
 .pit-green,
-.pit-open { background: #259a71; }
+.pit-open { background: var(--green); }
 .pit-bar b {
   position: absolute;
   inset: 0;
@@ -351,13 +402,13 @@ input {
   bottom: -2px;
   left: 0;
   width: 4px;
-  background: #111;
-  border: 1px solid white;
+  background: var(--ink);
+  border: 1px solid var(--box);
   transform: translateX(-2px);
   z-index: 2;
 }
 .pit-window.open { border-color: var(--green); }
-.pit-window.soon { border-color: #d79a22; }
+.pit-window.soon { border-color: var(--orange); }
 .pit-window.closed { border-color: var(--red); }
 .pit-window.urgent { border-color: var(--red); box-shadow: 0 0 0 4px rgba(217,76,98,.18); }
 .pit-detail {
@@ -370,7 +421,7 @@ input {
 .debug-panel {
   margin-top: 0;
   border: 2px solid var(--line);
-  background: white;
+  background: var(--box);
   padding: 10px 12px;
 }
 summary {
@@ -405,16 +456,16 @@ th, td {
 th {
   position: sticky;
   top: 0;
-  background: #eeeeea;
+  background: var(--table-head);
   z-index: 1;
 }
-tr.followed { background: #e9f0ff; }
+tr.followed { background: var(--followed-row); }
 pre {
   margin: 10px 0 0;
   padding: 10px;
   max-height: 150px;
   overflow: auto;
-  background: #f1f1ee;
+  background: var(--code-bg);
   border: 1px solid var(--soft-line);
   white-space: pre-wrap;
 }
@@ -429,12 +480,12 @@ pre {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(0,0,0,.42);
+  background: var(--modal-overlay);
 }
 .setup-modal.hidden { display: none; }
 .setup-card {
   width: min(760px, 95vw);
-  background: white;
+  background: var(--box);
   border: 3px solid var(--line);
   padding: 24px;
 }
@@ -486,11 +537,11 @@ pre {
   place-items: center;
   border: 2px solid var(--line);
   border-right-width: 0;
-  background: white;
+  background: var(--control);
   color: var(--ink);
 }
 .mode-picker label:last-child span { border-right-width: 2px; }
-.mode-picker input:checked + span { background: var(--ink); color: white; }
+.mode-picker input:checked + span { background: var(--primary-bg); color: var(--primary-ink); }
 .mode-picker input:focus-visible + span { outline: 3px solid var(--blue); outline-offset: 2px; }
 .subtitle, .eyebrow { color: var(--muted); }
 .folder-row {

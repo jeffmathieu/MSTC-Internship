@@ -105,6 +105,7 @@ function normalizeFollowedCars(settings = {}) {
 function normalizeSettings(settings) {
   const followedCars = normalizeFollowedCars(settings);
   const sessionMode = normalizeMode(settings?.sessionMode);
+  const theme = settings?.theme === 'dark' ? 'dark' : 'light';
   const legacyReferenceTimes = { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimes || {}) };
   const referenceTimesByMode = {
     race: { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimesByMode?.race || legacyReferenceTimes) },
@@ -116,6 +117,7 @@ function normalizeSettings(settings) {
     followedCar: followedCars[0] || '33',
     followedCars,
     sessionMode,
+    theme,
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     referenceTimesByMode,
     referenceTimes: referenceTimesByMode[sessionMode],
@@ -948,6 +950,9 @@ ipcMain.handle('settings:set', (_event, settings) => {
   merged.pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
   saveSettings(merged);
   syncAdditionalDashboardWindows(merged);
+  if (previous.theme !== merged.theme) {
+    BrowserWindow.getAllWindows().forEach((window) => window.webContents.send('theme:update', merged.theme));
+  }
   if ((previous.storageFolder || '') !== (merged.storageFolder || '')) {
     collectorState = {
       ...collectorState,

@@ -20,6 +20,29 @@ const normReference = window.normReference;
 const dashboardView = window.dashboardView;
 const previousMetricValues = new Map();
 
+// Applies one of the two supported visual themes. Theme colors themselves are
+// grouped at the top of styles.css, so changing the palette never requires
+// touching renderer logic.
+function applyTheme(theme) {
+  const normalized = theme === 'dark' ? 'dark' : 'light';
+  document.documentElement?.setAttribute('data-theme', normalized);
+  document.body?.setAttribute('data-theme', normalized);
+  const button = $('theme-toggle');
+  if (button) {
+    const dark = normalized === 'dark';
+    button.textContent = dark ? '☀' : '☾';
+    button.setAttribute('title', dark ? 'Switch to light mode' : 'Switch to dark mode');
+    button.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+  }
+  return normalized;
+}
+
+async function toggleTheme() {
+  const next = currentSettings?.theme === 'dark' ? 'light' : 'dark';
+  currentSettings = await window.liveTiming.setSettings({ theme: next });
+  applyTheme(currentSettings.theme);
+}
+
 // Maps collector states to the visual status pill classes in styles.css.
 function statusClass(status) {
   if (['collecting', 'connected'].includes(status)) return 'ok';
@@ -830,6 +853,7 @@ function setupDetailTabs() {
 // preload API, subscribes to collector updates, and opens setup when required.
 async function init() {
   currentSettings = await window.liveTiming.getSettings();
+  applyTheme(currentSettings.theme);
   configuredFollowedCars = normalizedCarList(currentSettings.followedCars, currentSettings.followedCar || '33');
   $('timing-url').value = currentSettings.timingUrl || 'https://livetiming.getraceresults.com/demo#screen-results';
   $('followed-car').value = fixedDashboardCar || currentSettings.followedCar || '33';
@@ -851,6 +875,7 @@ async function init() {
   $('stop')?.addEventListener('click', () => window.liveTiming.stopCollector());
   $('show-live')?.addEventListener('click', () => window.liveTiming.openLiveWindow());
   $('open-graphs')?.addEventListener('click', () => window.liveTiming.openGraphsWindow(activeCarNumber()));
+  $('theme-toggle')?.addEventListener('click', toggleTheme);
   $('choose-folder')?.addEventListener('click', async () => { await chooseAndSetFolder('storage-folder'); await saveSettingsFromInputs(); });
   $('setup-choose-folder')?.addEventListener('click', async () => { await chooseAndSetFolder('setup-folder'); });
   $('setup-add-car')?.addEventListener('click', () => {
@@ -871,6 +896,9 @@ async function init() {
   $('comparison-car')?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); });
   ['pit-duration','pit-required-input','pit-race-hours'].forEach((id) => $(id)?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); }));
   document.querySelectorAll('.edit-ref').forEach((button) => button.addEventListener('click', () => editReferenceTime(button)));
+  window.liveTiming.onThemeUpdate?.((theme) => {
+    currentSettings = { ...currentSettings, theme: applyTheme(theme) };
+  });
   window.liveTiming.onCollectorUpdate(render);
   render(await window.liveTiming.getCollectorState());
   if (!currentSettings.setupComplete || !currentSettings.storageFolder) showSetup(true);

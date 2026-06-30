@@ -144,6 +144,8 @@ function createFakeDocument() {
 
   return {
     elements,
+    documentElement: new FakeElement('html', 'html'),
+    body: new FakeElement('body', 'body'),
     getElementById: byId,
     createElement: (tagName) => new FakeElement('', tagName),
     querySelector: (selector) => tableBodies.has(selector) ? tableBodies.get(selector) : null,
@@ -154,6 +156,7 @@ function createFakeDocument() {
 // Settings and collector states below model one normal dashboard update: initial
 // blank analytics, then a live update with sectors, comparisons, and pit data.
 const settings = {
+  theme: 'light',
   timingUrl: 'https://example.com/live',
   followedCar: '13',
   followedCars: ['13'],
@@ -268,6 +271,7 @@ let collectorUpdate = null;
 let lastSettingsPatch = null;
 let graphsOpenCount = 0;
 let lastGraphsCar = null;
+let themeUpdate = null;
 const liveTiming = {
   getSettings: async () => settings,
   setSettings: async (patch) => {
@@ -281,6 +285,7 @@ const liveTiming = {
   getCollectorState: async () => initialState,
   openLiveWindow: async () => true,
   openGraphsWindow: async (carNumber) => { graphsOpenCount += 1; lastGraphsCar = carNumber; return true; },
+  onThemeUpdate: (callback) => { themeUpdate = callback; return () => {}; },
   exportCurrent: async () => ({ csvPath: 'rows.csv', jsonPath: 'rows.json', historyPath: 'history.json' }),
   onCollectorUpdate: (callback) => { collectorUpdate = callback; return () => {}; }
 };
@@ -322,6 +327,18 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('best-sector-1').textContent, '—');
   assert.strictEqual(document.getElementById('ideal-time').textContent, '—');
   assert.notStrictEqual(document.getElementById('best-sector-1').textContent, '0:00.000');
+  assert.strictEqual(document.body.attributes['data-theme'], 'light');
+  assert.strictEqual(document.getElementById('theme-toggle').textContent, '☾');
+
+  await document.getElementById('theme-toggle').trigger('click');
+  await flushAsync();
+  assert.strictEqual(lastSettingsPatch.theme, 'dark', 'theme toggle persists dark mode');
+  assert.strictEqual(document.body.attributes['data-theme'], 'dark');
+  assert.strictEqual(document.getElementById('theme-toggle').textContent, '☀');
+  assert.strictEqual(document.getElementById('theme-toggle').attributes['aria-label'], 'Switch to light mode');
+  themeUpdate('light');
+  assert.strictEqual(document.body.attributes['data-theme'], 'light', 'theme updates synchronize open windows');
+  assert.strictEqual(document.getElementById('theme-toggle').textContent, '☾');
 
   assert.ok(collectorUpdate, 'renderer subscribes to collector updates');
   collectorUpdate(updatedState);
