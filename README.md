@@ -4,9 +4,7 @@ This is a local desktop dashboard for GetRaceResults / Circuit Zolder live timin
 
 - left top: session and followed-car information
 - left middle: same-class mini timing table with catch estimates
-- left bottom: norm/reference-time warning
 - right top: settings, status and controls
-- right main: switchable graph panel
 - lower details: full timing rows, stored laps and parser debug
 
 ## Run during development
@@ -16,54 +14,113 @@ npm install
 npm run dev
 ```
 
+## Download / Install
+
+Download the newest version from the repository's **GitHub Releases** page.
+
+- **Windows:** download and run the `MSTC Race Engineer Dashboard Setup ... .exe` installer.
+- **macOS:** download and open the `.dmg`, then drag the app to Applications.
+
+Installed builds check GitHub Releases for newer versions when the app starts.
+Development runs started with `npm start` or `npm run dev` never check for
+updates. When an update has downloaded, the app asks whether to restart and
+install immediately or continue working and install later.
+
 ## First launch
 
 The app opens a setup screen where you choose:
 
 1. live timing URL, for example `https://livetiming.getraceresults.com/demo#screen-results`
-2. our car number, default `33`
-3. reference / norm time, default `1:42.000`
+2. one to three car numbers to follow, with the `+` button adding another dashboard
+3. session mode: Race, Practice, or Qualifying
 4. data storage folder
 
-These settings are remembered. You can reopen the setup window with the **Setup** button.
+These settings are remembered. The first number uses the main dashboard; every
+additional number opens a separate dashboard window. All dashboards share one
+timing-page poll, one live table and one lap-history file, so following three
+cars does not fetch the website three times. You can reopen the setup window
+with the **Setup** button.
+
+Race mode enables pitstop strategy, recent-pace comparisons and catch
+predictions. Practice mode keeps norm-time and pace comparisons but hides pit
+and catch strategy. Qualifying mode compares best and latest valid flying laps
+for team drivers, BIC, XIC and adjacent class cars. Each mode stores its own
+reference lap and sector times, so switching modes does not overwrite another
+mode's norm settings.
 
 ## Data storage
 
-The app stores readable data in the folder you select:
+The folder you select is a base storage folder. Every time you press **Start
+live**, the app creates a new session folder inside that base folder, for
+example:
+
+`2026-06-25T08-42-10Z_ris-timing_car-33`
+
+All files for that live run are written into that session folder, so you do not
+need to manually create a new folder for each race, qualifying, practice, or
+race-weekend session.
+
+Each session folder contains readable source files that contain the timing data
+as it came in, and derived files that are recalculated from that source data.
 
 - `latest_live_rows.csv`
 - `latest_live_rows.json`
-- `latest_session_info.json`
 - `lap_history.csv`
 - `lap_history.jsonl`
+- `session_metadata.json`
+- `parser_debug.json`
+- `analytics_summary.json`
+- `lap_prediction_car-<number>.json`
+- `pitstop_plan_car-<number>.json`
 
-Only new completed laps are appended to the lap history, so polling every few seconds does not create duplicate rows.
+`latest_live_rows.csv` and `latest_live_rows.json` are overwritten on every
+successful poll. They contain the current timing table only: position, car
+number, class, driver, last lap, best lap, sectors, gaps, and similar fields.
+These files are useful when you want to inspect what the app sees right now.
 
-## Live and replay mode
+`lap_history.csv` and `lap_history.jsonl` are the long-term source of truth.
+Only new completed laps are appended, so polling every few seconds does not
+create duplicate rows. These files keep all completed laps, including laps
+driven under safety car, full course yellow, code 60, or yellow flags. Those
+laps are stored because they are still part of the race history, but the
+analytics can exclude them from pace averages.
 
-- **Start live** reads the chosen GetRaceResults timing URL.
-- **Replay** plays the built-in Belcar replay data so graphs and catch estimates can be tested quickly.
+`session_metadata.json` is overwritten with compact session information such as
+the timing URL, detected timing provider, followed car, session name, and last
+update time.
 
-## Graphs
+`parser_debug.json` is overwritten with parser diagnostics. It shows which table
+headers were detected, how many rows were parsed, the first parsed rows, and any
+parser warnings. This is mainly for troubleshooting when a timing website
+changes its HTML.
 
-Graphs are defined in `src/renderer/app.js` in the `graphRegistry` array. To add another graph later, add another object with:
+`analytics_summary.json` is a derived cache built from `lap_history`. It stores
+the current averages, best lap times, best sector times, driver statistics,
+class statistics, and comparison deltas used by the dashboard. It does not copy
+the full lap list again; detailed lap data stays in `lap_history.jsonl`.
 
-```js
-{
-  id: 'myGraph',
-  label: 'My graph name',
-  description: 'What this graph shows',
-  render(container, state) {
-    // draw graph here
-  }
-}
-```
+The averages are therefore available without the renderer having to rebuild all
+statistics from scratch every time. The app still keeps `lap_history` as the
+source of truth, so if the averaging rule changes later, the summary can be
+rebuilt from the saved laps.
 
-Current graph types:
+The analytics summary contains a separate dashboard analysis for every followed
+car. Current-lap predictions and pitstop plans are written to car-specific files
+so each dashboard can update independently while using the same source data.
 
-- Our lap time over race, colored by driver/stint
-- Same-class lap comparison
-- Driver sector comparison
+For neutralized laps, the storage keeps both the lap and its flag fields. A
+full lap under safety car or FCY is excluded from lap-time pace averages, but a
+sector can still count if that sector has its own green/eligible marker. For
+example: if sector 1 was completed under green and FCY starts during sector 2,
+sector 1 can still count for sector averages while the full lap does not count
+for lap-time averages.
+
+Pit/inlaps and the following outlaps also remain stored as race history, but are
+excluded from lap and sector pace averages.
+
+## Live mode
+
+**Start live** reads the chosen GetRaceResults timing URL. The dashboard uses live timing data only.
 
 ## Build a Windows app
 
@@ -75,3 +132,45 @@ npm run dist:win
 ```
 
 The output appears in `dist/`.
+
+To build locally for the current platform, or specifically for macOS:
+
+```bash
+npm run dist
+npm run dist:mac
+```
+
+## Release process
+
+Releases are published only for pushed version tags:
+
+1. Merge the intended changes into `main` and make sure `npm test` passes.
+2. From `main`, increment the version with one of:
+
+   ```bash
+   npm version patch
+   npm version minor
+   npm version major
+   ```
+
+3. Push the generated version commit and tag:
+
+   ```bash
+   git push origin main
+   git push origin --tags
+   ```
+
+The `v*` tag starts `.github/workflows/release.yml`. GitHub Actions builds the
+Windows NSIS installer and the macOS DMG/ZIP, then publishes the installers and
+auto-update metadata to GitHub Releases. The tag version must match the version
+in `package.json`, which `npm version` handles automatically.
+
+## Code signing note
+
+The current CI builds are unsigned. Windows SmartScreen and macOS Gatekeeper may
+therefore display warnings. This is acceptable for internal testing, but code
+signing should be added before a broad production rollout. In particular,
+macOS auto-updates require a signed application. The release workflow contains
+commented placeholders for future macOS notarization and Windows certificate
+secrets; certificates and passwords must stay in GitHub Actions secrets and
+must never be committed to the repository.

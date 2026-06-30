@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Race Analysis Graphs</title>
+    <link rel="stylesheet" href="graphs.css" />
+  </head>
+  <body>
+    <main class="graphs-page">
+      <header>
+        <div>
+          <span>Race analysis</span>
+          <strong id="graphs-session">Waiting for session data</strong>
+        </div>
+        <div class="graphs-meta">
+          <span>Our car <strong id="graphs-car">—</strong></span>
+          <span>Stored laps <strong id="graphs-lap-count">0</strong></span>
+          <span>Updated <strong id="graphs-updated">—</strong></span>
+        </div>
+      </header>
+
+      <section class="graphs-grid">
+        <article class="chart-panel" data-slot="0">
+          <div class="chart-heading"><div><h1></h1><p></p></div><div class="chart-actions"><select aria-label="Graph in top-left panel"></select><div class="zoom-controls" aria-label="Graph zoom controls"><button data-view="left" title="Pan left" aria-label="Pan graph left">←</button><button data-view="out" title="Zoom out" aria-label="Zoom out">−</button><button data-view="in" title="Zoom in" aria-label="Zoom in">+</button><button data-view="right" title="Pan right" aria-label="Pan graph right">→</button><button data-view="reset" title="Reset zoom" aria-label="Reset zoom">↺</button></div></div></div>
+          <div class="chart-stage"><canvas></canvas><div class="chart-empty">Waiting for completed laps</div><div class="chart-tooltip"></div></div>
+          <div class="chart-legend"></div>
+        </article>
+        <article class="chart-panel" data-slot="1">
+          <div class="chart-heading"><div><h1></h1><p></p></div><div class="chart-actions"><select aria-label="Graph in top-right panel"></select><div class="zoom-controls" aria-label="Graph zoom controls"><button data-view="left" title="Pan left" aria-label="Pan graph left">←</button><button data-view="out" title="Zoom out" aria-label="Zoom out">−</button><button data-view="in" title="Zoom in" aria-label="Zoom in">+</button><button data-view="right" title="Pan right" aria-label="Pan graph right">→</button><button data-view="reset" title="Reset zoom" aria-label="Reset zoom">↺</button></div></div></div>
+          <div class="chart-stage"><canvas></canvas><div class="chart-empty">Waiting for completed laps</div><div class="chart-tooltip"></div></div>
+          <div class="chart-legend"></div>
+        </article>
+        <article class="chart-panel" data-slot="2">
+          <div class="chart-heading"><div><h1></h1><p></p></div><div class="chart-actions"><select aria-label="Graph in bottom-left panel"></select><div class="zoom-controls" aria-label="Graph zoom controls"><button data-view="left" title="Pan left" aria-label="Pan graph left">←</button><button data-view="out" title="Zoom out" aria-label="Zoom out">−</button><button data-view="in" title="Zoom in" aria-label="Zoom in">+</button><button data-view="right" title="Pan right" aria-label="Pan graph right">→</button><button data-view="reset" title="Reset zoom" aria-label="Reset zoom">↺</button></div></div></div>
+          <div class="chart-stage"><canvas></canvas><div class="chart-empty">Waiting for completed laps</div><div class="chart-tooltip"></div></div>
+          <div class="chart-legend"></div>
+        </article>
+        <article class="chart-panel" data-slot="3">
+          <div class="chart-heading"><div><h1></h1><p></p></div><div class="chart-actions"><select aria-label="Graph in bottom-right panel"></select><div class="zoom-controls" aria-label="Graph zoom controls"><button data-view="left" title="Pan left" aria-label="Pan graph left">←</button><button data-view="out" title="Zoom out" aria-label="Zoom out">−</button><button data-view="in" title="Zoom in" aria-label="Zoom in">+</button><button data-view="right" title="Pan right" aria-label="Pan graph right">→</button><button data-view="reset" title="Reset zoom" aria-label="Reset zoom">↺</button></div></div></div>
+          <div class="chart-stage"><canvas></canvas><div class="chart-empty">Waiting for completed laps</div><div class="chart-tooltip"></div></div>
+          <div class="chart-legend"></div>
+        </article>
+      </section>
+    </main>
+
+    <script src="../shared/lapAnalytics.js"></script>
+    <script src="../shared/graphData.js"></script>
+    <script src="graphs.js"></script>
+  </body>
+</html>
