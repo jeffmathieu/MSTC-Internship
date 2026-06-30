@@ -34,7 +34,6 @@
           <button id="setup-choose-folder" class="secondary">Choose folder</button>
         </div>
         <div class="button-row end">
-          <button id="open-pit-setup" class="secondary">Pitstop setup</button>
           <button id="setup-save" class="primary">Save and open dashboards</button>
         </div>
       </div>
@@ -57,6 +56,14 @@
           <label class="pit-circuit-field">
             Circuit and pit formation
             <select id="pit-circuit"></select>
+          </label>
+          <label>
+            Regular-track distance (m)
+            <input id="pit-distance-meters" type="number" min="1" step="1" />
+          </label>
+          <label>
+            FCY speed (km/h)
+            <input id="pit-fcy-speed" type="number" min="1" step="1" />
           </label>
         </div>
         <p id="pit-distance-note" class="subtitle"></p>
@@ -233,6 +240,7 @@
             <span>Pit time</span>
             <input id="pit-duration" type="number" min="0" step="1" value="75" />
           </label>
+          <button id="open-pit-setup" class="secondary icon-button pit-setup-button" title="Open pitstop setup" aria-label="Open pitstop setup">⚙</button>
         </div>
         <div class="pit-bar" id="pit-bar">
           <span class="pit-segment pit-start-closed"></span>

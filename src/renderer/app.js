@@ -203,6 +203,9 @@ function hoursFromInput(id, fallbackHours) {
 // Builds the pit rule object saved to settings. If new pit rules become
 // configurable, add their input mapping here and the planner default.
 function pitRulesFromInputs() {
+  const selectedCircuit = pitstopCircuits?.pitstopCircuitById($('pit-circuit')?.value);
+  const configuredDistance = Number($('pit-distance-meters')?.value);
+  const configuredFcySpeed = Number($('pit-fcy-speed')?.value);
   return {
     raceDurationMs: hoursFromInput('pit-race-hours', 24) * 60 * 60 * 1000,
     pitClosedStartMs: 25 * 60 * 1000,
@@ -210,7 +213,14 @@ function pitRulesFromInputs() {
     pitCooldownMs: 25 * 60 * 1000,
     pitStopDurationMs: secondsFromInput('pit-duration', 75) * 1000,
     requiredPitStops: Math.max(0, Math.floor(secondsFromInput('pit-required-input', 2))),
-    nearWindowLaps: 2
+    nearWindowLaps: 2,
+    circuitId: selectedCircuit?.id || currentSettings?.pitCircuitId || 'zolder',
+    regularTrackDistanceMeters: Number.isFinite(configuredDistance) && configuredDistance > 0
+      ? configuredDistance
+      : selectedCircuit?.regularTrackDistanceMeters ?? null,
+    fcySpeedKph: Number.isFinite(configuredFcySpeed) && configuredFcySpeed > 0
+      ? configuredFcySpeed
+      : selectedCircuit?.fcySpeedKph ?? 60
   };
 }
 
@@ -227,11 +237,23 @@ function populatePitstopCircuits() {
 }
 
 function updatePitDistanceNote() {
+  const distance = Number($('pit-distance-meters')?.value);
+  const speed = Number($('pit-fcy-speed')?.value);
+  if (!(distance > 0) || !(speed > 0)) {
+    setText('pit-distance-note', 'Enter a positive distance and FCY speed.');
+    return;
+  }
+  const travelSeconds = distance / (speed / 3.6);
+  setText('pit-distance-note', `A non-pitting car needs approximately ${travelSeconds.toFixed(1)}s between pit-in and pit-out.`);
+}
+
+// Selecting a layout loads its saved defaults. The engineer can then override
+// either value for race-specific regulations without changing the profile.
+function applyPitCircuitDefaults() {
   const circuit = pitstopCircuits?.pitstopCircuitById($('pit-circuit')?.value);
-  const configured = Number(circuit?.regularTrackDistanceMeters) > 0;
-  setText('pit-distance-note', configured
-    ? `Regular-track distance: ${circuit.regularTrackDistanceMeters} m · FCY speed: ${circuit.fcySpeedKph} km/h`
-    : 'FCY distance is not configured yet. Add it at the TODO for this layout in src/shared/pitstopCircuits.js.');
+  if ($('pit-distance-meters')) $('pit-distance-meters').value = String(circuit?.regularTrackDistanceMeters ?? '');
+  if ($('pit-fcy-speed')) $('pit-fcy-speed').value = String(circuit?.fcySpeedKph ?? 60);
+  updatePitDistanceNote();
 }
 
 function pitSetupLocked() {
@@ -244,6 +266,9 @@ function showPitSetup(show = true) {
     $('pit-race-hours').value = String((currentSettings?.pitRules?.raceDurationMs || 86400000) / 3600000);
     $('pit-required-input').value = String(currentSettings?.pitRules?.requiredPitStops ?? 2);
     $('pit-circuit').value = currentSettings?.pitCircuitId || currentSettings?.pitRules?.circuitId || 'zolder';
+    const selectedCircuit = pitstopCircuits?.pitstopCircuitById($('pit-circuit').value);
+    $('pit-distance-meters').value = String(currentSettings?.pitRules?.regularTrackDistanceMeters ?? selectedCircuit?.regularTrackDistanceMeters ?? '');
+    $('pit-fcy-speed').value = String(currentSettings?.pitRules?.fcySpeedKph ?? selectedCircuit?.fcySpeedKph ?? 60);
     updatePitDistanceNote();
   }
   $('pit-setup-modal')?.classList.toggle('hidden', !show);
@@ -935,7 +960,8 @@ async function init() {
   $('setup-save')?.addEventListener('click', async () => { syncMainFromSetup(); await saveSettingsFromInputs(true); showSetup(false); render(currentState || await window.liveTiming.getCollectorState()); });
   $('open-pit-setup')?.addEventListener('click', () => showPitSetup(true));
   $('pit-setup-cancel')?.addEventListener('click', () => showPitSetup(false));
-  $('pit-circuit')?.addEventListener('change', updatePitDistanceNote);
+  $('pit-circuit')?.addEventListener('change', applyPitCircuitDefaults);
+  ['pit-distance-meters', 'pit-fcy-speed'].forEach((id) => $(id)?.addEventListener('input', updatePitDistanceNote));
   $('pit-setup-save')?.addEventListener('click', async () => {
     if (pitSetupLocked()) return;
     await saveSettingsFromInputs();

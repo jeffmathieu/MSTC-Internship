@@ -69,6 +69,13 @@ const configuredFcyLoss = pitLossForSession({
 assert.strictEqual(configuredFcyLoss.regularTrackTravelMs, 36000);
 assert.strictEqual(configuredFcyLoss.pitLossMs, 39000);
 assert.strictEqual(configuredFcyLoss.reliable, true);
+const raceSpecificOverride = pitLossForSession({
+  session: { flag: 'FCY' },
+  fcyGapState: { ready: true },
+  rules: { pitStopDurationMs: 75000, regularTrackDistanceMeters: 700, fcySpeedKph: 70 }
+});
+assert.strictEqual(raceSpecificOverride.regularTrackTravelMs, 36000);
+assert.strictEqual(raceSpecificOverride.pitLossMs, 39000);
 assert.strictEqual(pitLossForSession({ session: { flag: 'Green' }, rules: { pitStopDurationMs: 75000 } }).pitLossMs, 75000);
 
 // Invalid FCY speeds fall back to 60 km/h instead of dividing by zero or

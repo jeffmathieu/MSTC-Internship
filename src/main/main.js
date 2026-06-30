@@ -111,6 +111,8 @@ function normalizeSettings(settings) {
   const theme = settings?.theme === 'dark' ? 'dark' : 'light';
   const pitCircuitId = normalizePitstopCircuitId(settings?.pitCircuitId || settings?.pitRules?.circuitId);
   const pitCircuit = pitstopCircuitById(pitCircuitId);
+  const configuredPitDistance = Number(settings?.pitRules?.regularTrackDistanceMeters);
+  const configuredFcySpeed = Number(settings?.pitRules?.fcySpeedKph);
   const legacyReferenceTimes = { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimes || {}) };
   const referenceTimesByMode = {
     race: { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimesByMode?.race || legacyReferenceTimes) },
@@ -131,8 +133,12 @@ function normalizeSettings(settings) {
       ...DEFAULT_PIT_RULES,
       ...(settings?.pitRules || {}),
       circuitId: pitCircuitId,
-      regularTrackDistanceMeters: pitCircuit?.regularTrackDistanceMeters ?? null,
-      fcySpeedKph: pitCircuit?.fcySpeedKph ?? DEFAULT_PIT_RULES.fcySpeedKph
+      regularTrackDistanceMeters: Number.isFinite(configuredPitDistance) && configuredPitDistance > 0
+        ? configuredPitDistance
+        : pitCircuit?.regularTrackDistanceMeters ?? null,
+      fcySpeedKph: Number.isFinite(configuredFcySpeed) && configuredFcySpeed > 0
+        ? configuredFcySpeed
+        : pitCircuit?.fcySpeedKph ?? DEFAULT_PIT_RULES.fcySpeedKph
     }
   };
 }

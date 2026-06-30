@@ -56,7 +56,9 @@ race.
 
 FCY pit loss uses the selected layout's regular-track distance between pit-in
 and pit-out. Circuit distances and FCY speeds are maintained centrally in
-`src/shared/pitstopCircuits.js`. If a future layout has no distance yet, the app
+`src/shared/pitstopCircuits.js`. Selecting a layout fills these defaults into
+the Pitstop setup, where distance and speed can be overridden for race-specific
+rules without modifying the central profile. If a future layout has no distance yet, the app
 shows that configuration is missing instead of calculating a false rejoin
 position. After FCY starts, predictions remain marked as provisional until a
 fresh timing passage and stable gaps have been observed.

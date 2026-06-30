@@ -326,7 +326,7 @@ input {
 }
 .pit-header {
   display: grid;
-  grid-template-columns: minmax(220px, 1.2fr) minmax(120px, .55fr) minmax(110px, .55fr) minmax(340px, 1.6fr) 92px;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(120px, .55fr) minmax(110px, .55fr) minmax(340px, 1.6fr) 92px 42px;
   gap: 12px;
   align-items: end;
 }
@@ -365,6 +365,14 @@ input {
   height: 32px;
   padding: 4px 7px;
   font-size: 14px;
+}
+.pit-setup-button {
+  align-self: end;
+  width: 42px;
+  height: 32px;
+  padding: 0;
+  font-size: 19px;
+  line-height: 1;
 }
 .pit-bar {
   position: relative;
