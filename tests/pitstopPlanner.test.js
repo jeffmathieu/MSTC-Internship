@@ -10,7 +10,10 @@ const {
   buildPitstopPlan,
   projectClassAfterPit,
   timeUntilNextAllowedPit,
-  latestSafePitElapsedMsForRemainingStops
+  latestSafePitElapsedMsForRemainingStops,
+  isFcySession,
+  nextFcyGapState,
+  pitLossForSession
 } = require('../src/shared/pitstopPlanner');
 
 const rules = normalizeRules({
@@ -46,6 +49,125 @@ assert.strictEqual(pitCountFromRow({ pitInfo: 'stops 3' }), 3);
 assert.strictEqual(pitCountFromRow({ pit: '--' }), 0);
 assert.strictEqual(estimateAverageLapMs([{ lastLap: '2:06.000' }, { lastLapMs: 124000 }, { lastLap: '2:05.000' }]), 125000);
 assert.strictEqual(estimateAverageLapMs([{ lastLap: '--' }, { lastLapMs: 0 }]), null);
+
+// FCY pit loss subtracts the time a non-pitting car needs to cover the regular
+// track between pit entry and pit exit. A missing distance produces no guess.
+assert.strictEqual(isFcySession({ flag: 'Full Course Yellow' }), true);
+assert.strictEqual(isFcySession({ flag: 'GREEN FLAG' }), false);
+const missingFcyDistance = pitLossForSession({
+  session: { flag: 'FCY' },
+  rules: { pitStopDurationMs: 75000, circuitId: 'zolder', regularTrackDistanceMeters: null }
+});
+assert.strictEqual(missingFcyDistance.status, 'missing-distance');
+assert.strictEqual(missingFcyDistance.pitLossMs, null);
+
+const configuredFcyLoss = pitLossForSession({
+  session: { flag: 'FCY' },
+  fcyGapState: { ready: true },
+  rules: { pitStopDurationMs: 75000, regularTrackDistanceMeters: 600, fcySpeedKph: 60 }
+});
+assert.strictEqual(configuredFcyLoss.regularTrackTravelMs, 36000);
+assert.strictEqual(configuredFcyLoss.pitLossMs, 39000);
+assert.strictEqual(configuredFcyLoss.reliable, true);
+assert.strictEqual(pitLossForSession({ session: { flag: 'Green' }, rules: { pitStopDurationMs: 75000 } }).pitLossMs, 75000);
+
+// Invalid FCY speeds fall back to 60 km/h instead of dividing by zero or
+// producing Infinity. Numeric settings strings remain supported.
+for (const invalidSpeed of [0, -20, 'not-a-speed', Infinity]) {
+  const safeSpeedResult = pitLossForSession({
+    session: { flag: 'Full Course Yellow' },
+    fcyGapState: { ready: true },
+    rules: { pitStopDurationMs: '75000', regularTrackDistanceMeters: '600', fcySpeedKph: invalidSpeed }
+  });
+  assert.strictEqual(safeSpeedResult.fcySpeedKph, 60);
+  assert.strictEqual(safeSpeedResult.regularTrackTravelMs, 36000);
+  assert.strictEqual(safeSpeedResult.pitLossMs, 39000);
+}
+
+// If both routes take exactly 75 seconds there is no relative loss. A longer
+// regular route creates a negative loss (a relative FCY pit advantage), which
+// must remain signed rather than being silently clamped to zero.
+assert.strictEqual(pitLossForSession({
+  session: { flag: 'FCY' },
+  fcyGapState: { ready: true },
+  rules: { pitStopDurationMs: 75000, regularTrackDistanceMeters: 1250, fcySpeedKph: 60 }
+}).pitLossMs, 0);
+assert.strictEqual(pitLossForSession({
+  session: { flag: 'FCY' },
+  fcyGapState: { ready: true },
+  rules: { pitStopDurationMs: 75000, regularTrackDistanceMeters: 1500, fcySpeedKph: 60 }
+}).pitLossMs, -15000);
+
+for (const invalidDistance of [0, -1, 'bad', Infinity, undefined]) {
+  const result = pitLossForSession({
+    session: { flag: 'FCY' },
+    rules: { pitStopDurationMs: 75000, circuitId: 'test-layout', regularTrackDistanceMeters: invalidDistance }
+  });
+  assert.strictEqual(result.status, 'missing-distance');
+  assert.strictEqual(result.pitLossMs, null);
+}
+
+// Repeated polls do not become reliable until both a fresh timing passage and
+// stable post-FCY gaps have been observed.
+const stabilizationRules = { fcyStablePollsRequired: 2, fcyMinimumAgeMs: 10000 };
+const preFcy = nextFcyGapState({
+  rows: classRows,
+  session: { flag: 'Green' },
+  collectedAt: '2026-06-26T10:00:00.000Z',
+  rules: stabilizationRules
+});
+const fcyStarted = nextFcyGapState({
+  previous: preFcy,
+  rows: classRows,
+  session: { flag: 'FCY' },
+  collectedAt: '2026-06-26T10:00:05.000Z',
+  rules: stabilizationRules
+});
+assert.strictEqual(fcyStarted.ready, false);
+assert.strictEqual(fcyStarted.freshTimingObserved, false);
+const refreshedRows = classRows.map((row) => ({ ...row, lapNumber: row.lapNumber + 1, interval: row.carNumber === 56 ? '19.000' : row.interval }));
+const fcyFresh = nextFcyGapState({ previous: fcyStarted, rows: refreshedRows, session: { flag: 'FCY' }, collectedAt: '2026-06-26T10:00:10.000Z', rules: stabilizationRules });
+const fcyStableOnce = nextFcyGapState({ previous: fcyFresh, rows: refreshedRows, session: { flag: 'FCY' }, collectedAt: '2026-06-26T10:00:15.000Z', rules: stabilizationRules });
+const fcyReady = nextFcyGapState({ previous: fcyStableOnce, rows: refreshedRows, session: { flag: 'FCY' }, collectedAt: '2026-06-26T10:00:20.000Z', rules: stabilizationRules });
+assert.strictEqual(fcyFresh.freshTimingObserved, true);
+assert.strictEqual(fcyStableOnce.ready, false);
+assert.strictEqual(fcyReady.ready, true);
+
+// A changed interval resets stability, and empty timing tables can never become
+// stable merely because the same empty page was polled repeatedly.
+const changedGapAgain = nextFcyGapState({
+  previous: fcyStableOnce,
+  rows: refreshedRows.map((row) => ({ ...row, interval: row.carNumber === 56 ? '18.500' : row.interval })),
+  session: { flag: 'FCY' },
+  collectedAt: '2026-06-26T10:00:20.000Z',
+  rules: stabilizationRules
+});
+assert.strictEqual(changedGapAgain.stablePolls, 0);
+assert.strictEqual(changedGapAgain.ready, false);
+const emptyFcyStart = nextFcyGapState({ rows: [], session: { flag: 'FCY' }, collectedAt: '2026-06-26T10:00:00.000Z', rules: { fcyStablePollsRequired: 1, fcyMinimumAgeMs: 0 } });
+const emptyFcyAgain = nextFcyGapState({ previous: emptyFcyStart, rows: [], session: { flag: 'FCY' }, collectedAt: '2026-06-26T10:00:05.000Z', rules: { fcyStablePollsRequired: 1, fcyMinimumAgeMs: 0 } });
+assert.strictEqual(emptyFcyAgain.ready, false);
+
+const provisionalFcyPlan = buildPitstopPlan({
+  rows: classRows,
+  session: { timeToGo: '1:20:00', flag: 'FCY' },
+  followedCarNumber: '33',
+  pitState: { completedPitStops: 0 },
+  fcyGapState: fcyFresh,
+  rules: { ...rules, regularTrackDistanceMeters: 600, fcySpeedKph: 60 }
+});
+assert.strictEqual(provisionalFcyPlan.pitLoss.pitLossMs, 39000);
+assert.strictEqual(provisionalFcyPlan.pitLoss.status, 'stabilizing');
+assert.strictEqual(provisionalFcyPlan.projection.provisional, true);
+
+const missingDistancePlan = buildPitstopPlan({
+  rows: classRows,
+  session: { timeToGo: '1:20:00', flag: 'FCY' },
+  followedCarNumber: '33',
+  rules: { ...rules, circuitId: 'assen', regularTrackDistanceMeters: null }
+});
+assert.strictEqual(missingDistancePlan.projection.available, false);
+assert.ok(missingDistancePlan.projection.reason.includes('assen'));
 
 // Existing pit count on the first app sample is accepted as baseline because
 // the app cannot know when that stop happened before it started.

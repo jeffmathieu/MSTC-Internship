@@ -28,8 +28,10 @@ const {
 const {
   DEFAULT_RULES: DEFAULT_PIT_RULES,
   buildPitstopPlan,
-  nextPitStateFromRow
+  nextPitStateFromRow,
+  nextFcyGapState
 } = require('../shared/pitstopPlanner');
+const { pitstopCircuitById, normalizePitstopCircuitId } = require('../shared/pitstopCircuits');
 const { buildLapPrediction } = require('../shared/lapPrediction');
 const { buildAdjacentClassBattles } = require('../shared/classBattle');
 const { normalizeMode, buildComparisonView, qualifyingAdjacentView } = require('../shared/sessionMode');
@@ -55,6 +57,7 @@ const knownLapKeys = new Set();
 // evidence we have for the lap that just completed.
 const latestLiveRowByCar = new Map();
 const latestPitStateByCar = new Map();
+const latestFcyGapStateByCar = new Map();
 
 // Single source of truth for the collector UI. The renderer receives this
 // object through the "collector:update" IPC event whenever something changes.
@@ -106,6 +109,8 @@ function normalizeSettings(settings) {
   const followedCars = normalizeFollowedCars(settings);
   const sessionMode = normalizeMode(settings?.sessionMode);
   const theme = settings?.theme === 'dark' ? 'dark' : 'light';
+  const pitCircuitId = normalizePitstopCircuitId(settings?.pitCircuitId || settings?.pitRules?.circuitId);
+  const pitCircuit = pitstopCircuitById(pitCircuitId);
   const legacyReferenceTimes = { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimes || {}) };
   const referenceTimesByMode = {
     race: { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimesByMode?.race || legacyReferenceTimes) },
@@ -118,12 +123,16 @@ function normalizeSettings(settings) {
     followedCars,
     sessionMode,
     theme,
+    pitCircuitId,
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     referenceTimesByMode,
     referenceTimes: referenceTimesByMode[sessionMode],
     pitRules: {
       ...DEFAULT_PIT_RULES,
-      ...(settings?.pitRules || {})
+      ...(settings?.pitRules || {}),
+      circuitId: pitCircuitId,
+      regularTrackDistanceMeters: pitCircuit?.regularTrackDistanceMeters ?? null,
+      fcySpeedKph: pitCircuit?.fcySpeedKph ?? DEFAULT_PIT_RULES.fcySpeedKph
     }
   };
 }
@@ -488,11 +497,20 @@ function buildAndWritePitstopPlan(settings, context, rows, carNumber) {
   const folder = ensureStorage(settings);
   const followedCarNumber = String(carNumber || '');
   const pitState = updatePitState(settings, rows, context, followedCarNumber);
+  const fcyGapState = nextFcyGapState({
+    previous: latestFcyGapStateByCar.get(followedCarNumber),
+    session: context?.session || {},
+    rows,
+    collectedAt: context?.collectedAt || new Date().toISOString(),
+    rules: settings.pitRules
+  });
+  latestFcyGapStateByCar.set(followedCarNumber, fcyGapState);
   const plan = buildPitstopPlan({
     rows,
     session: context?.session || {},
     followedCarNumber,
     pitState,
+    fcyGapState,
     rules: {
       ...settings.pitRules,
       averageLapMs: averageLapForPitPlan(settings, followedCarNumber)
@@ -741,6 +759,7 @@ function loadExistingHistory(settings) {
   knownLapKeys.clear();
   latestLiveRowByCar.clear();
   latestPitStateByCar.clear();
+  latestFcyGapStateByCar.clear();
   const folder = ensureStorage(settings);
   const jsonlPath = path.join(folder, 'lap_history.jsonl');
   if (!fs.existsSync(jsonlPath)) return [];

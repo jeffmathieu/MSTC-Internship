@@ -326,7 +326,7 @@ input {
 }
 .pit-header {
   display: grid;
-  grid-template-columns: minmax(220px, 1.2fr) minmax(120px, .55fr) minmax(110px, .55fr) minmax(340px, 1.6fr) 92px 74px 78px;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(120px, .55fr) minmax(110px, .55fr) minmax(340px, 1.6fr) 92px;
   gap: 12px;
   align-items: end;
 }
@@ -553,6 +553,22 @@ pre {
   display: flex;
   justify-content: flex-end;
   margin-top: 18px;
+}
+.pit-setup-card { width: min(680px, 95vw); }
+.pit-setup-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+.pit-setup-grid .pit-circuit-field { grid-column: 1 / -1; }
+.pit-setup-grid select {
+  width: 100%;
+  min-height: 39px;
+  border: 2px solid var(--line);
+  background: var(--control);
+  color: var(--ink);
+  padding: 7px 10px;
+  font-weight: 900;
 }
 
 body.mode-practice .pit-window,

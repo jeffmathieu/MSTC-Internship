@@ -157,6 +157,8 @@ function createFakeDocument() {
 // blank analytics, then a live update with sectors, comparisons, and pit data.
 const settings = {
   theme: 'light',
+  pitCircuitId: 'zolder',
+  pitRules: { raceDurationMs: 4 * 60 * 60 * 1000, requiredPitStops: 2, pitStopDurationMs: 75000, circuitId: 'zolder' },
   timingUrl: 'https://example.com/live',
   followedCar: '13',
   followedCars: ['13'],
@@ -291,7 +293,7 @@ const liveTiming = {
 };
 
 const context = {
-  window: { location: { search: '' }, liveTiming, classBattle: {}, lapAnalytics: {}, pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
+  window: { location: { search: '' }, liveTiming, classBattle: {}, lapAnalytics: {}, pitstopCircuits: require('../src/shared/pitstopCircuits'), pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
   document,
   URLSearchParams,
   console,
@@ -393,6 +395,30 @@ module.exports = (async () => {
   await document.getElementById('open-graphs').trigger('click');
   assert.strictEqual(graphsOpenCount, 1, 'graph icon opens the detachable graphs window');
   assert.strictEqual(lastGraphsCar, '13', 'graph window follows the car displayed by this dashboard');
+
+  await document.getElementById('open-pit-setup').trigger('click');
+  assert.strictEqual(document.getElementById('pit-setup-modal').classList.contains('hidden'), false);
+  assert.strictEqual(document.getElementById('pit-circuit').children.length, 5, 'all supported pit formations appear in the dropdown');
+  document.getElementById('pit-race-hours').value = '6';
+  document.getElementById('pit-required-input').value = '3';
+  document.getElementById('pit-circuit').value = 'spa-f1';
+  await document.getElementById('pit-circuit').trigger('change');
+  assert.ok(document.getElementById('pit-distance-note').textContent.includes('650 m'));
+  assert.ok(document.getElementById('pit-distance-note').textContent.includes('60 km/h'));
+  await document.getElementById('pit-setup-save').trigger('click');
+  await flushAsync();
+  assert.strictEqual(lastSettingsPatch.pitCircuitId, 'spa-f1');
+  assert.strictEqual(lastSettingsPatch.pitRules.raceDurationMs, 6 * 60 * 60 * 1000);
+  assert.strictEqual(lastSettingsPatch.pitRules.requiredPitStops, 3);
+  assert.strictEqual(document.getElementById('pit-setup-modal').classList.contains('hidden'), true);
+
+  collectorUpdate({ ...updatedState, mode: 'live', status: 'collecting' });
+  await flushAsync();
+  assert.strictEqual(document.getElementById('open-pit-setup').disabled, true, 'fixed pit setup locks during live collection');
+  await document.getElementById('open-pit-setup').trigger('click');
+  assert.strictEqual(document.getElementById('pit-setup-modal').classList.contains('hidden'), true);
+  collectorUpdate(updatedState);
+  await flushAsync();
 
   await document.getElementById('setup-add-car').trigger('click');
   const extraCars = document.getElementById('setup-extra-cars');

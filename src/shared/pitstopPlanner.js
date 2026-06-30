@@ -16,7 +16,12 @@ const DEFAULT_RULES = {
   pitStopDurationMs: 75 * 1000,
   requiredPitStops: 2,
   nearWindowLaps: 2,
-  averageLapMs: null
+  averageLapMs: null,
+  circuitId: 'zolder',
+  regularTrackDistanceMeters: null,
+  fcySpeedKph: 60,
+  fcyStablePollsRequired: 3,
+  fcyMinimumAgeMs: 15 * 1000
 };
 
 // Converts optional numeric inputs into a real number or null. Most planner
@@ -47,6 +52,7 @@ function positiveNumber(value, fallback) {
 // mandatory stop count, or minimum pit loss.
 function normalizeRules(rules = {}) {
   const merged = { ...DEFAULT_RULES, ...rules };
+  const configuredFcySpeedKph = numberOrNull(merged.fcySpeedKph);
   return {
     raceDurationMs: positiveNumber(merged.raceDurationMs, DEFAULT_RULES.raceDurationMs),
     pitClosedStartMs: positiveNumber(merged.pitClosedStartMs, DEFAULT_RULES.pitClosedStartMs),
@@ -55,7 +61,113 @@ function normalizeRules(rules = {}) {
     pitStopDurationMs: positiveNumber(merged.pitStopDurationMs, DEFAULT_RULES.pitStopDurationMs),
     requiredPitStops: Math.max(0, Math.floor(positiveNumber(merged.requiredPitStops, DEFAULT_RULES.requiredPitStops))),
     nearWindowLaps: Math.max(0, Math.floor(positiveNumber(merged.nearWindowLaps, DEFAULT_RULES.nearWindowLaps))),
-    averageLapMs: numberOrNull(merged.averageLapMs)
+    averageLapMs: numberOrNull(merged.averageLapMs),
+    circuitId: String(merged.circuitId || DEFAULT_RULES.circuitId),
+    regularTrackDistanceMeters: numberOrNull(merged.regularTrackDistanceMeters),
+    // Zero cannot be accepted here because FCY travel time divides by speed.
+    fcySpeedKph: configuredFcySpeedKph !== null && configuredFcySpeedKph > 0
+      ? configuredFcySpeedKph
+      : DEFAULT_RULES.fcySpeedKph,
+    fcyStablePollsRequired: Math.max(1, Math.floor(positiveNumber(merged.fcyStablePollsRequired, DEFAULT_RULES.fcyStablePollsRequired))),
+    fcyMinimumAgeMs: positiveNumber(merged.fcyMinimumAgeMs, DEFAULT_RULES.fcyMinimumAgeMs)
+  };
+}
+
+function isFcySession(session = {}) {
+  const flag = String(session.flag || session.sessionFlag || session.raceControl || '').toLowerCase();
+  return /full\s*course\s*yellow|\bfcy\b/.test(flag);
+}
+
+// Produces compact signatures from timing rows. Gap stability alone is not
+// enough because three polls may repeat stale webpage data; a changed lap,
+// sector, or last-lap value proves that at least one new timing passage arrived.
+function fcyRowSignatures(rows = []) {
+  const ordered = overallSortedRows(rows);
+  return {
+    gap: ordered.map((row) => `${row.carNumber}:${row.interval ?? row.diff ?? row.gap ?? ''}`).join('|'),
+    timing: ordered.map((row) => `${row.carNumber}:${row.lapNumber ?? ''}:${row.sector1 ?? ''}:${row.sector2 ?? ''}:${row.sector3 ?? ''}:${row.lastLap ?? ''}`).join('|')
+  };
+}
+
+// Tracks whether FCY intervals have had time to refresh and stabilize. Main.js
+// stores this small state between polls; the function remains pure and directly
+// testable. A prediction may still be shown while status is "stabilizing", but
+// callers must label it provisional.
+function nextFcyGapState({ previous = {}, session = {}, rows = [], collectedAt = '', rules = {} } = {}) {
+  const normalized = normalizeRules(rules);
+  const signatures = fcyRowSignatures(rows);
+  const active = isFcySession(session);
+  const nowMs = Number.isFinite(Date.parse(collectedAt)) ? Date.parse(collectedAt) : Date.now();
+  if (!active) {
+    return {
+      active: false,
+      status: 'green',
+      ready: false,
+      startedAtMs: null,
+      stablePolls: 0,
+      freshTimingObserved: false,
+      lastGapSignature: signatures.gap,
+      lastTimingSignature: signatures.timing
+    };
+  }
+
+  const justStarted = previous.active !== true;
+  const startedAtMs = justStarted ? nowMs : (numberOrNull(previous.startedAtMs) ?? nowMs);
+  const sameGap = !justStarted && signatures.gap !== '' && signatures.gap === previous.lastGapSignature;
+  const stablePolls = sameGap ? (Number(previous.stablePolls) || 0) + 1 : 0;
+  const freshTimingObserved = Boolean(previous.freshTimingObserved)
+    || signatures.timing !== String(previous.lastTimingSignature || '');
+  const ageMs = Math.max(0, nowMs - startedAtMs);
+  const ready = freshTimingObserved
+    && ageMs >= normalized.fcyMinimumAgeMs
+    && stablePolls >= normalized.fcyStablePollsRequired;
+
+  return {
+    active: true,
+    status: ready ? 'ready' : 'stabilizing',
+    ready,
+    startedAtMs,
+    ageMs,
+    stablePolls,
+    freshTimingObserved,
+    lastGapSignature: signatures.gap,
+    lastTimingSignature: signatures.timing
+  };
+}
+
+// Calculates only the time lost relative to a non-pitting car. The dashboard's
+// pit time is measured pit-in to pit-out; under FCY we subtract the time another
+// car spends on the regular track between those exact reference points.
+function pitLossForSession({ session = {}, rules = {}, fcyGapState = {} } = {}) {
+  const normalized = normalizeRules(rules);
+  if (!isFcySession(session)) {
+    return { active: false, status: 'green', reliable: true, pitLossMs: normalized.pitStopDurationMs };
+  }
+
+  const distanceMeters = numberOrNull(normalized.regularTrackDistanceMeters);
+  if (!(distanceMeters > 0)) {
+    return {
+      active: true,
+      status: 'missing-distance',
+      reliable: false,
+      pitLossMs: null,
+      circuitId: normalized.circuitId,
+      reason: `Regular-track pit distance is not configured for ${normalized.circuitId}`
+    };
+  }
+  // Store strategy times at millisecond precision, matching every other timing
+  // value in the app and avoiding floating-point tails such as 29999.999999.
+  const regularTrackTravelMs = Math.round((distanceMeters / (normalized.fcySpeedKph / 3.6)) * 1000);
+  return {
+    active: true,
+    status: fcyGapState.ready ? 'ready' : 'stabilizing',
+    reliable: Boolean(fcyGapState.ready),
+    provisional: !fcyGapState.ready,
+    circuitId: normalized.circuitId,
+    regularTrackDistanceMeters: distanceMeters,
+    fcySpeedKph: normalized.fcySpeedKph,
+    regularTrackTravelMs,
+    pitLossMs: normalized.pitStopDurationMs - regularTrackTravelMs
   };
 }
 
@@ -435,7 +547,7 @@ function latestSafePitElapsedMsForRemainingStops({ clock, rules, pitState = {} }
 // Produces the full dashboard-facing pitstop object. Callers pass live rows,
 // session clock, current pit state, and rules; the returned object contains all
 // status labels, required-stop counts, timing windows, and after-pit projection.
-function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pitState = {}, rules = {} } = {}) {
+function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pitState = {}, rules = {}, fcyGapState = {} } = {}) {
   const normalizedRules = normalizeRules(rules);
   const clock = raceClockFromSession(session, normalizedRules);
   const windowState = timeUntilNextAllowedPit({ clock, rules: normalizedRules, pitState });
@@ -448,7 +560,10 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
   const latestSafePitElapsedMs = latestSafePitElapsedMsForRemainingStops({ clock, rules: normalizedRules, pitState });
   const mustPitSoonMs = latestSafePitElapsedMs !== null && clock.elapsedMs !== null ? latestSafePitElapsedMs - clock.elapsedMs : null;
   const isStrategyUrgent = remainingRequiredStops > 0 && Number.isFinite(mustPitSoonMs) && mustPitSoonMs <= 0;
-  const projection = projectClassAfterPit(rows, followedCarNumber, normalizedRules.pitStopDurationMs, { averageLapMs });
+  const pitLoss = pitLossForSession({ session, rules: normalizedRules, fcyGapState });
+  const projection = Number.isFinite(pitLoss.pitLossMs)
+    ? { ...projectClassAfterPit(rows, followedCarNumber, pitLoss.pitLossMs, { averageLapMs }), provisional: pitLoss.provisional, fcyStatus: pitLoss.status }
+    : { available: false, reason: pitLoss.reason, items: [], fcyStatus: pitLoss.status };
 
   let status = 'unknown';
   if (isStrategyUrgent) status = 'urgent';
@@ -479,11 +594,11 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
     remainingRequiredStops,
     latestSafePitElapsedMs,
     mustPitSoonMs,
-    projection
+    projection,
+    pitLoss,
+    fcyGapState
   };
 }
-
-//TODO: FCY has different time calculations for prediction pitstop loss
 
 return {
   DEFAULT_RULES,
@@ -495,6 +610,10 @@ return {
   nextPitStateFromRow,
   estimateAverageLapMs,
   raceClockFromSession,
+  isFcySession,
+  fcyRowSignatures,
+  nextFcyGapState,
+  pitLossForSession,
   projectClassAfterPit,
   timeUntilNextAllowedPit,
   latestSafePitElapsedMsForRemainingStops,

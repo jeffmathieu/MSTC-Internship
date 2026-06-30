@@ -34,7 +34,35 @@
           <button id="setup-choose-folder" class="secondary">Choose folder</button>
         </div>
         <div class="button-row end">
+          <button id="open-pit-setup" class="secondary">Pitstop setup</button>
           <button id="setup-save" class="primary">Save and open dashboards</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="pit-setup-modal" class="setup-modal hidden">
+      <div class="setup-card pit-setup-card">
+        <p class="eyebrow">Fixed race information</p>
+        <h1>Pitstop setup</h1>
+        <p class="subtitle">Configure these values before starting collection. Pit time remains adjustable on the dashboard.</p>
+        <div class="pit-setup-grid">
+          <label>
+            Total race time (hours)
+            <input id="pit-race-hours" type="number" min="0.25" step="0.25" value="24" />
+          </label>
+          <label>
+            Mandatory pitstops
+            <input id="pit-required-input" type="number" min="0" step="1" value="2" />
+          </label>
+          <label class="pit-circuit-field">
+            Circuit and pit formation
+            <select id="pit-circuit"></select>
+          </label>
+        </div>
+        <p id="pit-distance-note" class="subtitle"></p>
+        <div class="button-row end">
+          <button id="pit-setup-cancel" class="secondary">Cancel</button>
+          <button id="pit-setup-save" class="primary">Save pitstop setup</button>
         </div>
       </div>
     </div>
@@ -205,14 +233,6 @@
             <span>Pit time</span>
             <input id="pit-duration" type="number" min="0" step="1" value="75" />
           </label>
-          <label>
-            <span>Stops</span>
-            <input id="pit-required-input" type="number" min="0" step="1" value="2" />
-          </label>
-          <label>
-            <span>Race h</span>
-            <input id="pit-race-hours" type="number" min="0.25" step="0.25" value="24" />
-          </label>
         </div>
         <div class="pit-bar" id="pit-bar">
           <span class="pit-segment pit-start-closed"></span>
@@ -268,6 +288,7 @@
 
     <script src="../shared/lapAnalytics.js"></script>
     <script src="../shared/classBattle.js"></script>
+    <script src="../shared/pitstopCircuits.js"></script>
     <script src="../shared/pitstopPlanner.js"></script>
     <script src="../shared/normReference.js"></script>
     <script src="../shared/dashboardView.js"></script>

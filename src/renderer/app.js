@@ -16,6 +16,7 @@ const isSecondaryDashboard = dashboardQuery.get('secondary') === '1';
 const classBattle = window.classBattle;
 const lapAnalytics = window.lapAnalytics;
 const pitstopPlanner = window.pitstopPlanner;
+const pitstopCircuits = window.pitstopCircuits;
 const normReference = window.normReference;
 const dashboardView = window.dashboardView;
 const previousMetricValues = new Map();
@@ -211,6 +212,41 @@ function pitRulesFromInputs() {
     requiredPitStops: Math.max(0, Math.floor(secondsFromInput('pit-required-input', 2))),
     nearWindowLaps: 2
   };
+}
+
+function populatePitstopCircuits() {
+  const select = $('pit-circuit');
+  if (!select || !pitstopCircuits) return;
+  select.innerHTML = '';
+  pitstopCircuits.PITSTOP_CIRCUITS.forEach((circuit) => {
+    const option = document.createElement('option');
+    option.value = circuit.id;
+    option.textContent = circuit.label;
+    select.appendChild(option);
+  });
+}
+
+function updatePitDistanceNote() {
+  const circuit = pitstopCircuits?.pitstopCircuitById($('pit-circuit')?.value);
+  const configured = Number(circuit?.regularTrackDistanceMeters) > 0;
+  setText('pit-distance-note', configured
+    ? `Regular-track distance: ${circuit.regularTrackDistanceMeters} m · FCY speed: ${circuit.fcySpeedKph} km/h`
+    : 'FCY distance is not configured yet. Add it at the TODO for this layout in src/shared/pitstopCircuits.js.');
+}
+
+function pitSetupLocked() {
+  return currentState?.mode === 'live' && currentState?.status !== 'idle' && currentState?.status !== 'error';
+}
+
+function showPitSetup(show = true) {
+  if (show && pitSetupLocked()) return;
+  if (show) {
+    $('pit-race-hours').value = String((currentSettings?.pitRules?.raceDurationMs || 86400000) / 3600000);
+    $('pit-required-input').value = String(currentSettings?.pitRules?.requiredPitStops ?? 2);
+    $('pit-circuit').value = currentSettings?.pitCircuitId || currentSettings?.pitRules?.circuitId || 'zolder';
+    updatePitDistanceNote();
+  }
+  $('pit-setup-modal')?.classList.toggle('hidden', !show);
 }
 
 function referenceTimesFromInputs() {
@@ -528,13 +564,18 @@ function projectionLabel(projection) {
   };
   const behind = projection.carAhead ? `${gapLabel(projection.carAhead)} behind #${projection.carAhead.carNumber}` : 'class lead';
   const ahead = projection.carBehind ? `${gapLabel(projection.carBehind)} ahead #${projection.carBehind.carNumber}` : 'no car behind';
-  return `${position} · ${behind} · ${ahead}`;
+  const label = `${position} · ${behind} · ${ahead}`;
+  return projection.provisional ? `FCY gaps stabilizing · ${label}` : label;
 }
 
 // Renders pit window status, required-stop progress, next allowed pit time, and
 // after-pit class projection. All rule calculations come from pitstopPlanner.
 function renderPitstopPlan(plan) {
   const pitWindow = document.querySelector('.pit-window');
+  if ($('open-pit-setup')) {
+    $('open-pit-setup').disabled = pitSetupLocked();
+    $('open-pit-setup').title = pitSetupLocked() ? 'Stop live collection before changing fixed pitstop setup' : '';
+  }
   if (!plan) {
     setText('pit-status', 'Waiting');
     setText('pit-next', '—');
@@ -554,7 +595,9 @@ function renderPitstopPlan(plan) {
     Number.isFinite(plan.clock?.remainingMs) ? `remaining ${pitstopPlanner.formatDuration(plan.clock.remainingMs)}` : '',
     Number.isFinite(plan.totalPitStops) && plan.totalPitStops !== plan.completedPitStops ? `total pits ${plan.totalPitStops}, valid ${plan.completedPitStops}` : '',
     Number.isFinite(plan.mustPitSoonMs) ? `latest safe stop in ${pitstopPlanner.formatDuration(plan.mustPitSoonMs)}` : '',
-    `pit loss ${pitstopPlanner.formatDuration(plan.rules?.pitStopDurationMs)}`
+    Number.isFinite(plan.pitLoss?.pitLossMs)
+      ? `${plan.pitLoss?.active ? 'FCY net pit loss' : 'pit loss'} ${pitstopPlanner.formatDuration(plan.pitLoss.pitLossMs)}`
+      : plan.pitLoss?.reason || ''
   ].filter(Boolean);
   setText('pit-detail', detailParts.join(' · '));
 
@@ -714,6 +757,7 @@ async function saveSettingsFromInputs(setupComplete = false) {
     comparisonCar: $('comparison-car')?.value.trim() || '',
     referenceTimes: activeReferenceTimes,
     referenceTimesByMode,
+    pitCircuitId: $('pit-circuit')?.value || currentSettings?.pitCircuitId || 'zolder',
     storageFolder: $('storage-folder').value.trim(),
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     pitRules: pitRulesFromInputs()
@@ -862,6 +906,8 @@ async function init() {
   if ($('comparison-car')) $('comparison-car').value = currentSettings.comparisonCar || '';
   syncReferenceInputs(currentSettings);
   syncSessionMode(currentSettings.sessionMode || 'race');
+  populatePitstopCircuits();
+  if ($('pit-circuit')) $('pit-circuit').value = currentSettings.pitCircuitId || currentSettings.pitRules?.circuitId || 'zolder';
   if ($('pit-duration')) $('pit-duration').value = String(Math.round((currentSettings.pitRules?.pitStopDurationMs || 75000) / 1000));
   if ($('pit-required-input')) $('pit-required-input').value = String(currentSettings.pitRules?.requiredPitStops ?? 2);
   if ($('pit-race-hours')) $('pit-race-hours').value = String((currentSettings.pitRules?.raceDurationMs || 86400000) / 3600000);
@@ -887,6 +933,15 @@ async function init() {
   });
   $('setup-car')?.addEventListener('input', () => { configuredFollowedCars[0] = $('setup-car').value; });
   $('setup-save')?.addEventListener('click', async () => { syncMainFromSetup(); await saveSettingsFromInputs(true); showSetup(false); render(currentState || await window.liveTiming.getCollectorState()); });
+  $('open-pit-setup')?.addEventListener('click', () => showPitSetup(true));
+  $('pit-setup-cancel')?.addEventListener('click', () => showPitSetup(false));
+  $('pit-circuit')?.addEventListener('change', updatePitDistanceNote);
+  $('pit-setup-save')?.addEventListener('click', async () => {
+    if (pitSetupLocked()) return;
+    await saveSettingsFromInputs();
+    showPitSetup(false);
+    render(currentState);
+  });
   $('open-setup')?.addEventListener('click', () => showSetup(true));
   $('export')?.addEventListener('click', async () => { const result = await window.liveTiming.exportCurrent(); alert(`Exported:\n${result.csvPath}\n${result.jsonPath}\n${result.historyPath || ''}`); });
 
@@ -894,7 +949,7 @@ async function init() {
   // added to the modal, include their hidden input IDs here.
   ['timing-url','followed-car','poll-interval'].forEach((id) => $(id)?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); }));
   $('comparison-car')?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); });
-  ['pit-duration','pit-required-input','pit-race-hours'].forEach((id) => $(id)?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); }));
+  $('pit-duration')?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); });
   document.querySelectorAll('.edit-ref').forEach((button) => button.addEventListener('click', () => editReferenceTime(button)));
   window.liveTiming.onThemeUpdate?.((theme) => {
     currentSettings = { ...currentSettings, theme: applyTheme(theme) };
