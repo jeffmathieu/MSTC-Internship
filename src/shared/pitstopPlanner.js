@@ -483,6 +483,8 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
   };
 }
 
+//TODO: FCY has different time calculations for prediction pitstop loss
+
 return {
   DEFAULT_RULES,
   numberOrNull,
