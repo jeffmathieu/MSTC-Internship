@@ -62,13 +62,26 @@
 
   // Compares long-term pace with current form. The recent metric intentionally
   // uses only the latest ten eligible laps, regardless of stint length.
-  function driverPaceComparison(history, carNumber, recentLapCount = 10) {
+  function driverPaceComparison(history, carNumber, recentLapCount = 10, mode = 'race') {
     const drivers = lapAnalytics.driverStats(history, carNumber);
     const categories = drivers.map((driver) => driver.driverName);
     const recentAverage = (driver) => {
       const recent = driver.laps.filter(lapAnalytics.lapPaceEligible).slice(-recentLapCount);
       return average(recent.map((lap) => lap.lapTimeMs));
     };
+    if (mode === 'qualifying') {
+      return {
+        type: 'bar',
+        title: 'Driver qualifying comparison',
+        subtitle: 'Best and latest valid flying lap per team driver.',
+        yFormat: 'time',
+        categories,
+        series: [
+          { name: 'Best lap', values: drivers.map((driver) => driver.bestLapMs) },
+          { name: 'Last valid', values: drivers.map((driver) => driver.lastLapMs) }
+        ]
+      };
+    }
     return {
       type: 'bar',
       title: 'Driver pace comparison',
@@ -146,8 +159,8 @@
     };
   }
 
-  function buildGraph(type, history, carNumber) {
-    if (type === 'driver-pace') return driverPaceComparison(history, carNumber);
+  function buildGraph(type, history, carNumber, options = {}) {
+    if (type === 'driver-pace') return driverPaceComparison(history, carNumber, 10, options.mode);
     if (type === 'driver-sectors') return driverSectorComparison(history, carNumber);
     if (type === 'class-pace') return classPaceComparison(history, carNumber);
     return driverLapTimes(history, carNumber);

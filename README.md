@@ -20,13 +20,21 @@ The app opens a setup screen where you choose:
 
 1. live timing URL, for example `https://livetiming.getraceresults.com/demo#screen-results`
 2. one to three car numbers to follow, with the `+` button adding another dashboard
-3. data storage folder
+3. session mode: Race, Practice, or Qualifying
+4. data storage folder
 
 These settings are remembered. The first number uses the main dashboard; every
 additional number opens a separate dashboard window. All dashboards share one
 timing-page poll, one live table and one lap-history file, so following three
 cars does not fetch the website three times. You can reopen the setup window
 with the **Setup** button.
+
+Race mode enables pitstop strategy, recent-pace comparisons and catch
+predictions. Practice mode keeps norm-time and pace comparisons but hides pit
+and catch strategy. Qualifying mode compares best and latest valid flying laps
+for team drivers, BIC, XIC and adjacent class cars. Each mode stores its own
+reference lap and sector times, so switching modes does not overwrite another
+mode's norm settings.
 
 ## Data storage
 

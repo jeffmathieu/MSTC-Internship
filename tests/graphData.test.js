@@ -32,6 +32,10 @@ assert.deepStrictEqual(driverPace.categories, ['Driver 1', 'Driver 2', 'Driver 3
 assert.strictEqual(driverPace.series[0].values[0], 100000);
 assert.strictEqual(driverPace.series[2].values[0], 100145);
 assert.strictEqual(driverPace.series[2].values[2], 102045);
+const qualifyingDriverPace = graphData.driverPaceComparison(history, 33, 10, 'qualifying');
+assert.strictEqual(qualifyingDriverPace.title, 'Driver qualifying comparison');
+assert.deepStrictEqual(qualifyingDriverPace.series.map((series) => series.name), ['Best lap', 'Last valid']);
+assert.strictEqual(qualifyingDriverPace.series[1].values[2], 102090);
 
 const sectorGraph = graphData.driverSectorComparison(history, 33);
 assert.strictEqual(sectorGraph.series.length, 6);
@@ -84,6 +88,7 @@ assert.deepStrictEqual(graphData.driverPaceComparison([], 33).categories, []);
 assert.deepStrictEqual(graphData.driverSectorComparison([], 33).series[0].values, []);
 assert.strictEqual(graphData.buildGraph('unknown', history, 33).title, 'Lap times per driver');
 assert.strictEqual(graphData.buildGraph('driver-pace', history, 33).title, 'Driver pace comparison');
+assert.strictEqual(graphData.buildGraph('driver-pace', history, 33, { mode: 'qualifying' }).title, 'Driver qualifying comparison');
 assert.strictEqual(graphData.buildGraph('driver-sectors', history, 33).title, 'Sector comparison');
 assert.strictEqual(graphData.buildGraph('class-pace', history, 33).title, 'Class pace comparison');
 

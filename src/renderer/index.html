@@ -22,6 +22,12 @@
           </div>
           <div id="setup-extra-cars"></div>
         </div>
+        <fieldset class="mode-picker">
+          <legend>Session mode</legend>
+          <label><input id="mode-race" type="radio" name="session-mode" value="race" checked /><span>Race</span></label>
+          <label><input id="mode-practice" type="radio" name="session-mode" value="practice" /><span>Practice</span></label>
+          <label><input id="mode-qualifying" type="radio" name="session-mode" value="qualifying" /><span>Qualifying</span></label>
+        </fieldset>
         <label>Data storage base folder</label>
         <div class="folder-row">
           <input id="setup-folder" type="text" readonly />
@@ -137,29 +143,29 @@
 
       <section class="comparison-grid">
         <article class="compare-stack">
-          <div class="metric-box"><span>Best D1</span><strong id="best-d1-a">—</strong></div>
-          <div class="metric-box"><span>Last D2</span><strong id="last-d2">—</strong></div>
-          <div class="metric-box delta" id="delta-best-last-card"><span>Delta D1 - D2</span><strong id="delta-best-last">—</strong></div>
+          <div class="metric-box"><span id="comparison-1-top-label">Best D1</span><strong id="best-d1-a">—</strong></div>
+          <div class="metric-box"><span id="comparison-1-bottom-label">Last D2</span><strong id="last-d2">—</strong></div>
+          <div class="metric-box delta" id="delta-best-last-card"><span id="comparison-1-delta-label">Delta D1 - D2</span><strong id="delta-best-last">—</strong></div>
         </article>
         <article class="compare-stack">
-          <div class="metric-box"><span>Best D1</span><strong id="best-d1-b">—</strong></div>
-          <div class="metric-box"><span>Best D2</span><strong id="best-d2">—</strong></div>
-          <div class="metric-box delta" id="delta-best-best-card"><span>Delta D1 - D2</span><strong id="delta-best-best">—</strong></div>
+          <div class="metric-box"><span id="comparison-2-top-label">Best D1</span><strong id="best-d1-b">—</strong></div>
+          <div class="metric-box"><span id="comparison-2-bottom-label">Best D2</span><strong id="best-d2">—</strong></div>
+          <div class="metric-box delta" id="delta-best-best-card"><span id="comparison-2-delta-label">Delta D1 - D2</span><strong id="delta-best-best">—</strong></div>
         </article>
         <article class="compare-stack">
-          <div class="metric-box"><span>Average D1</span><strong id="average-d1">—</strong></div>
-          <div class="metric-box"><span>Average D2</span><strong id="average-d2">—</strong></div>
-          <div class="metric-box delta" id="delta-average-drivers-card"><span>Delta D1 - D2</span><strong id="delta-average-drivers">—</strong></div>
+          <div class="metric-box"><span id="comparison-3-top-label">Average D1</span><strong id="average-d1">—</strong></div>
+          <div class="metric-box"><span id="comparison-3-bottom-label">Average D2</span><strong id="average-d2">—</strong></div>
+          <div class="metric-box delta" id="delta-average-drivers-card"><span id="comparison-3-delta-label">Delta D1 - D2</span><strong id="delta-average-drivers">—</strong></div>
         </article>
         <article class="compare-stack">
-          <div class="metric-box"><span>Average BIC</span><strong id="average-bic">—</strong></div>
-          <div class="metric-box"><span>Average Dact</span><strong id="average-bic-driver">—</strong></div>
-          <div class="metric-box delta" id="delta-bic-card"><span>Delta BIC - Dact</span><strong id="delta-bic">—</strong></div>
+          <div class="metric-box"><span id="comparison-4-top-label">Average BIC</span><strong id="average-bic">—</strong></div>
+          <div class="metric-box"><span id="comparison-4-bottom-label">Average Dact</span><strong id="average-bic-driver">—</strong></div>
+          <div class="metric-box delta" id="delta-bic-card"><span id="comparison-4-delta-label">Delta BIC - Dact</span><strong id="delta-bic">—</strong></div>
         </article>
         <article class="compare-stack">
-          <div class="metric-box"><span>Average XIC</span><strong id="average-xic">—</strong></div>
-          <div class="metric-box"><span>Average Dact</span><strong id="average-xic-driver">—</strong></div>
-          <div class="metric-box delta" id="delta-xic-card"><span>Delta XIC - Dact</span><strong id="delta-xic">—</strong></div>
+          <div class="metric-box"><span id="comparison-5-top-label">Average XIC</span><strong id="average-xic">—</strong></div>
+          <div class="metric-box"><span id="comparison-5-bottom-label">Average Dact</span><strong id="average-xic-driver">—</strong></div>
+          <div class="metric-box delta" id="delta-xic-card"><span id="comparison-5-delta-label">Delta XIC - Dact</span><strong id="delta-xic">—</strong></div>
         </article>
       </section>
 

@@ -194,6 +194,17 @@ function referenceTimesFromInputs() {
   return currentReferenceTimes();
 }
 
+function selectedSessionMode() {
+  return ['race', 'practice', 'qualifying'].find((mode) => $(`mode-${mode}`)?.checked) || currentSettings?.sessionMode || 'race';
+}
+
+function syncSessionMode(mode = currentSettings?.sessionMode || 'race') {
+  const normalized = ['race', 'practice', 'qualifying'].includes(mode) ? mode : 'race';
+  if ($(`mode-${normalized}`)) $(`mode-${normalized}`).checked = true;
+  document.body?.classList.remove('mode-race', 'mode-practice', 'mode-qualifying');
+  document.body?.classList.add(`mode-${normalized}`);
+}
+
 // Updates a delta card and applies semantic border color. In this UI positive
 // means good for the displayed comparison because backend deltas are inverted
 // before they arrive here when needed.
@@ -391,6 +402,25 @@ function driverStatsForLiveCar(summary, rows, carNumber) {
 // Fills the D1/D2, BIC, and XIC comparison boxes from precomputed analytics.
 // Renderer only formats values; lap/sector math stays in shared modules/main.
 function renderDriverAndClassComparisons(summary, rows) {
+  const view = summary?.comparisonView;
+  if (view?.columns?.length === 5) {
+    const ids = [
+      ['best-d1-a', 'last-d2', 'delta-best-last-card', 'delta-best-last'],
+      ['best-d1-b', 'best-d2', 'delta-best-best-card', 'delta-best-best'],
+      ['average-d1', 'average-d2', 'delta-average-drivers-card', 'delta-average-drivers'],
+      ['average-bic', 'average-bic-driver', 'delta-bic-card', 'delta-bic'],
+      ['average-xic', 'average-xic-driver', 'delta-xic-card', 'delta-xic']
+    ];
+    view.columns.forEach((column, index) => {
+      setText(`comparison-${index + 1}-top-label`, column.topLabel);
+      setText(`comparison-${index + 1}-bottom-label`, column.bottomLabel);
+      setText(`comparison-${index + 1}-delta-label`, column.deltaLabel);
+      setMetric(ids[index][0], formatMs(numericMs(column.topMs)));
+      setMetric(ids[index][1], formatMs(numericMs(column.bottomMs)));
+      setDelta(ids[index][2], ids[index][3], numericMs(column.deltaMs));
+    });
+    return;
+  }
   const driverComparison = summary?.dashboardAnalysis?.driverComparison;
   const classComparison = summary?.dashboardAnalysis?.classComparison;
   const bestDriver = driverComparison?.bestDriver || null;
@@ -440,6 +470,15 @@ function renderAdjacentClassBattles(summary) {
       if (card) {
         card.classList.remove('good', 'bad');
         card.classList.add('neutral');
+      }
+      return;
+    }
+    if (battles?.mode === 'qualifying') {
+      setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · Best Δ ${displayDelta(numericMs(item.bestLapDeltaMs))}`);
+      setText(`battle-${side}-detail`, `Their best ${formatMs(numericMs(item.rivalBestLapMs))} · our best ${formatMs(numericMs(item.ourBestLapMs))}`);
+      if (card) {
+        card.classList.remove('good', 'bad', 'neutral');
+        card.classList.add(item.trendState || 'neutral');
       }
       return;
     }
@@ -607,6 +646,7 @@ function render(state) {
   $('last-update').textContent = currentState.lastSuccessAt ? new Date(currentState.lastSuccessAt).toLocaleTimeString() : '—';
   renderFollowed(rows);
   const activeAnalytics = analyticsForActiveCar(currentState.analyticsSummary || null);
+  syncSessionMode(activeAnalytics?.sessionMode || currentSettings?.sessionMode || 'race');
   renderSectorAnalytics(activeAnalytics, rows, predictionForActiveCar(currentState));
   renderDriverAndClassComparisons(activeAnalytics, rows);
   renderAdjacentClassBattles(activeAnalytics);
@@ -632,12 +672,25 @@ async function chooseAndSetFolder(targetInputId = 'storage-folder') {
 async function saveSettingsFromInputs(setupComplete = false) {
   const primaryCar = String(configuredFollowedCars[0] || currentSettings?.followedCar || $('followed-car').value || '33').trim();
   const followedCars = normalizedCarList(configuredFollowedCars, primaryCar);
+  const previousMode = currentSettings?.sessionMode || 'race';
+  const sessionMode = selectedSessionMode();
+  const referenceTimesByMode = {
+    race: { ...(currentSettings?.referenceTimesByMode?.race || {}) },
+    practice: { ...(currentSettings?.referenceTimesByMode?.practice || {}) },
+    qualifying: { ...(currentSettings?.referenceTimesByMode?.qualifying || {}) }
+  };
+  referenceTimesByMode[previousMode] = referenceTimesFromInputs();
+  const activeReferenceTimes = sessionMode === previousMode
+    ? referenceTimesFromInputs()
+    : referenceTimesByMode[sessionMode];
   const patch = {
     timingUrl: $('timing-url').value.trim(),
     followedCar: primaryCar,
     followedCars,
+    sessionMode,
     comparisonCar: $('comparison-car')?.value.trim() || '',
-    referenceTimes: referenceTimesFromInputs(),
+    referenceTimes: activeReferenceTimes,
+    referenceTimesByMode,
     storageFolder: $('storage-folder').value.trim(),
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     pitRules: pitRulesFromInputs()
@@ -645,6 +698,8 @@ async function saveSettingsFromInputs(setupComplete = false) {
   if (setupComplete) patch.setupComplete = true;
   currentSettings = await window.liveTiming.setSettings(patch);
   configuredFollowedCars = normalizedCarList(currentSettings.followedCars, currentSettings.followedCar);
+  syncReferenceInputs(currentSettings);
+  syncSessionMode(currentSettings.sessionMode);
   return currentSettings;
 }
 
@@ -687,6 +742,7 @@ function syncSetupFromMain() {
   configuredFollowedCars = normalizedCarList(currentSettings?.followedCars, currentSettings?.followedCar || '33');
   $('setup-car').value = configuredFollowedCars[0] || '33';
   $('setup-folder').value = $('storage-folder').value;
+  syncSessionMode(currentSettings?.sessionMode || 'race');
   renderExtraCarInputs();
 }
 
@@ -781,6 +837,7 @@ async function init() {
   $('storage-folder').value = currentSettings.storageFolder || '';
   if ($('comparison-car')) $('comparison-car').value = currentSettings.comparisonCar || '';
   syncReferenceInputs(currentSettings);
+  syncSessionMode(currentSettings.sessionMode || 'race');
   if ($('pit-duration')) $('pit-duration').value = String(Math.round((currentSettings.pitRules?.pitStopDurationMs || 75000) / 1000));
   if ($('pit-required-input')) $('pit-required-input').value = String(currentSettings.pitRules?.requiredPitStops ?? 2);
   if ($('pit-race-hours')) $('pit-race-hours').value = String((currentSettings.pitRules?.raceDurationMs || 86400000) / 3600000);

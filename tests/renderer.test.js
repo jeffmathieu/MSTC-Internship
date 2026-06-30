@@ -387,6 +387,47 @@ module.exports = (async () => {
   await flushAsync();
   assert.deepStrictEqual(Array.from(lastSettingsPatch.followedCars), ['13', '2']);
 
+  const qualifyingState = {
+    ...updatedState,
+    pitstopPlan: null,
+    pitstopPlansByCar: {},
+    analyticsSummary: {
+      ...updatedState.analyticsSummary,
+      sessionMode: 'qualifying',
+      comparisonView: {
+        mode: 'qualifying',
+        columns: [
+          { topLabel: 'Best team driver', topMs: 123000, bottomLabel: 'Last current', bottomMs: 124000, deltaLabel: 'Delta best - last', deltaMs: -1000 },
+          { topLabel: 'Best team driver', topMs: 123000, bottomLabel: 'Best current', bottomMs: 123500, deltaLabel: 'Delta best - best', deltaMs: -500 },
+          { topLabel: 'Last team driver', topMs: 124500, bottomLabel: 'Last current', bottomMs: 124000, deltaLabel: 'Delta last - last', deltaMs: 500 },
+          { topLabel: 'Best BIC', topMs: 122000, bottomLabel: 'Last BIC', bottomMs: 123000, deltaLabel: 'Delta best - last', deltaMs: 1000 },
+          { topLabel: 'Best XIC', topMs: 125000, bottomLabel: 'Last XIC', bottomMs: 126500, deltaLabel: 'Delta best - last', deltaMs: 1500 }
+        ]
+      },
+      adjacentClassBattles: {
+        available: true,
+        mode: 'qualifying',
+        ahead: { row: { carNumber: '2' }, ourBestLapMs: 123500, rivalBestLapMs: 122000, bestLapDeltaMs: -1500, trendState: 'bad' },
+        behind: { row: { carNumber: '56' }, ourBestLapMs: 123500, rivalBestLapMs: 125000, bestLapDeltaMs: 1500, trendState: 'good' }
+      }
+    }
+  };
+  collectorUpdate(qualifyingState);
+  await flushAsync();
+  assert.strictEqual(document.getElementById('comparison-3-top-label').textContent, 'Last team driver');
+  assert.strictEqual(document.getElementById('average-d1').textContent, '2:04.500');
+  assert.strictEqual(document.getElementById('comparison-4-top-label').textContent, 'Best BIC');
+  assert.strictEqual(document.getElementById('delta-bic').textContent, '+1.000s');
+  assert.strictEqual(document.getElementById('battle-ahead-main').textContent, '#2 · Best Δ -1.500s');
+  assert.ok(document.getElementById('battle-ahead-detail').textContent.includes('Their best 2:02.000'));
+
+  document.getElementById('mode-race').checked = false;
+  document.getElementById('mode-qualifying').checked = true;
+  await document.getElementById('setup-save').trigger('click');
+  await flushAsync();
+  assert.strictEqual(lastSettingsPatch.sessionMode, 'qualifying');
+  assert.strictEqual(lastSettingsPatch.referenceTimesByMode.race.lapMs, 126000);
+
   document.getElementById('comparison-car').value = '56';
   await document.getElementById('comparison-car').trigger('change');
   assert.strictEqual(lastSettingsPatch.comparisonCar, '56');

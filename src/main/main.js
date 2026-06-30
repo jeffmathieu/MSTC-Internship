@@ -31,6 +31,7 @@ const {
 } = require('../shared/pitstopPlanner');
 const { buildLapPrediction } = require('../shared/lapPrediction');
 const { buildAdjacentClassBattles } = require('../shared/classBattle');
+const { normalizeMode, buildComparisonView, qualifyingAdjacentView } = require('../shared/sessionMode');
 
 // Main-process references. Electron keeps UI windows and timers alive through
 // these variables, so every start/stop function below updates them carefully.
@@ -101,15 +102,21 @@ function normalizeFollowedCars(settings = {}) {
 
 function normalizeSettings(settings) {
   const followedCars = normalizeFollowedCars(settings);
+  const sessionMode = normalizeMode(settings?.sessionMode);
+  const legacyReferenceTimes = { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimes || {}) };
+  const referenceTimesByMode = {
+    race: { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimesByMode?.race || legacyReferenceTimes) },
+    practice: { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimesByMode?.practice || {}) },
+    qualifying: { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimesByMode?.qualifying || {}) }
+  };
   return {
     ...settings,
     followedCar: followedCars[0] || '33',
     followedCars,
+    sessionMode,
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
-    referenceTimes: {
-      ...DEFAULT_REFERENCE_TIMES,
-      ...(settings?.referenceTimes || {})
-    },
+    referenceTimesByMode,
+    referenceTimes: referenceTimesByMode[sessionMode],
     pitRules: {
       ...DEFAULT_PIT_RULES,
       ...(settings?.pitRules || {})
@@ -131,6 +138,7 @@ function loadSettings() {
     timingUrl: 'https://livetiming.getraceresults.com/demo#screen-results',
     followedCar: '33',
     followedCars: ['33'],
+    sessionMode: 'race',
     comparisonCar: '',
     referenceTimes: DEFAULT_REFERENCE_TIMES,
     storageFolder: defaultStorageFolder(),
@@ -616,6 +624,7 @@ function buildAnalyticsSummary(settings, context, rows = []) {
   const classNames = [...new Set(laps.map((lap) => lap.className).filter(Boolean))];
   const selectedCarNumber = settings.comparisonCar || settings.selectedComparisonCar || '';
   const followedCars = normalizeFollowedCars(settings);
+  const sessionMode = normalizeMode(settings.sessionMode);
   const dashboardAnalysisByCar = Object.fromEntries(followedCars.map((carNumber) => [
     carNumber,
     compactDashboardAnalysis(buildDashboardAnalysis(history, {
@@ -627,6 +636,16 @@ function buildAnalyticsSummary(settings, context, rows = []) {
     carNumber,
     buildAdjacentClassBattles(rows, history, carNumber, { lapWindow: 10 })
   ]));
+  const comparisonViewsByCar = Object.fromEntries(followedCars.map((carNumber) => [
+    carNumber,
+    buildComparisonView({ history, rows, ourCarNumber: carNumber, selectedCarNumber, mode: sessionMode })
+  ]));
+  const modeAdjacentViewsByCar = Object.fromEntries(followedCars.map((carNumber) => [
+    carNumber,
+    sessionMode === 'qualifying'
+      ? qualifyingAdjacentView(history, rows, carNumber)
+      : sessionMode === 'race' ? adjacentClassBattlesByCar[carNumber] : null
+  ]));
   const primaryCar = String(settings.followedCar || followedCars[0] || '');
 
   return {
@@ -635,6 +654,7 @@ function buildAnalyticsSummary(settings, context, rows = []) {
     updatedAt: context?.collectedAt || new Date().toISOString(),
     followedCar: primaryCar,
     followedCars,
+    sessionMode,
     selectedComparisonCar: selectedCarNumber,
     lapCount: laps.length,
     paceLapCount: laps.filter(lapPaceEligible).length,
@@ -648,8 +668,11 @@ function buildAnalyticsSummary(settings, context, rows = []) {
       driverStats(history, carNumber).map(compactStats)
     ])),
     adjacentClassBattlesByCar,
+    comparisonViewsByCar,
+    modeAdjacentViewsByCar,
     dashboardAnalysisByCar,
-    adjacentClassBattles: adjacentClassBattlesByCar[primaryCar] || null,
+    adjacentClassBattles: modeAdjacentViewsByCar[primaryCar] || null,
+    comparisonView: comparisonViewsByCar[primaryCar] || null,
     dashboardAnalysis: dashboardAnalysisByCar[primaryCar] || null
   };
 }
@@ -828,7 +851,13 @@ async function pollLivePage() {
     let pitstopPlansByCar = collectorState.pitstopPlansByCar;
     try { analyticsSummary = writeAnalyticsSummary(settings, context, normalized.rows); } catch (error) { addError(error, 'writeAnalyticsSummary'); }
     try { lapPredictionsByCar = writeLapPredictions(settings, context, normalized.rows); } catch (error) { addError(error, 'writeLapPredictions'); }
-    try { pitstopPlansByCar = writePitstopPlans(settings, context, normalized.rows); } catch (error) { addError(error, 'writePitstopPlans'); }
+    if (normalizeMode(settings.sessionMode) === 'race') {
+      try { pitstopPlansByCar = writePitstopPlans(settings, context, normalized.rows); } catch (error) { addError(error, 'writePitstopPlans'); }
+    } else {
+      pitstopPlansByCar = {};
+      collectorState.pitstopPlansByCar = {};
+      collectorState.pitstopPlan = null;
+    }
     const primaryCar = String(settings.followedCar || '');
     collectorState = {
       ...collectorState,

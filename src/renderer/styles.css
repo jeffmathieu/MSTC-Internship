@@ -461,6 +461,37 @@ pre {
   font-size: 21px;
   line-height: 1;
 }
+.mode-picker {
+  margin: 14px 0 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+.mode-picker legend {
+  margin-bottom: 5px;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.mode-picker label { margin: 0; }
+.mode-picker input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.mode-picker span {
+  min-height: 39px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--line);
+  border-right-width: 0;
+  background: white;
+  color: var(--ink);
+}
+.mode-picker label:last-child span { border-right-width: 2px; }
+.mode-picker input:checked + span { background: var(--ink); color: white; }
+.mode-picker input:focus-visible + span { outline: 3px solid var(--blue); outline-offset: 2px; }
 .subtitle, .eyebrow { color: var(--muted); }
 .folder-row {
   display: grid;
@@ -472,6 +503,10 @@ pre {
   justify-content: flex-end;
   margin-top: 18px;
 }
+
+body.mode-practice .pit-window,
+body.mode-practice .battle-strip,
+body.mode-qualifying .pit-window { display: none; }
 
 @media (max-width: 1050px) {
   .engineer-dashboard { padding: 16px; }

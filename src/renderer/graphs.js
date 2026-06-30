@@ -6,6 +6,7 @@ const DEFAULT_GRAPHS = ['driver-laps', 'driver-pace', 'driver-sectors', 'class-p
 
 let currentState = {};
 let followedCarNumber = '';
+let sessionMode = 'race';
 let resizeTimer = null;
 
 function formatTime(ms) {
@@ -208,7 +209,7 @@ function wireTooltip(panel, canvas, hitPoints) {
 
 function renderPanel(panel) {
   const type = panel.querySelector('select').value;
-  const chart = graphApi.buildGraph(type, currentState.lapHistory || [], followedCarNumber);
+  const chart = graphApi.buildGraph(type, currentState.lapHistory || [], followedCarNumber, { mode: sessionMode });
   panel.querySelector('h1').textContent = chart.title;
   panel.querySelector('p').textContent = chart.subtitle;
   const canvas = panel.querySelector('canvas');
@@ -232,6 +233,7 @@ function renderPanel(panel) {
 
 function renderGraphs(state) {
   currentState = state || {};
+  sessionMode = currentState.analyticsSummary?.sessionMode || sessionMode;
   document.getElementById('graphs-session').textContent = currentState.session?.sessionName || currentState.session?.pageTitle || 'Waiting for session data';
   document.getElementById('graphs-car').textContent = followedCarNumber || '—';
   document.getElementById('graphs-lap-count').textContent = String((currentState.lapHistory || []).length);
@@ -241,6 +243,7 @@ function renderGraphs(state) {
 
 async function initGraphs() {
   const settings = await window.liveTiming.getSettings();
+  sessionMode = settings.sessionMode || 'race';
   const queryCar = new URLSearchParams(window.location.search).get('car');
   followedCarNumber = String(queryCar || settings.followedCar || '');
   document.querySelectorAll('.chart-panel').forEach((panel, index) => {

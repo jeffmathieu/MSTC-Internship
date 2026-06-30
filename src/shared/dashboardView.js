@@ -13,7 +13,10 @@
     return {
       ...summary,
       dashboardAnalysis: summary.dashboardAnalysisByCar?.[key] || (isPrimary ? summary.dashboardAnalysis : null),
-      adjacentClassBattles: summary.adjacentClassBattlesByCar?.[key] || (isPrimary ? summary.adjacentClassBattles : null)
+      comparisonView: summary.comparisonViewsByCar?.[key] || (isPrimary ? summary.comparisonView : null),
+      adjacentClassBattles: summary.modeAdjacentViewsByCar?.[key]
+        || summary.adjacentClassBattlesByCar?.[key]
+        || (isPrimary ? summary.adjacentClassBattles : null)
     };
   }
 

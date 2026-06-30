@@ -15,6 +15,16 @@ const state = {
       13: { car: '13' },
       2: { car: '2' },
       9: { car: '9' }
+    },
+    comparisonViewsByCar: {
+      13: { car: '13' },
+      2: { car: '2' },
+      9: { car: '9' }
+    },
+    modeAdjacentViewsByCar: {
+      13: { car: 'mode-13' },
+      2: { car: 'mode-2' },
+      9: { car: 'mode-9' }
     }
   },
   lapPrediction: { car: 'legacy-primary-13' },
@@ -24,7 +34,8 @@ const state = {
 };
 
 assert.strictEqual(dashboardView.analyticsForCar(state.analyticsSummary, '2').dashboardAnalysis.car, '2');
-assert.strictEqual(dashboardView.analyticsForCar(state.analyticsSummary, '2').adjacentClassBattles.car, '2');
+assert.strictEqual(dashboardView.analyticsForCar(state.analyticsSummary, '2').comparisonView.car, '2');
+assert.strictEqual(dashboardView.analyticsForCar(state.analyticsSummary, '2').adjacentClassBattles.car, 'mode-2');
 assert.strictEqual(dashboardView.predictionForCar(state, '9').car, '9');
 assert.strictEqual(dashboardView.pitstopPlanForCar(state, '9').car, '9');
 assert.strictEqual(dashboardView.analyticsForCar(state.analyticsSummary, '13').dashboardAnalysis.car, '13');
