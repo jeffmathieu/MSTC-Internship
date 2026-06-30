@@ -1,6 +1,6 @@
 {
   "name": "mstc-race-engineer-dashboard",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Electron race-engineering dashboard for live timing, pace analysis and pit strategy.",
   "main": "src/main/main.js",
   "scripts": {
