@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -32,6 +33,7 @@ const {
 const { buildLapPrediction } = require('../shared/lapPrediction');
 const { buildAdjacentClassBattles } = require('../shared/classBattle');
 const { normalizeMode, buildComparisonView, qualifyingAdjacentView } = require('../shared/sessionMode');
+const { setupAutoUpdates } = require('./autoUpdater');
 
 // Main-process references. Electron keeps UI windows and timers alive through
 // these variables, so every start/stop function below updates them carefully.
@@ -995,6 +997,7 @@ ipcMain.handle('export:current', async () => {
 app.whenReady().then(() => {
   createMainWindow();
   syncAdditionalDashboardWindows(loadSettings());
+  setupAutoUpdates({ app, dialog, autoUpdater, getParentWindow: () => mainWindow });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createMainWindow();

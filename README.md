@@ -14,6 +14,18 @@ npm install
 npm run dev
 ```
 
+## Download / Install
+
+Download the newest version from the repository's **GitHub Releases** page.
+
+- **Windows:** download and run the `MSTC Race Engineer Dashboard Setup ... .exe` installer.
+- **macOS:** download and open the `.dmg`, then drag the app to Applications.
+
+Installed builds check GitHub Releases for newer versions when the app starts.
+Development runs started with `npm start` or `npm run dev` never check for
+updates. When an update has downloaded, the app asks whether to restart and
+install immediately or continue working and install later.
+
 ## First launch
 
 The app opens a setup screen where you choose:
@@ -120,3 +132,45 @@ npm run dist:win
 ```
 
 The output appears in `dist/`.
+
+To build locally for the current platform, or specifically for macOS:
+
+```bash
+npm run dist
+npm run dist:mac
+```
+
+## Release process
+
+Releases are published only for pushed version tags:
+
+1. Merge the intended changes into `main` and make sure `npm test` passes.
+2. From `main`, increment the version with one of:
+
+   ```bash
+   npm version patch
+   npm version minor
+   npm version major
+   ```
+
+3. Push the generated version commit and tag:
+
+   ```bash
+   git push origin main
+   git push origin --tags
+   ```
+
+The `v*` tag starts `.github/workflows/release.yml`. GitHub Actions builds the
+Windows NSIS installer and the macOS DMG/ZIP, then publishes the installers and
+auto-update metadata to GitHub Releases. The tag version must match the version
+in `package.json`, which `npm version` handles automatically.
+
+## Code signing note
+
+The current CI builds are unsigned. Windows SmartScreen and macOS Gatekeeper may
+therefore display warnings. This is acceptable for internal testing, but code
+signing should be added before a broad production rollout. In particular,
+macOS auto-updates require a signed application. The release workflow contains
+commented placeholders for future macOS notarization and Windows certificate
+secrets; certificates and passwords must stay in GitHub Actions secrets and
+must never be committed to the repository.

@@ -1,15 +1,16 @@
 {
-  "name": "zolder-live-timing-reader",
+  "name": "mstc-race-engineer-dashboard",
   "version": "0.1.0",
-  "description": "Small Electron app that reads and displays GetRaceResults live timing table data.",
+  "description": "Electron race-engineering dashboard for live timing, pace analysis and pit strategy.",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
     "test": "node tests/run-all.js",
     "test:coverage": "node --test --experimental-test-coverage tests/*.test.js",
-    "dist": "electron-builder",
-    "dist:win": "electron-builder --win portable nsis"
+    "dist": "electron-builder --publish never",
+    "dist:win": "electron-builder --win nsis --publish never",
+    "dist:mac": "electron-builder --mac dmg zip --publish never"
   },
   "keywords": [
     "livetiming",
@@ -24,8 +25,10 @@
     "electron-builder": "^26.8.1"
   },
   "build": {
-    "appId": "be.jeffmathieu.zolderlivetimingreader",
-    "productName": "Zolder Live Timing Reader",
+    "appId": "com.jeffmathieu.mstcraceengineerdashboard",
+    "productName": "MSTC Race Engineer Dashboard",
+    "asar": true,
+    "electronUpdaterCompatibility": ">=2.16",
     "directories": {
       "output": "dist"
     },
@@ -33,15 +36,31 @@
       "src/**/*",
       "package.json"
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "jeffmathieu",
+      "repo": "MSTC-Internship",
+      "releaseType": "release"
+    },
     "win": {
-      "target": [
-        "nsis",
-        "portable"
-      ]
+      "target": "nsis",
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.sports",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }
