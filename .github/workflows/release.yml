@@ -9,29 +9,42 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  build:
     name: Build ${{ matrix.platform }} release
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: macOS
-            os: macos-latest
-            build-args: --mac dmg zip
+            os: macos-15
+            build-command: npx electron-builder --mac dmg zip --publish never
+            artifact-name: macos-release
+            artifact-paths: |
+              dist/*.dmg
+              dist/*.zip
+              dist/*.blockmap
+              dist/latest-mac.yml
+
           - platform: Windows
             os: windows-latest
-            build-args: --win nsis
+            build-command: npx electron-builder --win nsis --publish never
+            artifact-name: windows-release
+            artifact-paths: |
+              dist/*.exe
+              dist/*.exe.blockmap
+              dist/latest.yml
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: "20.x"
+          node-version: "24.x"
           cache: npm
 
       - name: Install dependencies
@@ -40,10 +53,9 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Build and publish release
-        run: npx electron-builder ${{ matrix.build-args }} --publish always
+      - name: Build release files
+        run: ${{ matrix.build-command }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           # Future macOS signing/notarization secrets:
           # CSC_LINK: ${{ secrets.MAC_CERTIFICATE }}
@@ -54,3 +66,42 @@ jobs:
           # Future Windows signing secrets:
           # WIN_CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
           # WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+
+      - name: List dist files
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path dist -File | Select-Object Name, Length
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.artifact-paths }}
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    name: Publish single GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: List release assets
+        run: |
+          find release-assets -maxdepth 1 -type f -print
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            release-assets/*
