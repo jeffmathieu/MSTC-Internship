@@ -415,10 +415,21 @@ function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) 
   const averageLapMs = estimateAverageLapMs(rowsInClass, options.averageLapMs);
   const overallBehind = overallGapsBehindFollowed(rows, followedCarNumber, averageLapMs);
   const classBehind = overallBehind.filter((item) => item.row.className === followed.className);
+  const followedLap = lapNumber(followed);
   if (Number.isFinite(pitLossMs) && classBehind.length) {
-    const passedClassCars = classBehind.filter((item) => item.gapFromFollowedMs <= pitLossMs);
+    // A numeric DIFF must never make a lapped car pass us in classification.
+    // Some feeds expose a physical interval alongside INT=5L; only same-lap
+    // rivals can be consumed directly by a sub-lap pit loss.
+    const sameLapClassBehind = classBehind.filter((item) => {
+      const candidateLap = lapNumber(item.row);
+      return !Number.isFinite(followedLap) || !Number.isFinite(candidateLap) || candidateLap === followedLap;
+    });
+    const passedClassCars = sameLapClassBehind.filter((item) => item.gapFromFollowedMs <= pitLossMs);
     const carAheadEntry = passedClassCars.at(-1) || null;
-    const carBehindEntry = classBehind.find((item) => item.gapFromFollowedMs > pitLossMs) || null;
+    const carBehindEntry = sameLapClassBehind.find((item) => item.gapFromFollowedMs > pitLossMs) || null;
+    const nearestLappedBehind = !carBehindEntry
+      ? classBehind.find((item) => Number.isFinite(lapNumber(item.row)) && Number.isFinite(followedLap) && lapNumber(item.row) < followedLap)
+      : null;
     const currentClassPosition = Number(followed.classPosition);
     const projectedClassPosition = Number.isFinite(currentClassPosition)
       ? currentClassPosition + passedClassCars.length
@@ -437,19 +448,24 @@ function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) 
         projectedGapToUsMs: carAheadEntry.gapFromFollowedMs - pitLossMs,
         isOurCar: false
       } : null,
-      carBehind: carBehindEntry ? {
-        carNumber: String(carBehindEntry.row.carNumber),
-        team: carBehindEntry.row.team || '',
-        driver: carBehindEntry.row.driver || '',
-        currentClassPosition: carBehindEntry.row.classPosition || null,
-        lapDeltaToUs: Number.isFinite(lapNumber(carBehindEntry.row)) && Number.isFinite(lapNumber(followed)) ? lapNumber(carBehindEntry.row) - lapNumber(followed) : null,
-        projectedGapToUsMs: carBehindEntry.gapFromFollowedMs - pitLossMs,
+      carBehind: (carBehindEntry || nearestLappedBehind) ? {
+        carNumber: String((carBehindEntry || nearestLappedBehind).row.carNumber),
+        team: (carBehindEntry || nearestLappedBehind).row.team || '',
+        driver: (carBehindEntry || nearestLappedBehind).row.driver || '',
+        currentClassPosition: (carBehindEntry || nearestLappedBehind).row.classPosition || null,
+        lapDeltaToUs: Number.isFinite(lapNumber((carBehindEntry || nearestLappedBehind).row)) && Number.isFinite(followedLap) ? lapNumber((carBehindEntry || nearestLappedBehind).row) - followedLap : null,
+        projectedGapToUsMs: carBehindEntry
+          ? carBehindEntry.gapFromFollowedMs - pitLossMs
+          : Number.isFinite(averageLapMs)
+            ? ((followedLap - lapNumber(nearestLappedBehind.row)) * averageLapMs) - pitLossMs
+            : null,
+        estimatedFromLapGap: Boolean(nearestLappedBehind),
         isOurCar: false
       } : null,
       items: [
         ...passedClassCars.map((item) => ({ carNumber: String(item.row.carNumber), projectedGapToUsMs: item.gapFromFollowedMs - pitLossMs, isOurCar: false })),
         { carNumber: String(followedCarNumber), projectedGapToUsMs: 0, isOurCar: true },
-        ...classBehind.filter((item) => item.gapFromFollowedMs > pitLossMs).map((item) => ({ carNumber: String(item.row.carNumber), projectedGapToUsMs: item.gapFromFollowedMs - pitLossMs, isOurCar: false }))
+        ...sameLapClassBehind.filter((item) => item.gapFromFollowedMs > pitLossMs).map((item) => ({ carNumber: String(item.row.carNumber), projectedGapToUsMs: item.gapFromFollowedMs - pitLossMs, isOurCar: false }))
       ]
     };
   }

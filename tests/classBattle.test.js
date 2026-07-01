@@ -3,6 +3,7 @@ const {
   numberOrNull,
   average,
   parseGapToMs,
+  parseLapGap,
   parseTimeToMs,
   formatSeconds,
   formatSignedSeconds,
@@ -11,6 +12,7 @@ const {
   classGapToPrevious,
   relativeClassGap,
   overallRelativeGap,
+  lapGapBetween,
   lapsForCar,
   recentAverageForCar,
   buildClassBattleSummary,
@@ -52,7 +54,13 @@ const history = [
 assert.strictEqual(parseGapToMs('12.000'), 12000);
 assert.strictEqual(parseGapToMs('+1:02.500'), 62500);
 assert.strictEqual(parseGapToMs('-- 106 laps --'), null);
+assert.strictEqual(parseGapToMs('5L'), null);
 assert.strictEqual(parseGapToMs(''), null);
+assert.strictEqual(parseLapGap('5L'), 5);
+assert.strictEqual(parseLapGap('5 L'), 5);
+assert.strictEqual(parseLapGap('-- 106 laps --'), 106);
+assert.strictEqual(parseLapGap('1 lap'), 1);
+assert.strictEqual(parseLapGap('15.250'), null);
 assert.strictEqual(parseTimeToMs('1:02:034'), 62034);
 assert.strictEqual(parseTimeToMs('10:02:03.456'), 36123456);
 assert.strictEqual(parseTimeToMs('12.5'), 12500);
@@ -163,5 +171,46 @@ const noPaceSummary = buildClassBattleSummary([
 const noPaceItem = noPaceSummary.items.find((item) => item.battle)?.battle;
 assert.strictEqual(noPaceItem.deltaPerLap, null);
 assert.strictEqual(noPaceItem.trendState, 'neutral');
+
+// Provider-independent lap-gap handling. RIS-style "5L" and a numeric interval
+// that happens to be present at the same time must both defer to lap counters.
+const lappedBattleRows = [
+  { sourceProvider: 'ris-timing', position: 1, classPosition: 1, carNumber: 10, className: 'CC', lapNumber: 105, lastLap: '2:10.000', interval: '--' },
+  { sourceProvider: 'ris-timing', position: 2, classPosition: 2, carNumber: 33, className: 'CC', lapNumber: 100, lastLap: '2:05.000', interval: '5L', diff: '0.500' },
+  { sourceProvider: 'ris-timing', position: 3, classPosition: 3, carNumber: 65, className: 'CC', lapNumber: 95, lastLap: '2:00.000', interval: '5L' }
+];
+const lappedHistory = [
+  { carNumber: 10, lapNumber: 104, lapTimeMs: 130000 },
+  { carNumber: 33, lapNumber: 99, lapTimeMs: 125000 },
+  { carNumber: 65, lapNumber: 94, lapTimeMs: 120000 }
+];
+const lappedBattles = buildAdjacentClassBattles(lappedBattleRows, lappedHistory, 33);
+const lappedClassRows = classSortedRows(lappedBattleRows, 'CC');
+assert.strictEqual(classGapToPrevious(lappedBattleRows, lappedClassRows, lappedBattleRows[1]).label, '5L');
+assert.strictEqual(lappedBattles.ahead.relativeGap, null);
+assert.strictEqual(lappedBattles.ahead.lapGap, 5);
+assert.strictEqual(lappedBattles.ahead.gapLabel, '5L');
+assert.strictEqual(lappedBattles.ahead.estimatedGapMs, 650000);
+assert.strictEqual(lappedBattles.ahead.lapsToCatch, 130);
+assert.ok(lappedBattles.ahead.catchInfo.includes('est. 130.0 laps'));
+assert.strictEqual(lappedBattles.behind.gapLabel, '5L');
+assert.strictEqual(lappedBattles.behind.estimatedGapMs, 625000);
+assert.strictEqual(lappedBattles.behind.lapsToCatch, 125);
+assert.ok(lappedBattles.behind.catchInfo.includes('est. 125.0 laps'));
+assert.strictEqual(lapGapBetween(lappedBattleRows, lappedBattleRows[0], lappedBattleRows[1]), 5);
+
+// Text fallback also supports GetRaceResults-style labels when lap counters are
+// missing, but only for adjacent overall cars so an unrelated interval cannot
+// contaminate the estimate.
+const textLapGapRows = [
+  { sourceProvider: 'getraceresults', position: 1, carNumber: 1, className: 'GT', classPosition: 1, lastLap: '--' },
+  { sourceProvider: 'getraceresults', position: 2, carNumber: 2, className: 'GT', classPosition: 2, interval: '-- 3 laps --', lastLap: '--' },
+  { sourceProvider: 'getraceresults', position: 3, carNumber: 3, className: 'OTHER', classPosition: 1, interval: '1L', lastLap: '--' }
+];
+const textLapSummary = buildAdjacentClassBattles(textLapGapRows, [], 1);
+assert.strictEqual(textLapSummary.behind.gapLabel, '3L');
+assert.strictEqual(textLapSummary.behind.estimatedGapMs, null);
+assert.strictEqual(textLapSummary.behind.lapsToCatch, null);
+assert.strictEqual(lapGapBetween(textLapGapRows, textLapGapRows[0], textLapGapRows[2]), null);
 
 console.log('Class battle tests passed.');

@@ -397,20 +397,20 @@ const fallbackUnscoredOurCarProjection = projectClassAfterPit([
 assert.strictEqual(fallbackUnscoredOurCarProjection.available, false);
 assert.strictEqual(fallbackUnscoredOurCarProjection.reason, 'Our projected race distance is not reliable yet');
 
-// Physical rejoin projection follows the numeric DIFF/INT chain. Even if a car
-// is laps down in the race classification, a tiny numeric interval means it is
-// physically close enough to pass us during a pitstop.
+// A numeric DIFF may be present beside a lap-based interval. Classification lap
+// counts win: a 75-second stop cannot make a car four laps behind pass us.
 const lappedCarProjection = projectClassAfterPit([
   { position: 1, classPosition: 1, carNumber: 10, className: 'CC', team: 'Leader', lapNumber: 20, interval: '--', lastLapMs: 125000 },
   { position: 2, classPosition: 2, carNumber: 33, className: 'CC', team: 'Us', lapNumber: 20, interval: '10.000', lastLapMs: 125000 },
-  { position: 5, classPosition: 5, carNumber: 65, className: 'CC', team: 'Lapped', lapNumber: 16, interval: '0.319', lastLapMs: 126000 }
+  { position: 5, classPosition: 5, carNumber: 65, className: 'CC', team: 'Lapped', lapNumber: 16, interval: '4L', diff: '0.319', lastLapMs: 126000 }
 ], '33', 75000, { averageLapMs: 125000 });
 assert.strictEqual(lappedCarProjection.available, true);
-assert.strictEqual(lappedCarProjection.projectedClassPosition, 3);
-assert.strictEqual(lappedCarProjection.carAhead.carNumber, '65');
-assert.strictEqual(lappedCarProjection.carAhead.lapDeltaToUs, -4);
-assert.strictEqual(lappedCarProjection.carAhead.projectedGapToUsMs, -74681);
-assert.strictEqual(lappedCarProjection.carBehind, null);
+assert.strictEqual(lappedCarProjection.projectedClassPosition, 2);
+assert.strictEqual(lappedCarProjection.carAhead, null);
+assert.strictEqual(lappedCarProjection.carBehind.carNumber, '65');
+assert.strictEqual(lappedCarProjection.carBehind.lapDeltaToUs, -4);
+assert.strictEqual(lappedCarProjection.carBehind.projectedGapToUsMs, 425000);
+assert.strictEqual(lappedCarProjection.carBehind.estimatedFromLapGap, true);
 
 // Regression for an Asian LMS-style table: a lapped other-class car can sit
 // visually between us and the next same-class car. Its "-- 65 laps --" GAP must

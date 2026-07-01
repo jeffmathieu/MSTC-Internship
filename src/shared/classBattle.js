@@ -62,8 +62,16 @@ function parseTimeToMs(value) {
 // be added as seconds between same-lap cars.
 function parseGapToMs(value) {
   const text = String(value || '').trim();
-  if (!text || text === '--' || text === '?' || /lap/i.test(text)) return null;
+  if (!text || text === '--' || text === '?' || parseLapGap(text) !== null) return null;
   return parseTimeToMs(text.replace(/^\+/, ''));
+}
+
+// Recognizes lap intervals from any provider. RIS commonly uses "5L", while
+// GetRaceResults may use "-- 5 laps --". Keeping this generic is a deliberate
+// failsafe: no provider is allowed to turn a lap count into fake seconds.
+function parseLapGap(value) {
+  const match = String(value || '').trim().match(/(?:^|\s|-)(\d+)\s*(?:l|laps?)(?:\s|$|-)/i);
+  return match ? Number(match[1]) : null;
 }
 
 // Formats gap deltas for compact class-table cells.
@@ -114,6 +122,10 @@ function classGapToPrevious(rows, classRows, row) {
   if (classIndex <= 0) return { ms: 0, label: 'class leader', reliable: true };
 
   const previousClassRow = classRows[classIndex - 1];
+  const lapGap = lapGapBetween(rows, previousClassRow, row);
+  if (Number.isFinite(lapGap) && lapGap > 0) {
+    return { ms: null, lapGap, label: `${lapGap}L`, reliable: false };
+  }
   const previousOverall = previousOverallRow(rows, row);
   if (!previousOverall || String(previousOverall.carNumber) !== String(previousClassRow.carNumber)) {
     return { ms: null, label: 'class gap unknown', reliable: false };
@@ -163,6 +175,22 @@ function overallRelativeGap(rows, fromRow, toRow) {
   return totalMs;
 }
 
+// Returns an absolute lap difference. Completed-lap counters are authoritative;
+// provider text is only a fallback when both counters are unavailable and the
+// cars are adjacent in the overall timing table.
+function lapGapBetween(rows, fromRow, toRow) {
+  const fromLap = numberOrNull(fromRow?.lapNumber);
+  const toLap = numberOrNull(toRow?.lapNumber);
+  if (fromLap !== null && toLap !== null && fromLap !== toLap) return Math.abs(fromLap - toLap);
+
+  const ordered = overallSortedRows(rows);
+  const fromIndex = ordered.findIndex((row) => String(row.carNumber) === String(fromRow?.carNumber));
+  const toIndex = ordered.findIndex((row) => String(row.carNumber) === String(toRow?.carNumber));
+  if (fromIndex < 0 || toIndex < 0 || Math.abs(fromIndex - toIndex) !== 1) return null;
+  const lowerRow = ordered[Math.max(fromIndex, toIndex)];
+  return parseLapGap(lowerRow.diff) ?? parseLapGap(lowerRow.interval) ?? parseLapGap(lowerRow.gap);
+}
+
 // Normalizes stored history rows to the small shape needed by catch estimates.
 function historyLapForAnalysis(entry) {
   const lastLapMs = numberOrNull(entry.lastLapMs ?? entry.lapTimeMs);
@@ -198,6 +226,7 @@ function buildBattleItem({ rows, classRows, followed, row, history, lapWindow })
   const theirAvg = recentAverageForCar(history, row.carNumber, lapWindow) ?? parseTimeToMs(row.lastLap);
   const relation = rowSortNumber(row.classPosition) < rowSortNumber(followed.classPosition) ? 'ahead' : 'behind';
   const relativeGap = overallRelativeGap(rows, followed, row);
+  const lapGap = lapGapBetween(rows, followed, row);
   const ourLastLapMs = parseTimeToMs(followed.lastLap) ?? numberOrNull(followed.lastLapMs);
   const theirLastLapMs = parseTimeToMs(row.lastLap) ?? numberOrNull(row.lastLapMs);
   const lastLapDeltaMs = Number.isFinite(ourLastLapMs) && Number.isFinite(theirLastLapMs) ? theirLastLapMs - ourLastLapMs : null;
@@ -205,20 +234,31 @@ function buildBattleItem({ rows, classRows, followed, row, history, lapWindow })
   let lapsToCatch = null;
   let minutesToCatch = null;
   let estimate = 'class gap unknown';
+  let estimatedGapMs = null;
+  let gapIsEstimate = false;
 
   if (Number.isFinite(ourAvg) && Number.isFinite(theirAvg)) {
+    // For an ahead rival, its pace estimates the time represented by its lead.
+    // For a behind rival, our pace estimates the distance represented by our
+    // lead. This is intentionally approximate because lap counters contain no
+    // information about either car's position within its current lap.
+    if (Number.isFinite(lapGap) && lapGap > 0) {
+      estimatedGapMs = lapGap * (relation === 'ahead' ? theirAvg : ourAvg);
+      gapIsEstimate = true;
+    }
+    const catchGapMs = Number.isFinite(relativeGap) ? relativeGap : estimatedGapMs;
     if (relation === 'ahead') {
       deltaPerLap = theirAvg - ourAvg;
-      if (Number.isFinite(relativeGap) && relativeGap > 0 && deltaPerLap > 0) {
-        lapsToCatch = relativeGap / deltaPerLap;
+      if (Number.isFinite(catchGapMs) && catchGapMs > 0 && deltaPerLap > 0) {
+        lapsToCatch = catchGapMs / deltaPerLap;
         minutesToCatch = (lapsToCatch * ourAvg) / 60000;
         estimate = `we catch #${row.carNumber}`;
       } else if (deltaPerLap > 0) estimate = `gaining on #${row.carNumber}`;
       else estimate = 'we are not catching';
     } else {
       deltaPerLap = ourAvg - theirAvg;
-      if (Number.isFinite(relativeGap) && relativeGap > 0 && deltaPerLap > 0) {
-        lapsToCatch = relativeGap / deltaPerLap;
+      if (Number.isFinite(catchGapMs) && catchGapMs > 0 && deltaPerLap > 0) {
+        lapsToCatch = catchGapMs / deltaPerLap;
         minutesToCatch = (lapsToCatch * ourAvg) / 60000;
         estimate = `#${row.carNumber} catches us`;
       } else if (deltaPerLap > 0) estimate = `#${row.carNumber} gaining`;
@@ -230,8 +270,8 @@ function buildBattleItem({ rows, classRows, followed, row, history, lapWindow })
   const catchInfo = [
     estimate,
     deltaLabel,
-    Number.isFinite(lapsToCatch) ? `${lapsToCatch.toFixed(1)} laps` : '',
-    Number.isFinite(minutesToCatch) ? `${minutesToCatch.toFixed(1)} min` : ''
+    Number.isFinite(lapsToCatch) ? `${gapIsEstimate ? 'est. ' : ''}${lapsToCatch.toFixed(1)} laps` : '',
+    Number.isFinite(minutesToCatch) ? `${gapIsEstimate ? 'est. ' : ''}${minutesToCatch.toFixed(1)} min` : ''
   ].filter(Boolean).join(' · ');
   const trendState = !Number.isFinite(deltaPerLap) || deltaPerLap === 0
     ? 'neutral'
@@ -244,7 +284,12 @@ function buildBattleItem({ rows, classRows, followed, row, history, lapWindow })
     relation,
     row,
     relativeGap,
-    gapLabel: Number.isFinite(relativeGap) ? formatSeconds(relativeGap) : 'gap unknown',
+    lapGap,
+    estimatedGapMs,
+    gapIsEstimate,
+    gapLabel: Number.isFinite(lapGap) && lapGap > 0
+      ? `${lapGap}L`
+      : Number.isFinite(relativeGap) ? formatSeconds(relativeGap) : 'gap unknown',
     lastLapDeltaMs,
     lastLapDeltaLabel: formatSignedSeconds(lastLapDeltaMs),
     ourAvg,
@@ -302,6 +347,7 @@ return {
   numberOrNull,
   average,
   parseTimeToMs,
+  parseLapGap,
   parseGapToMs,
   formatSeconds,
   formatSignedSeconds,
@@ -312,6 +358,7 @@ return {
   classGapToPrevious,
   relativeClassGap,
   overallRelativeGap,
+  lapGapBetween,
   lapsForCar,
   recentAverageForCar,
   buildBattleItem,
