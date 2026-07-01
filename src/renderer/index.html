@@ -11,7 +11,7 @@
       <div class="setup-card">
         <p class="eyebrow">First setup</p>
         <h1>Race Engineer Dashboard</h1>
-        <p class="subtitle">Choose the timing page, up to three followed cars and the data folder before starting. These settings are remembered.</p>
+        <p class="subtitle">Choose the timing page, up to three followed cars and one folder for this race session. Reuse that folder after a restart to continue with its saved history.</p>
         <label>Live timing URL</label>
         <input id="setup-url" type="text" value="https://livetiming.getraceresults.com/demo#screen-results" />
         <label>Cars to follow</label>
@@ -28,10 +28,10 @@
           <label><input id="mode-practice" type="radio" name="session-mode" value="practice" /><span>Practice</span></label>
           <label><input id="mode-qualifying" type="radio" name="session-mode" value="qualifying" /><span>Qualifying</span></label>
         </fieldset>
-        <label>Data storage base folder</label>
+        <label>Race session folder</label>
         <div class="folder-row">
           <input id="setup-folder" type="text" readonly />
-          <button id="setup-choose-folder" class="secondary">Choose folder</button>
+          <button id="setup-choose-folder" class="secondary">Choose session folder</button>
         </div>
         <div class="button-row end">
           <button id="setup-save" class="primary">Save and open dashboards</button>

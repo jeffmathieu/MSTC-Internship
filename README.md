@@ -33,7 +33,7 @@ The app opens a setup screen where you choose:
 1. live timing URL, for example `https://livetiming.getraceresults.com/demo#screen-results`
 2. one to three car numbers to follow, with the `+` button adding another dashboard
 3. session mode: Race, Practice, or Qualifying
-4. data storage folder
+4. a dedicated folder for this race session
 
 These settings are remembered. The first number uses the main dashboard; every
 additional number opens a separate dashboard window. All dashboards share one
@@ -77,15 +77,16 @@ change.
 
 ## Data storage
 
-The folder you select is a base storage folder. Every time you press **Start
-live**, the app creates a new session folder inside that base folder, for
-example:
+Create and select one dedicated folder for each race, qualifying, or practice
+session. The app writes directly into that selected folder and does not create
+an automatic timestamp subfolder when **Start live** is pressed.
 
-`2026-06-25T08-42-10Z_ris-timing_car-33`
-
-All files for that live run are written into that session folder, so you do not
-need to manually create a new folder for each race, qualifying, practice, or
-race-weekend session.
+If the app closes or crashes, reopen it with the same session folder and press
+**Start live** again. Existing `lap_history.jsonl` data is loaded first, its lap
+identities rebuild the duplicate guard, and collection continues by appending
+only newly completed laps. The latest stored pit state is restored as well, so
+valid-stop counts and an active post-stop cooldown survive the restart. Select
+a new empty folder when starting a genuinely new timing session.
 
 Each session folder contains readable source files that contain the timing data
 as it came in, and derived files that are recalculated from that source data.

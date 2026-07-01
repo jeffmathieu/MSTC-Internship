@@ -35,6 +35,7 @@ const { pitstopCircuitById, normalizePitstopCircuitId } = require('../shared/pit
 const { buildLapPrediction } = require('../shared/lapPrediction');
 const { buildAdjacentClassBattles } = require('../shared/classBattle');
 const { normalizeMode, buildComparisonView, qualifyingAdjacentView } = require('../shared/sessionMode');
+const { resolveSessionFolder, loadSessionHistory, loadStoredJson } = require('../shared/storageSession');
 const { setupAutoUpdates } = require('./autoUpdater');
 
 // Main-process references. Electron keeps UI windows and timers alive through
@@ -414,38 +415,11 @@ function slugPart(value, fallback = 'session') {
   return slug || fallback;
 }
 
-function providerOrHostFromUrl(url) {
-  const provider = detectSourceProvider({ timingUrl: url });
-  if (provider !== 'unknown') return provider;
-  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'timing'; }
-}
-
-function uniqueFolderPath(baseFolder, folderName) {
-  let candidate = path.join(baseFolder, folderName);
-  let suffix = 2;
-  while (fs.existsSync(candidate)) {
-    candidate = path.join(baseFolder, `${folderName}-${suffix}`);
-    suffix += 1;
-  }
-  return candidate;
-}
-
-function createStorageSessionFolder(settings, url, startedAt) {
-  const baseFolder = settings.storageFolder || defaultStorageFolder();
-  fs.mkdirSync(baseFolder, { recursive: true });
-  const timestamp = new Date(startedAt).toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[:]/g, '-');
-  const provider = slugPart(providerOrHostFromUrl(url), 'timing');
-  const followedCar = settings.followedCar ? `car-${slugPart(settings.followedCar, 'unknown')}` : 'car-unknown';
-  const folder = uniqueFolderPath(baseFolder, `${timestamp}_${provider}_${followedCar}`);
-  fs.mkdirSync(folder, { recursive: true });
-  return folder;
-}
-
-// Makes sure the active session storage folder exists before writing
-// exports/history. The user-selected storageFolder is treated as a base folder;
-// startCollector() creates a session-specific child folder for each live run.
+// Makes sure the manually selected session folder exists before reading or
+// writing race data. The same folder is deliberately reused after an app crash
+// or restart so lap_history.jsonl can restore progress and prevent duplicates.
 function ensureStorage(settings) {
-  const folder = collectorState.storageSessionFolder || settings.storageFolder || defaultStorageFolder();
+  const folder = resolveSessionFolder(collectorState.storageSessionFolder || settings.storageFolder, defaultStorageFolder());
   fs.mkdirSync(folder, { recursive: true });
   return folder;
 }
@@ -609,7 +583,7 @@ function writeSessionMetadata(settings, context) {
     lastUpdatedAt: context.collectedAt || '',
     followedCar: context.followedCar || '',
     followedCars: normalizeFollowedCars(settings),
-    baseStorageFolder: settings.storageFolder || defaultStorageFolder(),
+    baseStorageFolder: folder,
     storageFolder: folder,
     storageSchemaVersion: 1
   }, null, 2));
@@ -768,17 +742,32 @@ function loadExistingHistory(settings) {
   latestFcyGapStateByCar.clear();
   const folder = ensureStorage(settings);
   const jsonlPath = path.join(folder, 'lap_history.jsonl');
-  if (!fs.existsSync(jsonlPath)) return [];
   try {
-    const entries = fs.readFileSync(jsonlPath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
-    entries.forEach((entry) => {
-      if (entry.carNumber && entry.lastLap) knownLapKeys.add(lapIdentity(entry));
-    });
-    return entries.slice(-20000);
+    const { entries, knownKeys } = loadSessionHistory({ fs, jsonlPath, identityForLap: lapIdentity });
+    knownKeys.forEach((key) => knownLapKeys.add(key));
+    return entries;
   } catch (error) {
     addError(error, 'loadExistingHistory');
     return [];
   }
+}
+
+// Restores valid-stop counts and cooldown timestamps written on the previous
+// poll. Without this, restarting shortly after a stop would incorrectly reopen
+// the pit window even though lap history itself resumed correctly.
+function loadExistingPitStates(settings) {
+  const folder = ensureStorage(settings);
+  normalizeFollowedCars(settings).forEach((carNumber) => {
+    const filePath = path.join(folder, `pitstop_plan_car-${slugPart(carNumber, 'unknown')}.json`);
+    try {
+      const stored = loadStoredJson(fs, filePath);
+      if (stored?.pitState && typeof stored.pitState === 'object') {
+        latestPitStateByCar.set(String(carNumber), stored.pitState);
+      }
+    } catch (error) {
+      addError(error, `loadExistingPitState:${carNumber}`);
+    }
+  });
 }
 
 function liveRowKey(row) {
@@ -909,10 +898,9 @@ async function pollLivePage() {
 // Returns user-facing paths for the Debug/Storage UI. Add new exported files
 // here if the renderer should display their locations.
 function storageInfo(settings) {
-  const baseFolder = settings.storageFolder || defaultStorageFolder();
-  const folder = collectorState.storageSessionFolder || baseFolder;
+  const folder = resolveSessionFolder(collectorState.storageSessionFolder || settings.storageFolder, defaultStorageFolder());
   return {
-    baseFolder,
+    baseFolder: folder,
     folder,
     latestRowsCsv: path.join(folder, 'latest_live_rows.csv'),
     latestRowsJson: path.join(folder, 'latest_live_rows.json'),
@@ -933,10 +921,12 @@ async function startCollector(url) {
   stopCollector(false);
   const settings = loadSettings();
   const startedAt = new Date().toISOString();
-  const storageSessionFolder = createStorageSessionFolder(settings, url, startedAt);
+  const storageSessionFolder = resolveSessionFolder(settings.storageFolder, defaultStorageFolder());
+  fs.mkdirSync(storageSessionFolder, { recursive: true });
   latestPitStateByCar.clear();
   collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, lapPrediction: null, lapPredictionsByCar: {}, pitstopPlan: null, pitstopPlansByCar: {}, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
   collectorState = { ...collectorState, lapHistory: loadExistingHistory(settings), storage: storageInfo(settings) };
+  loadExistingPitStates(settings);
   broadcastState();
   try {
     const win = createLiveWindow();
@@ -979,9 +969,14 @@ ipcMain.handle('settings:set', (_event, settings) => {
     BrowserWindow.getAllWindows().forEach((window) => window.webContents.send('theme:update', merged.theme));
   }
   if ((previous.storageFolder || '') !== (merged.storageFolder || '')) {
+    // Activate the new folder before loading; ensureStorage() intentionally
+    // prefers collectorState.storageSessionFolder while a session is open.
+    collectorState.storageSessionFolder = merged.storageFolder || defaultStorageFolder();
+    const lapHistory = loadExistingHistory(merged);
+    loadExistingPitStates(merged);
     collectorState = {
       ...collectorState,
-      lapHistory: loadExistingHistory(merged),
+      lapHistory,
       storage: storageInfo(merged),
       snapshots: []
     };
@@ -992,11 +987,12 @@ ipcMain.handle('settings:set', (_event, settings) => {
 
 // Opens a native folder picker and stores the chosen export/history directory.
 ipcMain.handle('storage:chooseFolder', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'] });
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose or create the folder for this race session',
+    properties: ['openDirectory', 'createDirectory']
+  });
   if (result.canceled || !result.filePaths[0]) return null;
-  const settings = { ...loadSettings(), storageFolder: result.filePaths[0] };
-  saveSettings(settings);
-  return settings.storageFolder;
+  return result.filePaths[0];
 });
 
 ipcMain.handle('collector:start', (_event, url) => startCollector(url));
