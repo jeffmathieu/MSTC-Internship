@@ -16,9 +16,33 @@ const isSecondaryDashboard = dashboardQuery.get('secondary') === '1';
 const classBattle = window.classBattle;
 const lapAnalytics = window.lapAnalytics;
 const pitstopPlanner = window.pitstopPlanner;
+const pitstopCircuits = window.pitstopCircuits;
 const normReference = window.normReference;
 const dashboardView = window.dashboardView;
 const previousMetricValues = new Map();
+
+// Applies one of the two supported visual themes. Theme colors themselves are
+// grouped at the top of styles.css, so changing the palette never requires
+// touching renderer logic.
+function applyTheme(theme) {
+  const normalized = theme === 'dark' ? 'dark' : 'light';
+  document.documentElement?.setAttribute('data-theme', normalized);
+  document.body?.setAttribute('data-theme', normalized);
+  const button = $('theme-toggle');
+  if (button) {
+    const dark = normalized === 'dark';
+    button.textContent = dark ? '☀' : '☾';
+    button.setAttribute('title', dark ? 'Switch to light mode' : 'Switch to dark mode');
+    button.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+  }
+  return normalized;
+}
+
+async function toggleTheme() {
+  const next = currentSettings?.theme === 'dark' ? 'light' : 'dark';
+  currentSettings = await window.liveTiming.setSettings({ theme: next });
+  applyTheme(currentSettings.theme);
+}
 
 // Maps collector states to the visual status pill classes in styles.css.
 function statusClass(status) {
@@ -179,6 +203,9 @@ function hoursFromInput(id, fallbackHours) {
 // Builds the pit rule object saved to settings. If new pit rules become
 // configurable, add their input mapping here and the planner default.
 function pitRulesFromInputs() {
+  const selectedCircuit = pitstopCircuits?.pitstopCircuitById($('pit-circuit')?.value);
+  const configuredDistance = Number($('pit-distance-meters')?.value);
+  const configuredFcySpeed = Number($('pit-fcy-speed')?.value);
   return {
     raceDurationMs: hoursFromInput('pit-race-hours', 24) * 60 * 60 * 1000,
     pitClosedStartMs: 25 * 60 * 1000,
@@ -186,8 +213,65 @@ function pitRulesFromInputs() {
     pitCooldownMs: 25 * 60 * 1000,
     pitStopDurationMs: secondsFromInput('pit-duration', 75) * 1000,
     requiredPitStops: Math.max(0, Math.floor(secondsFromInput('pit-required-input', 2))),
-    nearWindowLaps: 2
+    nearWindowLaps: 2,
+    circuitId: selectedCircuit?.id || currentSettings?.pitCircuitId || 'zolder',
+    regularTrackDistanceMeters: Number.isFinite(configuredDistance) && configuredDistance > 0
+      ? configuredDistance
+      : selectedCircuit?.regularTrackDistanceMeters ?? null,
+    fcySpeedKph: Number.isFinite(configuredFcySpeed) && configuredFcySpeed > 0
+      ? configuredFcySpeed
+      : selectedCircuit?.fcySpeedKph ?? 60
   };
+}
+
+function populatePitstopCircuits() {
+  const select = $('pit-circuit');
+  if (!select || !pitstopCircuits) return;
+  select.innerHTML = '';
+  pitstopCircuits.PITSTOP_CIRCUITS.forEach((circuit) => {
+    const option = document.createElement('option');
+    option.value = circuit.id;
+    option.textContent = circuit.label;
+    select.appendChild(option);
+  });
+}
+
+function updatePitDistanceNote() {
+  const distance = Number($('pit-distance-meters')?.value);
+  const speed = Number($('pit-fcy-speed')?.value);
+  if (!(distance > 0) || !(speed > 0)) {
+    setText('pit-distance-note', 'Enter a positive distance and FCY speed.');
+    return;
+  }
+  const travelSeconds = distance / (speed / 3.6);
+  setText('pit-distance-note', `A non-pitting car needs approximately ${travelSeconds.toFixed(1)}s between pit-in and pit-out.`);
+}
+
+// Selecting a layout loads its saved defaults. The engineer can then override
+// either value for race-specific regulations without changing the profile.
+function applyPitCircuitDefaults() {
+  const circuit = pitstopCircuits?.pitstopCircuitById($('pit-circuit')?.value);
+  if ($('pit-distance-meters')) $('pit-distance-meters').value = String(circuit?.regularTrackDistanceMeters ?? '');
+  if ($('pit-fcy-speed')) $('pit-fcy-speed').value = String(circuit?.fcySpeedKph ?? 60);
+  updatePitDistanceNote();
+}
+
+function pitSetupLocked() {
+  return currentState?.mode === 'live' && currentState?.status !== 'idle' && currentState?.status !== 'error';
+}
+
+function showPitSetup(show = true) {
+  if (show && pitSetupLocked()) return;
+  if (show) {
+    $('pit-race-hours').value = String((currentSettings?.pitRules?.raceDurationMs || 86400000) / 3600000);
+    $('pit-required-input').value = String(currentSettings?.pitRules?.requiredPitStops ?? 2);
+    $('pit-circuit').value = currentSettings?.pitCircuitId || currentSettings?.pitRules?.circuitId || 'zolder';
+    const selectedCircuit = pitstopCircuits?.pitstopCircuitById($('pit-circuit').value);
+    $('pit-distance-meters').value = String(currentSettings?.pitRules?.regularTrackDistanceMeters ?? selectedCircuit?.regularTrackDistanceMeters ?? '');
+    $('pit-fcy-speed').value = String(currentSettings?.pitRules?.fcySpeedKph ?? selectedCircuit?.fcySpeedKph ?? 60);
+    updatePitDistanceNote();
+  }
+  $('pit-setup-modal')?.classList.toggle('hidden', !show);
 }
 
 function referenceTimesFromInputs() {
@@ -505,13 +589,18 @@ function projectionLabel(projection) {
   };
   const behind = projection.carAhead ? `${gapLabel(projection.carAhead)} behind #${projection.carAhead.carNumber}` : 'class lead';
   const ahead = projection.carBehind ? `${gapLabel(projection.carBehind)} ahead #${projection.carBehind.carNumber}` : 'no car behind';
-  return `${position} · ${behind} · ${ahead}`;
+  const label = `${position} · ${behind} · ${ahead}`;
+  return projection.provisional ? `FCY gaps stabilizing · ${label}` : label;
 }
 
 // Renders pit window status, required-stop progress, next allowed pit time, and
 // after-pit class projection. All rule calculations come from pitstopPlanner.
 function renderPitstopPlan(plan) {
   const pitWindow = document.querySelector('.pit-window');
+  if ($('open-pit-setup')) {
+    $('open-pit-setup').disabled = pitSetupLocked();
+    $('open-pit-setup').title = pitSetupLocked() ? 'Stop live collection before changing fixed pitstop setup' : '';
+  }
   if (!plan) {
     setText('pit-status', 'Waiting');
     setText('pit-next', '—');
@@ -531,7 +620,9 @@ function renderPitstopPlan(plan) {
     Number.isFinite(plan.clock?.remainingMs) ? `remaining ${pitstopPlanner.formatDuration(plan.clock.remainingMs)}` : '',
     Number.isFinite(plan.totalPitStops) && plan.totalPitStops !== plan.completedPitStops ? `total pits ${plan.totalPitStops}, valid ${plan.completedPitStops}` : '',
     Number.isFinite(plan.mustPitSoonMs) ? `latest safe stop in ${pitstopPlanner.formatDuration(plan.mustPitSoonMs)}` : '',
-    `pit loss ${pitstopPlanner.formatDuration(plan.rules?.pitStopDurationMs)}`
+    Number.isFinite(plan.pitLoss?.pitLossMs)
+      ? `${plan.pitLoss?.active ? 'FCY net pit loss' : 'pit loss'} ${pitstopPlanner.formatDuration(plan.pitLoss.pitLossMs)}`
+      : plan.pitLoss?.reason || ''
   ].filter(Boolean);
   setText('pit-detail', detailParts.join(' · '));
 
@@ -691,6 +782,7 @@ async function saveSettingsFromInputs(setupComplete = false) {
     comparisonCar: $('comparison-car')?.value.trim() || '',
     referenceTimes: activeReferenceTimes,
     referenceTimesByMode,
+    pitCircuitId: $('pit-circuit')?.value || currentSettings?.pitCircuitId || 'zolder',
     storageFolder: $('storage-folder').value.trim(),
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     pitRules: pitRulesFromInputs()
@@ -830,6 +922,7 @@ function setupDetailTabs() {
 // preload API, subscribes to collector updates, and opens setup when required.
 async function init() {
   currentSettings = await window.liveTiming.getSettings();
+  applyTheme(currentSettings.theme);
   configuredFollowedCars = normalizedCarList(currentSettings.followedCars, currentSettings.followedCar || '33');
   $('timing-url').value = currentSettings.timingUrl || 'https://livetiming.getraceresults.com/demo#screen-results';
   $('followed-car').value = fixedDashboardCar || currentSettings.followedCar || '33';
@@ -838,6 +931,8 @@ async function init() {
   if ($('comparison-car')) $('comparison-car').value = currentSettings.comparisonCar || '';
   syncReferenceInputs(currentSettings);
   syncSessionMode(currentSettings.sessionMode || 'race');
+  populatePitstopCircuits();
+  if ($('pit-circuit')) $('pit-circuit').value = currentSettings.pitCircuitId || currentSettings.pitRules?.circuitId || 'zolder';
   if ($('pit-duration')) $('pit-duration').value = String(Math.round((currentSettings.pitRules?.pitStopDurationMs || 75000) / 1000));
   if ($('pit-required-input')) $('pit-required-input').value = String(currentSettings.pitRules?.requiredPitStops ?? 2);
   if ($('pit-race-hours')) $('pit-race-hours').value = String((currentSettings.pitRules?.raceDurationMs || 86400000) / 3600000);
@@ -851,6 +946,7 @@ async function init() {
   $('stop')?.addEventListener('click', () => window.liveTiming.stopCollector());
   $('show-live')?.addEventListener('click', () => window.liveTiming.openLiveWindow());
   $('open-graphs')?.addEventListener('click', () => window.liveTiming.openGraphsWindow(activeCarNumber()));
+  $('theme-toggle')?.addEventListener('click', toggleTheme);
   $('choose-folder')?.addEventListener('click', async () => { await chooseAndSetFolder('storage-folder'); await saveSettingsFromInputs(); });
   $('setup-choose-folder')?.addEventListener('click', async () => { await chooseAndSetFolder('setup-folder'); });
   $('setup-add-car')?.addEventListener('click', () => {
@@ -862,6 +958,16 @@ async function init() {
   });
   $('setup-car')?.addEventListener('input', () => { configuredFollowedCars[0] = $('setup-car').value; });
   $('setup-save')?.addEventListener('click', async () => { syncMainFromSetup(); await saveSettingsFromInputs(true); showSetup(false); render(currentState || await window.liveTiming.getCollectorState()); });
+  $('open-pit-setup')?.addEventListener('click', () => showPitSetup(true));
+  $('pit-setup-cancel')?.addEventListener('click', () => showPitSetup(false));
+  $('pit-circuit')?.addEventListener('change', applyPitCircuitDefaults);
+  ['pit-distance-meters', 'pit-fcy-speed'].forEach((id) => $(id)?.addEventListener('input', updatePitDistanceNote));
+  $('pit-setup-save')?.addEventListener('click', async () => {
+    if (pitSetupLocked()) return;
+    await saveSettingsFromInputs();
+    showPitSetup(false);
+    render(currentState);
+  });
   $('open-setup')?.addEventListener('click', () => showSetup(true));
   $('export')?.addEventListener('click', async () => { const result = await window.liveTiming.exportCurrent(); alert(`Exported:\n${result.csvPath}\n${result.jsonPath}\n${result.historyPath || ''}`); });
 
@@ -869,8 +975,11 @@ async function init() {
   // added to the modal, include their hidden input IDs here.
   ['timing-url','followed-car','poll-interval'].forEach((id) => $(id)?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); }));
   $('comparison-car')?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); });
-  ['pit-duration','pit-required-input','pit-race-hours'].forEach((id) => $(id)?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); }));
+  $('pit-duration')?.addEventListener('change', async () => { await saveSettingsFromInputs(); render(currentState); });
   document.querySelectorAll('.edit-ref').forEach((button) => button.addEventListener('click', () => editReferenceTime(button)));
+  window.liveTiming.onThemeUpdate?.((theme) => {
+    currentSettings = { ...currentSettings, theme: applyTheme(theme) };
+  });
   window.liveTiming.onCollectorUpdate(render);
   render(await window.liveTiming.getCollectorState());
   if (!currentSettings.setupComplete || !currentSettings.storageFolder) showSetup(true);

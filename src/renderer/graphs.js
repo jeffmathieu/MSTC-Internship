@@ -9,6 +9,20 @@ let followedCarNumber = '';
 let sessionMode = 'race';
 let resizeTimer = null;
 
+function themeColor(variable, fallback) {
+  const styles = typeof window.getComputedStyle === 'function'
+    ? window.getComputedStyle(document.documentElement)
+    : null;
+  const value = styles?.getPropertyValue(variable).trim();
+  return value || fallback;
+}
+
+function applyGraphTheme(theme) {
+  const normalized = theme === 'dark' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', normalized);
+  document.body.setAttribute('data-theme', normalized);
+}
+
 function formatTime(ms) {
   if (!Number.isFinite(ms)) return '—';
   const rounded = Math.max(0, Math.round(ms));
@@ -28,7 +42,7 @@ function chartHasData(chart) {
 }
 
 function colorForSeries(series, index) {
-  if (series.highlight) return '#171717';
+  if (series.highlight) return themeColor('--ink', '#171717');
   return GRAPH_COLORS[index % GRAPH_COLORS.length];
 }
 
@@ -51,12 +65,12 @@ function drawAxes(context, bounds, yMin, yMax, yFormat) {
     const ratio = index / 4;
     const y = bottom - ratio * (bottom - top);
     const value = yMin + ratio * (yMax - yMin);
-    context.strokeStyle = index === 0 ? '#777771' : '#e1e1dc';
+    context.strokeStyle = index === 0 ? themeColor('--axis', '#777771') : themeColor('--grid', '#e1e1dc');
     context.beginPath();
     context.moveTo(left, y);
     context.lineTo(right, y);
     context.stroke();
-    context.fillStyle = '#686864';
+    context.fillStyle = themeColor('--muted', '#686864');
     context.textAlign = 'right';
     context.fillText(yFormat === 'time' ? formatTime(value) : String(Math.round(value)), left - 7, y);
   }
@@ -111,7 +125,7 @@ function drawLineChart(context, width, height, chart, viewport = { start: 0, end
       const x = xAt(point.x);
       const y = Math.max(bounds.top, Math.min(bounds.bottom, yAt(point.y)));
       const neutralized = point.eligible === false;
-      context.fillStyle = neutralized ? '#9a9a94' : color;
+      context.fillStyle = neutralized ? themeColor('--neutral-series', '#9a9a94') : color;
       context.beginPath();
       context.arc(x, y, series.highlight ? 4 : 3, 0, Math.PI * 2);
       context.fill();
@@ -119,7 +133,7 @@ function drawLineChart(context, width, height, chart, viewport = { start: 0, end
     });
   });
 
-  context.fillStyle = '#686864';
+  context.fillStyle = themeColor('--muted', '#686864');
   context.font = '700 10px system-ui';
   context.textBaseline = 'top';
   context.textAlign = 'left';
@@ -154,7 +168,7 @@ function drawBarChart(context, width, height, chart) {
       context.globalAlpha = 1;
       hitPoints.push({ x: x + barWidth / 2, y, radius: Math.max(7, barWidth / 2), text: `${category} · ${series.name} · ${formatTime(value)}` });
     });
-    context.fillStyle = '#686864';
+    context.fillStyle = themeColor('--muted', '#686864');
     context.font = '700 9px system-ui';
     context.textAlign = 'center';
     context.textBaseline = 'top';
@@ -243,6 +257,7 @@ function renderGraphs(state) {
 
 async function initGraphs() {
   const settings = await window.liveTiming.getSettings();
+  applyGraphTheme(settings.theme);
   sessionMode = settings.sessionMode || 'race';
   const queryCar = new URLSearchParams(window.location.search).get('car');
   followedCarNumber = String(queryCar || settings.followedCar || '');
@@ -283,6 +298,10 @@ async function initGraphs() {
     }, { passive: false });
   });
   window.liveTiming.onCollectorUpdate(renderGraphs);
+  window.liveTiming.onThemeUpdate?.((theme) => {
+    applyGraphTheme(theme);
+    renderGraphs(currentState);
+  });
   renderGraphs(await window.liveTiming.getCollectorState());
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);

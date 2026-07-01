@@ -16,7 +16,12 @@ const DEFAULT_RULES = {
   pitStopDurationMs: 75 * 1000,
   requiredPitStops: 2,
   nearWindowLaps: 2,
-  averageLapMs: null
+  averageLapMs: null,
+  circuitId: 'zolder',
+  regularTrackDistanceMeters: null,
+  fcySpeedKph: 60,
+  fcyStablePollsRequired: 3,
+  fcyMinimumAgeMs: 15 * 1000
 };
 
 // Converts optional numeric inputs into a real number or null. Most planner
@@ -47,6 +52,7 @@ function positiveNumber(value, fallback) {
 // mandatory stop count, or minimum pit loss.
 function normalizeRules(rules = {}) {
   const merged = { ...DEFAULT_RULES, ...rules };
+  const configuredFcySpeedKph = numberOrNull(merged.fcySpeedKph);
   return {
     raceDurationMs: positiveNumber(merged.raceDurationMs, DEFAULT_RULES.raceDurationMs),
     pitClosedStartMs: positiveNumber(merged.pitClosedStartMs, DEFAULT_RULES.pitClosedStartMs),
@@ -55,7 +61,113 @@ function normalizeRules(rules = {}) {
     pitStopDurationMs: positiveNumber(merged.pitStopDurationMs, DEFAULT_RULES.pitStopDurationMs),
     requiredPitStops: Math.max(0, Math.floor(positiveNumber(merged.requiredPitStops, DEFAULT_RULES.requiredPitStops))),
     nearWindowLaps: Math.max(0, Math.floor(positiveNumber(merged.nearWindowLaps, DEFAULT_RULES.nearWindowLaps))),
-    averageLapMs: numberOrNull(merged.averageLapMs)
+    averageLapMs: numberOrNull(merged.averageLapMs),
+    circuitId: String(merged.circuitId || DEFAULT_RULES.circuitId),
+    regularTrackDistanceMeters: numberOrNull(merged.regularTrackDistanceMeters),
+    // Zero cannot be accepted here because FCY travel time divides by speed.
+    fcySpeedKph: configuredFcySpeedKph !== null && configuredFcySpeedKph > 0
+      ? configuredFcySpeedKph
+      : DEFAULT_RULES.fcySpeedKph,
+    fcyStablePollsRequired: Math.max(1, Math.floor(positiveNumber(merged.fcyStablePollsRequired, DEFAULT_RULES.fcyStablePollsRequired))),
+    fcyMinimumAgeMs: positiveNumber(merged.fcyMinimumAgeMs, DEFAULT_RULES.fcyMinimumAgeMs)
+  };
+}
+
+function isFcySession(session = {}) {
+  const flag = String(session.flag || session.sessionFlag || session.raceControl || '').toLowerCase();
+  return /full\s*course\s*yellow|\bfcy\b/.test(flag);
+}
+
+// Produces compact signatures from timing rows. Gap stability alone is not
+// enough because three polls may repeat stale webpage data; a changed lap,
+// sector, or last-lap value proves that at least one new timing passage arrived.
+function fcyRowSignatures(rows = []) {
+  const ordered = overallSortedRows(rows);
+  return {
+    gap: ordered.map((row) => `${row.carNumber}:${row.interval ?? row.diff ?? row.gap ?? ''}`).join('|'),
+    timing: ordered.map((row) => `${row.carNumber}:${row.lapNumber ?? ''}:${row.sector1 ?? ''}:${row.sector2 ?? ''}:${row.sector3 ?? ''}:${row.lastLap ?? ''}`).join('|')
+  };
+}
+
+// Tracks whether FCY intervals have had time to refresh and stabilize. Main.js
+// stores this small state between polls; the function remains pure and directly
+// testable. A prediction may still be shown while status is "stabilizing", but
+// callers must label it provisional.
+function nextFcyGapState({ previous = {}, session = {}, rows = [], collectedAt = '', rules = {} } = {}) {
+  const normalized = normalizeRules(rules);
+  const signatures = fcyRowSignatures(rows);
+  const active = isFcySession(session);
+  const nowMs = Number.isFinite(Date.parse(collectedAt)) ? Date.parse(collectedAt) : Date.now();
+  if (!active) {
+    return {
+      active: false,
+      status: 'green',
+      ready: false,
+      startedAtMs: null,
+      stablePolls: 0,
+      freshTimingObserved: false,
+      lastGapSignature: signatures.gap,
+      lastTimingSignature: signatures.timing
+    };
+  }
+
+  const justStarted = previous.active !== true;
+  const startedAtMs = justStarted ? nowMs : (numberOrNull(previous.startedAtMs) ?? nowMs);
+  const sameGap = !justStarted && signatures.gap !== '' && signatures.gap === previous.lastGapSignature;
+  const stablePolls = sameGap ? (Number(previous.stablePolls) || 0) + 1 : 0;
+  const freshTimingObserved = Boolean(previous.freshTimingObserved)
+    || signatures.timing !== String(previous.lastTimingSignature || '');
+  const ageMs = Math.max(0, nowMs - startedAtMs);
+  const ready = freshTimingObserved
+    && ageMs >= normalized.fcyMinimumAgeMs
+    && stablePolls >= normalized.fcyStablePollsRequired;
+
+  return {
+    active: true,
+    status: ready ? 'ready' : 'stabilizing',
+    ready,
+    startedAtMs,
+    ageMs,
+    stablePolls,
+    freshTimingObserved,
+    lastGapSignature: signatures.gap,
+    lastTimingSignature: signatures.timing
+  };
+}
+
+// Calculates only the time lost relative to a non-pitting car. The dashboard's
+// pit time is measured pit-in to pit-out; under FCY we subtract the time another
+// car spends on the regular track between those exact reference points.
+function pitLossForSession({ session = {}, rules = {}, fcyGapState = {} } = {}) {
+  const normalized = normalizeRules(rules);
+  if (!isFcySession(session)) {
+    return { active: false, status: 'green', reliable: true, pitLossMs: normalized.pitStopDurationMs };
+  }
+
+  const distanceMeters = numberOrNull(normalized.regularTrackDistanceMeters);
+  if (!(distanceMeters > 0)) {
+    return {
+      active: true,
+      status: 'missing-distance',
+      reliable: false,
+      pitLossMs: null,
+      circuitId: normalized.circuitId,
+      reason: `Regular-track pit distance is not configured for ${normalized.circuitId}`
+    };
+  }
+  // Store strategy times at millisecond precision, matching every other timing
+  // value in the app and avoiding floating-point tails such as 29999.999999.
+  const regularTrackTravelMs = Math.round((distanceMeters / (normalized.fcySpeedKph / 3.6)) * 1000);
+  return {
+    active: true,
+    status: fcyGapState.ready ? 'ready' : 'stabilizing',
+    reliable: Boolean(fcyGapState.ready),
+    provisional: !fcyGapState.ready,
+    circuitId: normalized.circuitId,
+    regularTrackDistanceMeters: distanceMeters,
+    fcySpeedKph: normalized.fcySpeedKph,
+    regularTrackTravelMs,
+    pitLossMs: normalized.pitStopDurationMs - regularTrackTravelMs
   };
 }
 
@@ -303,10 +415,21 @@ function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) 
   const averageLapMs = estimateAverageLapMs(rowsInClass, options.averageLapMs);
   const overallBehind = overallGapsBehindFollowed(rows, followedCarNumber, averageLapMs);
   const classBehind = overallBehind.filter((item) => item.row.className === followed.className);
+  const followedLap = lapNumber(followed);
   if (Number.isFinite(pitLossMs) && classBehind.length) {
-    const passedClassCars = classBehind.filter((item) => item.gapFromFollowedMs <= pitLossMs);
+    // A numeric DIFF must never make a lapped car pass us in classification.
+    // Some feeds expose a physical interval alongside INT=5L; only same-lap
+    // rivals can be consumed directly by a sub-lap pit loss.
+    const sameLapClassBehind = classBehind.filter((item) => {
+      const candidateLap = lapNumber(item.row);
+      return !Number.isFinite(followedLap) || !Number.isFinite(candidateLap) || candidateLap === followedLap;
+    });
+    const passedClassCars = sameLapClassBehind.filter((item) => item.gapFromFollowedMs <= pitLossMs);
     const carAheadEntry = passedClassCars.at(-1) || null;
-    const carBehindEntry = classBehind.find((item) => item.gapFromFollowedMs > pitLossMs) || null;
+    const carBehindEntry = sameLapClassBehind.find((item) => item.gapFromFollowedMs > pitLossMs) || null;
+    const nearestLappedBehind = !carBehindEntry
+      ? classBehind.find((item) => Number.isFinite(lapNumber(item.row)) && Number.isFinite(followedLap) && lapNumber(item.row) < followedLap)
+      : null;
     const currentClassPosition = Number(followed.classPosition);
     const projectedClassPosition = Number.isFinite(currentClassPosition)
       ? currentClassPosition + passedClassCars.length
@@ -325,19 +448,24 @@ function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) 
         projectedGapToUsMs: carAheadEntry.gapFromFollowedMs - pitLossMs,
         isOurCar: false
       } : null,
-      carBehind: carBehindEntry ? {
-        carNumber: String(carBehindEntry.row.carNumber),
-        team: carBehindEntry.row.team || '',
-        driver: carBehindEntry.row.driver || '',
-        currentClassPosition: carBehindEntry.row.classPosition || null,
-        lapDeltaToUs: Number.isFinite(lapNumber(carBehindEntry.row)) && Number.isFinite(lapNumber(followed)) ? lapNumber(carBehindEntry.row) - lapNumber(followed) : null,
-        projectedGapToUsMs: carBehindEntry.gapFromFollowedMs - pitLossMs,
+      carBehind: (carBehindEntry || nearestLappedBehind) ? {
+        carNumber: String((carBehindEntry || nearestLappedBehind).row.carNumber),
+        team: (carBehindEntry || nearestLappedBehind).row.team || '',
+        driver: (carBehindEntry || nearestLappedBehind).row.driver || '',
+        currentClassPosition: (carBehindEntry || nearestLappedBehind).row.classPosition || null,
+        lapDeltaToUs: Number.isFinite(lapNumber((carBehindEntry || nearestLappedBehind).row)) && Number.isFinite(followedLap) ? lapNumber((carBehindEntry || nearestLappedBehind).row) - followedLap : null,
+        projectedGapToUsMs: carBehindEntry
+          ? carBehindEntry.gapFromFollowedMs - pitLossMs
+          : Number.isFinite(averageLapMs)
+            ? ((followedLap - lapNumber(nearestLappedBehind.row)) * averageLapMs) - pitLossMs
+            : null,
+        estimatedFromLapGap: Boolean(nearestLappedBehind),
         isOurCar: false
       } : null,
       items: [
         ...passedClassCars.map((item) => ({ carNumber: String(item.row.carNumber), projectedGapToUsMs: item.gapFromFollowedMs - pitLossMs, isOurCar: false })),
         { carNumber: String(followedCarNumber), projectedGapToUsMs: 0, isOurCar: true },
-        ...classBehind.filter((item) => item.gapFromFollowedMs > pitLossMs).map((item) => ({ carNumber: String(item.row.carNumber), projectedGapToUsMs: item.gapFromFollowedMs - pitLossMs, isOurCar: false }))
+        ...sameLapClassBehind.filter((item) => item.gapFromFollowedMs > pitLossMs).map((item) => ({ carNumber: String(item.row.carNumber), projectedGapToUsMs: item.gapFromFollowedMs - pitLossMs, isOurCar: false }))
       ]
     };
   }
@@ -435,7 +563,7 @@ function latestSafePitElapsedMsForRemainingStops({ clock, rules, pitState = {} }
 // Produces the full dashboard-facing pitstop object. Callers pass live rows,
 // session clock, current pit state, and rules; the returned object contains all
 // status labels, required-stop counts, timing windows, and after-pit projection.
-function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pitState = {}, rules = {} } = {}) {
+function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pitState = {}, rules = {}, fcyGapState = {} } = {}) {
   const normalizedRules = normalizeRules(rules);
   const clock = raceClockFromSession(session, normalizedRules);
   const windowState = timeUntilNextAllowedPit({ clock, rules: normalizedRules, pitState });
@@ -448,7 +576,10 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
   const latestSafePitElapsedMs = latestSafePitElapsedMsForRemainingStops({ clock, rules: normalizedRules, pitState });
   const mustPitSoonMs = latestSafePitElapsedMs !== null && clock.elapsedMs !== null ? latestSafePitElapsedMs - clock.elapsedMs : null;
   const isStrategyUrgent = remainingRequiredStops > 0 && Number.isFinite(mustPitSoonMs) && mustPitSoonMs <= 0;
-  const projection = projectClassAfterPit(rows, followedCarNumber, normalizedRules.pitStopDurationMs, { averageLapMs });
+  const pitLoss = pitLossForSession({ session, rules: normalizedRules, fcyGapState });
+  const projection = Number.isFinite(pitLoss.pitLossMs)
+    ? { ...projectClassAfterPit(rows, followedCarNumber, pitLoss.pitLossMs, { averageLapMs }), provisional: pitLoss.provisional, fcyStatus: pitLoss.status }
+    : { available: false, reason: pitLoss.reason, items: [], fcyStatus: pitLoss.status };
 
   let status = 'unknown';
   if (isStrategyUrgent) status = 'urgent';
@@ -479,7 +610,9 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
     remainingRequiredStops,
     latestSafePitElapsedMs,
     mustPitSoonMs,
-    projection
+    projection,
+    pitLoss,
+    fcyGapState
   };
 }
 
@@ -493,6 +626,10 @@ return {
   nextPitStateFromRow,
   estimateAverageLapMs,
   raceClockFromSession,
+  isFcySession,
+  fcyRowSignatures,
+  nextFcyGapState,
+  pitLossForSession,
   projectClassAfterPit,
   timeUntilNextAllowedPit,
   latestSafePitElapsedMsForRemainingStops,

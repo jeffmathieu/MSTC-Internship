@@ -110,6 +110,10 @@ Stored data can include:
 
 The app calculates race-engineering summaries from the stored lap history.
 
+1. live timing URL, for example `https://livetiming.getraceresults.com/demo#screen-results`
+2. one to three car numbers to follow, with the `+` button adding another dashboard
+3. session mode: Race, Practice, or Qualifying
+4. a dedicated folder for this race session
 Examples:
 
 - average lap pace
@@ -123,6 +127,45 @@ Examples:
 
 ### Neutralized-lap handling
 
+The **Pitstop setup** button contains fixed pre-race information: total race
+duration, mandatory pitstop count, and the circuit/pit formation. These values
+are locked while live collection is active. The pit-in to pit-out duration stays
+on the dashboard because service type and driver changes can alter it during a
+race.
+
+FCY pit loss uses the selected layout's regular-track distance between pit-in
+and pit-out. Circuit distances and FCY speeds are maintained centrally in
+`src/shared/pitstopCircuits.js`. Selecting a layout fills these defaults into
+the Pitstop setup, where distance and speed can be overridden for race-specific
+rules without modifying the central profile. If a future layout has no distance yet, the app
+shows that configuration is missing instead of calculating a false rejoin
+position. After FCY starts, predictions remain marked as provisional until a
+fresh timing passage and stable gaps have been observed.
+
+## Light and dark themes
+
+Use the moon/sun button in the top information bar to switch themes. The choice
+is saved and synchronized across the main dashboard, extra car dashboards, and
+graph windows.
+
+All dashboard colors are grouped in the two variable blocks at the top of
+`src/renderer/styles.css`. Graph-window colors use the matching blocks at the
+top of `src/renderer/graphs.css`. Edit the `:root` block for light mode and the
+`:root[data-theme="dark"]` block for dark mode; component CSS does not need to
+change.
+
+## Data storage
+
+Create and select one dedicated folder for each race, qualifying, or practice
+session. The app writes directly into that selected folder and does not create
+an automatic timestamp subfolder when **Start live** is pressed.
+
+If the app closes or crashes, reopen it with the same session folder and press
+**Start live** again. Existing `lap_history.jsonl` data is loaded first, its lap
+identities rebuild the duplicate guard, and collection continues by appending
+only newly completed laps. The latest stored pit state is restored as well, so
+valid-stop counts and an active post-stop cooldown survive the restart. Select
+a new empty folder when starting a genuinely new timing session.
 Laps driven under safety car, full course yellow, code 60, yellow flags, or similar neutralized conditions are still stored as part of the session history.
 
 However, they can be excluded from pace averages where appropriate.

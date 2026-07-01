@@ -16,6 +16,13 @@ contextBridge.exposeInMainWorld('liveTiming', {
   openLiveWindow: () => ipcRenderer.invoke('collector:openLiveWindow'),
   openGraphsWindow: (carNumber) => ipcRenderer.invoke('graphs:open', carNumber),
 
+  // Keeps every open dashboard and graph window on the same saved theme.
+  onThemeUpdate: (callback) => {
+    const listener = (_event, theme) => callback(theme);
+    ipcRenderer.on('theme:update', listener);
+    return () => ipcRenderer.removeListener('theme:update', listener);
+  },
+
   // Creates timestamped export files from the current main-process state.
   exportCurrent: () => ipcRenderer.invoke('export:current'),
 

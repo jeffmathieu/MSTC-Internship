@@ -144,6 +144,8 @@ function createFakeDocument() {
 
   return {
     elements,
+    documentElement: new FakeElement('html', 'html'),
+    body: new FakeElement('body', 'body'),
     getElementById: byId,
     createElement: (tagName) => new FakeElement('', tagName),
     querySelector: (selector) => tableBodies.has(selector) ? tableBodies.get(selector) : null,
@@ -154,6 +156,9 @@ function createFakeDocument() {
 // Settings and collector states below model one normal dashboard update: initial
 // blank analytics, then a live update with sectors, comparisons, and pit data.
 const settings = {
+  theme: 'light',
+  pitCircuitId: 'zolder',
+  pitRules: { raceDurationMs: 4 * 60 * 60 * 1000, requiredPitStops: 2, pitStopDurationMs: 75000, circuitId: 'zolder' },
   timingUrl: 'https://example.com/live',
   followedCar: '13',
   followedCars: ['13'],
@@ -268,6 +273,7 @@ let collectorUpdate = null;
 let lastSettingsPatch = null;
 let graphsOpenCount = 0;
 let lastGraphsCar = null;
+let themeUpdate = null;
 const liveTiming = {
   getSettings: async () => settings,
   setSettings: async (patch) => {
@@ -281,12 +287,13 @@ const liveTiming = {
   getCollectorState: async () => initialState,
   openLiveWindow: async () => true,
   openGraphsWindow: async (carNumber) => { graphsOpenCount += 1; lastGraphsCar = carNumber; return true; },
+  onThemeUpdate: (callback) => { themeUpdate = callback; return () => {}; },
   exportCurrent: async () => ({ csvPath: 'rows.csv', jsonPath: 'rows.json', historyPath: 'history.json' }),
   onCollectorUpdate: (callback) => { collectorUpdate = callback; return () => {}; }
 };
 
 const context = {
-  window: { location: { search: '' }, liveTiming, classBattle: {}, lapAnalytics: {}, pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
+  window: { location: { search: '' }, liveTiming, classBattle: {}, lapAnalytics: {}, pitstopCircuits: require('../src/shared/pitstopCircuits'), pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
   document,
   URLSearchParams,
   console,
@@ -322,6 +329,18 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('best-sector-1').textContent, '—');
   assert.strictEqual(document.getElementById('ideal-time').textContent, '—');
   assert.notStrictEqual(document.getElementById('best-sector-1').textContent, '0:00.000');
+  assert.strictEqual(document.body.attributes['data-theme'], 'light');
+  assert.strictEqual(document.getElementById('theme-toggle').textContent, '☾');
+
+  await document.getElementById('theme-toggle').trigger('click');
+  await flushAsync();
+  assert.strictEqual(lastSettingsPatch.theme, 'dark', 'theme toggle persists dark mode');
+  assert.strictEqual(document.body.attributes['data-theme'], 'dark');
+  assert.strictEqual(document.getElementById('theme-toggle').textContent, '☀');
+  assert.strictEqual(document.getElementById('theme-toggle').attributes['aria-label'], 'Switch to light mode');
+  themeUpdate('light');
+  assert.strictEqual(document.body.attributes['data-theme'], 'light', 'theme updates synchronize open windows');
+  assert.strictEqual(document.getElementById('theme-toggle').textContent, '☾');
 
   assert.ok(collectorUpdate, 'renderer subscribes to collector updates');
   collectorUpdate(updatedState);
@@ -376,6 +395,37 @@ module.exports = (async () => {
   await document.getElementById('open-graphs').trigger('click');
   assert.strictEqual(graphsOpenCount, 1, 'graph icon opens the detachable graphs window');
   assert.strictEqual(lastGraphsCar, '13', 'graph window follows the car displayed by this dashboard');
+
+  await document.getElementById('open-pit-setup').trigger('click');
+  assert.strictEqual(document.getElementById('pit-setup-modal').classList.contains('hidden'), false);
+  assert.strictEqual(document.getElementById('pit-circuit').children.length, 5, 'all supported pit formations appear in the dropdown');
+  document.getElementById('pit-race-hours').value = '6';
+  document.getElementById('pit-required-input').value = '3';
+  document.getElementById('pit-circuit').value = 'spa-f1';
+  await document.getElementById('pit-circuit').trigger('change');
+  assert.strictEqual(document.getElementById('pit-distance-meters').value, '650');
+  assert.strictEqual(document.getElementById('pit-fcy-speed').value, '60');
+  assert.ok(document.getElementById('pit-distance-note').textContent.includes('39.0s'));
+  document.getElementById('pit-distance-meters').value = '700';
+  document.getElementById('pit-fcy-speed').value = '70';
+  await document.getElementById('pit-fcy-speed').trigger('input');
+  assert.ok(document.getElementById('pit-distance-note').textContent.includes('36.0s'));
+  await document.getElementById('pit-setup-save').trigger('click');
+  await flushAsync();
+  assert.strictEqual(lastSettingsPatch.pitCircuitId, 'spa-f1');
+  assert.strictEqual(lastSettingsPatch.pitRules.raceDurationMs, 6 * 60 * 60 * 1000);
+  assert.strictEqual(lastSettingsPatch.pitRules.requiredPitStops, 3);
+  assert.strictEqual(lastSettingsPatch.pitRules.regularTrackDistanceMeters, 700);
+  assert.strictEqual(lastSettingsPatch.pitRules.fcySpeedKph, 70);
+  assert.strictEqual(document.getElementById('pit-setup-modal').classList.contains('hidden'), true);
+
+  collectorUpdate({ ...updatedState, mode: 'live', status: 'collecting' });
+  await flushAsync();
+  assert.strictEqual(document.getElementById('open-pit-setup').disabled, true, 'fixed pit setup locks during live collection');
+  await document.getElementById('open-pit-setup').trigger('click');
+  assert.strictEqual(document.getElementById('pit-setup-modal').classList.contains('hidden'), true);
+  collectorUpdate(updatedState);
+  await flushAsync();
 
   await document.getElementById('setup-add-car').trigger('click');
   const extraCars = document.getElementById('setup-extra-cars');
