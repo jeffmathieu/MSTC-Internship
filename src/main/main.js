@@ -37,6 +37,7 @@ const { buildAdjacentClassBattles } = require('../shared/classBattle');
 const { normalizeMode, buildComparisonView, qualifyingAdjacentView } = require('../shared/sessionMode');
 const { resolveSessionFolder, loadSessionHistory, loadStoredJson } = require('../shared/storageSession');
 const { setupAutoUpdates } = require('./autoUpdater');
+const { setupAppLifecycle } = require('./appLifecycle');
 
 // Main-process references. Electron keeps UI windows and timers alive through
 // these variables, so every start/stop function below updates them carefully.
@@ -46,6 +47,17 @@ const additionalDashboardWindows = new Map();
 const graphWindowsByCar = new Map();
 let pollTimer;
 let shouldCloseLiveWindow = false;
+
+// A real application quit must bypass the hidden live window's normal
+// close-to-hide behavior and stop the polling timer before Electron exits.
+const appLifecycle = setupAppLifecycle({
+  app,
+  onBeforeQuit: () => {
+    shouldCloseLiveWindow = true;
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = null;
+  }
+});
 
 // Stores unique lap identifiers that have already been written to disk.
 // Change the key format in updateLapHistory/loadExistingHistory if duplicate
@@ -192,6 +204,7 @@ function createMainWindow() {
       sandbox: false
     }
   });
+  appLifecycle.attachMainWindow(mainWindow);
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
 
@@ -1018,8 +1031,8 @@ ipcMain.handle('export:current', async () => {
   return { jsonPath, csvPath, historyPath };
 });
 
-// Electron app lifecycle. On macOS the app remains open after all windows close,
-// matching normal platform behavior; other platforms quit immediately.
+// Electron app startup. Shutdown behavior is registered through appLifecycle
+// above so it is consistent on macOS, Windows, and Linux.
 app.whenReady().then(() => {
   createMainWindow();
   syncAdditionalDashboardWindows(loadSettings());
@@ -1031,4 +1044,3 @@ app.whenReady().then(() => {
     }
   });
 });
-app.on('window-all-closed', () => { stopCollector(true); if (process.platform !== 'darwin') app.quit(); });
