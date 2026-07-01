@@ -1,52 +1,131 @@
-# Zolder Race Engineer Dashboard
+# MSTC Race Engineer Dashboard
 
-This is a local desktop dashboard for GetRaceResults / Circuit Zolder live timing. It reads the rendered live timing table, stores completed laps, and shows a race-engineer style layout based on the sketch:
+MSTC Race Engineer Dashboard is a local desktop application for motorsport live timing analysis.  
+It is built with Electron and is designed to support race engineers during live sessions by reading online timing data, storing completed laps, and turning that data into practical race, qualifying, and practice insights.
 
-- left top: session and followed-car information
-- left middle: same-class mini timing table with catch estimates
-- right top: settings, status and controls
-- lower details: full timing rows, stored laps and parser debug
+The app was developed for GetRaceResults / Circuit Zolder live timing, but the internal parser and debug output are structured so timing-page changes can be inspected and fixed more easily.
 
-## Run during development
+---
 
-```bash
-npm install
-npm run dev
-```
+## What does it do?
 
-## Download / Install
+The dashboard reads a live timing page, follows one or more selected cars, stores lap history locally, and shows race-engineering information such as:
 
-Download the newest version from the repository's **GitHub Releases** page.
+- current session information
+- followed-car status
+- same-class timing comparison
+- lap history
+- pace analysis
+- catch estimates
+- pitstop planning
+- qualifying comparisons
+- parser/debug information
 
-- **Windows:** download and run the `MSTC Race Engineer Dashboard Setup ... .exe` installer.
-- **macOS:** download and open the `.dmg`, then drag the app to Applications.
+The goal is to give a clearer overview than a normal live timing table by combining raw timing data with practical race-engineering calculations.
 
-Installed builds check GitHub Releases for newer versions when the app starts.
-Development runs started with `npm start` or `npm run dev` never check for
-updates. When an update has downloaded, the app asks whether to restart and
-install immediately or continue working and install later.
+---
 
-## First launch
+## Main features
 
-The app opens a setup screen where you choose:
+### Live timing dashboard
+
+- Reads a GetRaceResults live timing URL.
+- Displays the current live timing table.
+- Tracks the selected car or cars.
+- Shows session information and followed-car information.
+- Updates automatically while the session is running.
+
+### Follow up to three cars
+
+- Follow one, two, or three car numbers at the same time.
+- The first car uses the main dashboard.
+- Additional cars open in separate dashboard windows.
+- All dashboards share the same timing-page polling and lap-history data, so the app does not fetch the website multiple times unnecessarily.
+
+### Session modes
+
+The app supports different analysis modes depending on the type of session.
+
+#### Race mode
+
+Race mode focuses on race-engineering decisions:
+
+- pitstop strategy
+- recent pace comparison
+- catch estimates
+- same-class battle information
+- race history tracking
+- neutralized-lap handling
+
+#### Practice mode
+
+Practice mode focuses more on pace and reference comparisons:
+
+- norm-time comparison
+- pace comparison
+- lap and sector analysis
+- no race-specific pit/catch strategy view
+
+#### Qualifying mode
+
+Qualifying mode focuses on best-lap and flying-lap performance:
+
+- best lap comparison
+- latest valid flying lap comparison
+- team-driver comparison
+- BIC / XIC comparison
+- adjacent class-car comparison
+
+Each mode keeps its own reference lap and sector-time settings, so switching modes does not overwrite the reference values from another mode.
+
+### Same-class race overview
+
+The dashboard includes a same-class mini timing table that helps compare the followed car against relevant competitors.
+
+It can show:
+
+- nearby same-class cars
+- class position context
+- gap information
+- catch estimates
+- recent pace differences
+
+### Lap history storage
+
+Every completed lap is stored locally. The app avoids duplicate lap entries even when the live timing page is polled repeatedly.
+
+Stored data can include:
+
+- car number
+- class
+- driver
+- lap time
+- sector times
+- best lap
+- gaps
+- session metadata
+- flags or neutralized-session markers
+
+### Pace and sector analysis
+
+The app calculates race-engineering summaries from the stored lap history.
 
 1. live timing URL, for example `https://livetiming.getraceresults.com/demo#screen-results`
 2. one to three car numbers to follow, with the `+` button adding another dashboard
 3. session mode: Race, Practice, or Qualifying
 4. a dedicated folder for this race session
+Examples:
 
-These settings are remembered. The first number uses the main dashboard; every
-additional number opens a separate dashboard window. All dashboards share one
-timing-page poll, one live table and one lap-history file, so following three
-cars does not fetch the website three times. You can reopen the setup window
-with the **Setup** button.
+- average lap pace
+- best lap times
+- best sector times
+- driver statistics
+- class statistics
+- comparison deltas
+- current lap prediction
+- car-specific analysis summaries
 
-Race mode enables pitstop strategy, recent-pace comparisons and catch
-predictions. Practice mode keeps norm-time and pace comparisons but hides pit
-and catch strategy. Qualifying mode compares best and latest valid flying laps
-for team drivers, BIC, XIC and adjacent class cars. Each mode stores its own
-reference lap and sector times, so switching modes does not overwrite another
-mode's norm settings.
+### Neutralized-lap handling
 
 The **Pitstop setup** button contains fixed pre-race information: total race
 duration, mandatory pitstop count, and the circuit/pit formation. These values
@@ -87,9 +166,27 @@ identities rebuild the duplicate guard, and collection continues by appending
 only newly completed laps. The latest stored pit state is restored as well, so
 valid-stop counts and an active post-stop cooldown survive the restart. Select
 a new empty folder when starting a genuinely new timing session.
+Laps driven under safety car, full course yellow, code 60, yellow flags, or similar neutralized conditions are still stored as part of the session history.
 
-Each session folder contains readable source files that contain the timing data
-as it came in, and derived files that are recalculated from that source data.
+However, they can be excluded from pace averages where appropriate.
+
+For example:
+
+- a full lap under FCY can be excluded from lap-time averages
+- a green sector within a partially neutralized lap can still be used for sector averages
+- pit in-laps and out-laps are stored but excluded from representative pace averages
+
+### Pitstop strategy
+
+For race sessions, the app can generate pitstop-related analysis for followed cars.
+
+The generated pitstop plan is stored separately per car, so each followed-car dashboard can update independently while still using the same shared lap-history source.
+
+### Data export
+
+The app writes readable data files to the selected storage folder. This makes it possible to inspect or reuse the data outside the app.
+
+Generated files can include:
 
 - `latest_live_rows.csv`
 - `latest_live_rows.json`
@@ -101,104 +198,268 @@ as it came in, and derived files that are recalculated from that source data.
 - `lap_prediction_car-<number>.json`
 - `pitstop_plan_car-<number>.json`
 
-`latest_live_rows.csv` and `latest_live_rows.json` are overwritten on every
-successful poll. They contain the current timing table only: position, car
-number, class, driver, last lap, best lap, sectors, gaps, and similar fields.
-These files are useful when you want to inspect what the app sees right now.
+### Parser debug output
 
-`lap_history.csv` and `lap_history.jsonl` are the long-term source of truth.
-Only new completed laps are appended, so polling every few seconds does not
-create duplicate rows. These files keep all completed laps, including laps
-driven under safety car, full course yellow, code 60, or yellow flags. Those
-laps are stored because they are still part of the race history, but the
-analytics can exclude them from pace averages.
+The app writes parser diagnostics to `parser_debug.json`.
 
-`session_metadata.json` is overwritten with compact session information such as
-the timing URL, detected timing provider, followed car, session name, and last
-update time.
+This is useful when the timing website changes its HTML structure, because it shows:
 
-`parser_debug.json` is overwritten with parser diagnostics. It shows which table
-headers were detected, how many rows were parsed, the first parsed rows, and any
-parser warnings. This is mainly for troubleshooting when a timing website
-changes its HTML.
+- detected table headers
+- parsed row count
+- sample parsed rows
+- parser warnings
 
-`analytics_summary.json` is a derived cache built from `lap_history`. It stores
-the current averages, best lap times, best sector times, driver statistics,
-class statistics, and comparison deltas used by the dashboard. It does not copy
-the full lap list again; detailed lap data stays in `lap_history.jsonl`.
+### Auto-update support
 
-The averages are therefore available without the renderer having to rebuild all
-statistics from scratch every time. The app still keeps `lap_history` as the
-source of truth, so if the averaging rule changes later, the summary can be
-rebuilt from the saved laps.
+Installed builds check GitHub Releases for newer versions when the app starts.
 
-The analytics summary contains a separate dashboard analysis for every followed
-car. Current-lap predictions and pitstop plans are written to car-specific files
-so each dashboard can update independently while using the same source data.
+Development runs started with `npm start` or `npm run dev` do not check for updates.
 
-For neutralized laps, the storage keeps both the lap and its flag fields. A
-full lap under safety car or FCY is excluded from lap-time pace averages, but a
-sector can still count if that sector has its own green/eligible marker. For
-example: if sector 1 was completed under green and FCY starts during sector 2,
-sector 1 can still count for sector averages while the full lap does not count
-for lap-time averages.
+When an update has been downloaded, the app asks whether to restart and install immediately or continue working and install later.
 
-Pit/inlaps and the following outlaps also remain stored as race history, but are
-excluded from lap and sector pace averages.
+---
 
-## Live mode
+## Download and install
 
-**Start live** reads the chosen GetRaceResults timing URL. The dashboard uses live timing data only.
+Download the newest version from the GitHub Releases page:
 
-## Build a Windows app
+[GitHub Releases](https://github.com/jeffmathieu/MSTC-Internship/releases)
+
+### Windows
+
+Download the Windows installer:
+
+MSTC Race Engineer Dashboard-Setup-<version>-x64.exe
+
+Then run the installer.
+
+Example:
+
+MSTC Race Engineer Dashboard-Setup-1.0.0-x64.exe
+
+Windows may show a SmartScreen warning because the app is currently unsigned.
+For internal testing, click:
+
+More info → Run anyway
+macOS
+
+Download the macOS .dmg file:
+
+MSTC Race Engineer Dashboard-<version>-arm64.dmg
+
+Then:
+
+Open the .dmg.
+Drag the app to Applications.
+Start the app from Applications.
+
+macOS may show a Gatekeeper warning because the app is currently unsigned/not notarized.
+
+First launch
+
+When the app opens for the first time, it shows a setup screen.
+
+You need to choose:
+
+the live timing URL
+one to three car numbers to follow
+the session mode
+the data storage folder
+
+Example timing URL:
+
+https://livetiming.getraceresults.com/demo#screen-results
+
+After configuration, press:
+
+Start live
+
+The app will then start reading the timing page and storing session data.
+
+Basic usage
+1. Enter the live timing URL
+
+Paste the live timing page URL into the setup screen.
+
+The app is intended for rendered live timing pages, not manually imported CSV files.
+
+2. Select car numbers
+
+Enter the car number you want to follow.
+
+You can add extra dashboards with the + button, up to three followed cars.
+
+3. Select the session mode
+
+Choose one of:
+
+Race
+Practice
+Qualifying
+
+The selected mode changes which analysis panels are shown.
+
+4. Select a storage folder
+
+Choose a base folder where the app may write session data.
+
+Every time you press Start live, the app creates a new session folder inside that base folder.
+
+Example:
+
+2026-06-25T08-42-10Z_ris-timing_car-33
+
+This means you do not need to create a new folder manually for every race, practice, qualifying, or race-weekend session.
+
+5. Start live mode
+
+Press:
+
+Start live
+
+The dashboard starts polling the timing page and updating the analysis.
+
+Data storage structure
+
+Each live run gets its own session folder.
+
+Typical generated files:
+
+File	Purpose
+latest_live_rows.csv	Current live timing table as CSV
+latest_live_rows.json	Current live timing table as JSON
+lap_history.csv	Stored completed laps in CSV format
+lap_history.jsonl	Stored completed laps in append-friendly JSONL format
+session_metadata.json	Timing URL, provider, followed car, session info and update time
+parser_debug.json	Parser diagnostics for troubleshooting
+analytics_summary.json	Derived pace, lap, sector and comparison statistics
+lap_prediction_car-<number>.json	Current-lap prediction for a followed car
+pitstop_plan_car-<number>.json	Pitstop strategy output for a followed car
+
+lap_history.csv and lap_history.jsonl are the long-term source of truth.
+
+analytics_summary.json, lap predictions, and pitstop plans are derived files that can be recalculated from the saved lap history.
+
+Development
+Requirements
+Node.js
+npm
+Install dependencies
+npm install
+Run in development mode
+npm run dev
+
+or:
+
+npm start
+Run tests
+npm test
+Test coverage
+npm run test:coverage
+Building locally
+Build for the current platform
+npm run dist
+Build Windows installer
 
 On Windows:
 
-```bash
-npm install
 npm run dist:win
-```
 
-The output appears in `dist/`.
+The installer is written to:
 
-To build locally for the current platform, or specifically for macOS:
+dist/
+Build macOS app
 
-```bash
-npm run dist
+On macOS:
+
 npm run dist:mac
-```
 
-## Release process
+The .dmg and .zip files are written to:
 
-Releases are published only for pushed version tags:
+dist/
+Release process
 
-1. Merge the intended changes into `main` and make sure `npm test` passes.
-2. From `main`, increment the version with one of:
+Releases are published through GitHub Actions when a version tag is pushed.
 
-   ```bash
-   npm version patch
-   npm version minor
-   npm version major
-   ```
+Recommended process:
 
-3. Push the generated version commit and tag:
+Merge the intended changes into main.
+Make sure tests pass:
+npm test
+Increment the version:
+npm version patch
 
-   ```bash
-   git push origin main
-   git push origin --tags
-   ```
+or:
 
-The `v*` tag starts `.github/workflows/release.yml`. GitHub Actions builds the
-Windows NSIS installer and the macOS DMG/ZIP, then publishes the installers and
-auto-update metadata to GitHub Releases. The tag version must match the version
-in `package.json`, which `npm version` handles automatically.
+npm version minor
 
-## Code signing note
+or:
 
-The current CI builds are unsigned. Windows SmartScreen and macOS Gatekeeper may
-therefore display warnings. This is acceptable for internal testing, but code
-signing should be added before a broad production rollout. In particular,
-macOS auto-updates require a signed application. The release workflow contains
-commented placeholders for future macOS notarization and Windows certificate
-secrets; certificates and passwords must stay in GitHub Actions secrets and
-must never be committed to the repository.
+npm version major
+
+For example, the first stable release should use:
+
+npm version 1.0.0
+Push the version commit and tag:
+git push origin main
+git push origin --tags
+
+The pushed v* tag starts the release workflow.
+
+GitHub Actions then builds:
+
+the Windows NSIS installer
+the macOS DMG
+the macOS ZIP
+auto-update metadata files
+
+The generated files are attached to the GitHub Release.
+
+Versioning
+
+This project uses semantic versioning:
+
+MAJOR.MINOR.PATCH
+
+Examples:
+
+Version	Meaning
+1.0.0	First stable release
+1.0.1	Bugfix release
+1.1.0	New backwards-compatible feature
+2.0.0	Larger breaking change
+Code signing note
+
+The current builds are unsigned.
+
+This means:
+
+Windows may show SmartScreen warnings.
+macOS may show Gatekeeper warnings.
+macOS auto-updates may require additional signing/notarization work for production use.
+
+For internal testing this is acceptable, but before a broad production rollout the app should be signed.
+
+Signing secrets must be stored in GitHub Actions secrets and must never be committed to the repository.
+
+Tech stack
+Electron
+JavaScript
+HTML
+CSS
+electron-builder
+electron-updater
+GitHub Actions
+Repository structure
+.github/workflows/   GitHub Actions release workflow
+scripts/             Supporting scripts
+src/                 Electron main process, renderer and app logic
+tests/               Automated tests
+package.json         App metadata, scripts and build configuration
+License
+
+MIT
+
+Author
+
+Jeff Mathieu
