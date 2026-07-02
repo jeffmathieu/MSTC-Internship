@@ -1,0 +1,13 @@
+\chapter{Conclusie}
+\label{chap:conclusie}
+
+Tijdens deze zesweekse stage werd een eerste operationele versie van het MSTC Race Engineer Dashboard ontwikkeld. De applicatie leest live timingpagina's, normaliseert providerafhankelijke gegevens, bewaart een hervatbare racehistoriek en zet die om in analyses voor race, kwalificatie en vrije training. De interface ondersteunt maximaal drie wagens met één gedeelde collector en biedt daarnaast een afzonderlijk grafiekvenster.
+
+De belangrijkste technische bijdrage is niet één afzonderlijk algoritme, maar de betrouwbare keten van externe timingdata naar uitlegbare beslissingsinformatie. Rondes en sectoren worden met hun context opgeslagen. Neutralisaties en pitfasen worden bewaard zonder de representatieve gemiddelden te vervormen. De rondevoorspelling gebruikt recente sectordata van de juiste piloot. Klasseverschillen en pitstopprojecties houden rekening met algemene racevolgorde, tussenliggende wagens, ronde-eenheden en timingprovider. De renderer presenteert deze resultaten maar berekent ze niet zelf.
+
+Het intensieve overleg met de opdrachtgever was bepalend voor het resultaat. Praktische scenario's brachten fouten aan het licht die met generieke testdata moeilijk zichtbaar waren. Door die scenario's om te zetten naar afzonderlijke domeinfuncties en regressietests groeide de software van een dashboardprototype naar een beter onderhoudbare applicatie. De automatische test- en releaseworkflows ondersteunen verdere ontwikkeling na de stage.
+
+Niet alle ambities zijn definitief afgerond. De voorspellingen blijven eenvoudige, uitlegbare modellen en gebruiken geen telemetrie, banden- of weerdata. De FCY-pitloss is afhankelijk van correcte circuitparameters en stabiele timinggaps. Code signing en notarization ontbreken nog. Het belangrijkste open punt is de praktijktest in Spa. Tot die test is uitgevoerd, kunnen stabiliteit en nauwkeurigheid in een echte raceomgeving niet definitief worden bevestigd.
+
+De stage maakte duidelijk dat race-engineeringsoftware vooral betrouwbaar moet omgaan met onvolledige en contextafhankelijke data. Een plausibel getal is niet noodzakelijk een correct getal. Door onbekende situaties zichtbaar te maken, aannames configureerbaar te houden en regels automatisch te testen, biedt de gerealiseerde applicatie een stevige basis voor verdere validatie en uitbreiding.
+

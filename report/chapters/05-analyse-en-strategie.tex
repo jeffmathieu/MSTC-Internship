@@ -1,0 +1,68 @@
+\chapter{Analyse, voorspelling en strategie}
+\label{chap:analyse}
+
+\section{Geldige data als basisregel}
+Vrijwel elke analyse begint met dezelfde vraag: is deze ronde representatief? \code{lapAnalytics.js} centraliseert deze beslissing. Een ronde onder Safety Car, Full Course Yellow, Code 60 of een andere neutralisatie wordt opgeslagen, maar niet gebruikt voor gemiddelden, best-driververgelijkingen of tempografieken. Hetzelfde geldt voor pitgerelateerde in- en outlaps. Sectoren worden afzonderlijk beoordeeld, zodat een groene sector uit een later geneutraliseerde ronde niet verloren gaat.
+
+Deze centrale filtering voorkomt dat verschillende functies uiteenlopende definities van een geldige ronde gebruiken. Grafieken, gemiddelden en vergelijkingen steunen daardoor op dezelfde regels. De tests bevatten expliciete scenario's met ontbrekende tijden, gedeeltelijke neutralisatie, pitfasen en ongeldige waarden.
+
+\section{Ronde- en pilootstatistieken}
+Voor een reeks geldige ronden worden laatste tijd, beste tijd, gemiddelde tijd, sectorgemiddelden en beste sectoren bepaald. Pilootstatistieken worden per combinatie van wagen en piloot opgebouwd. De beste piloot van het eigen team is niet hard gecodeerd: wanneer de actuele piloot na zijn stint sneller blijkt, kan hij de vorige referentiepiloot vervangen.
+
+In racemodus vergelijkt het dashboard onder meer:
+
+\begin{itemize}
+  \item beste teamtijd met de laatste ronde van de huidige piloot;
+  \item beste teamtijd met de beste ronde van de huidige piloot;
+  \item gemiddeld tempo van de beste piloot met dat van de huidige piloot;
+  \item tempo van de beste wagen in de klasse met de eigen actuele stint;
+  \item tempo van een vrij gekozen klassewagen met de eigen actuele stint.
+\end{itemize}
+
+In qualifyingmodus zijn gemiddelden minder relevant. Daar gebruikt de app vooral beste en laatste geldige ronde van teamgenoten en concurrenten. Practice legt de nadruk op referenties en consistente vergelijking zonder pitstopstrategie.
+
+\section{Voorspelling van de actuele ronde}
+De rondevoorspelling is bewust eenvoudig en uitlegbaar. Voor de huidige piloot worden per sector maximaal de laatste tien geldige sectortijden geselecteerd. Na sector 1 is de voorspelling:
+
+\[
+  \hat{T}_{lap} = T_{S1,actueel} + \overline{T}_{S2,recent} + \overline{T}_{S3,recent}.
+\]
+
+Na sector 2 worden beide actuele sectoren gebruikt:
+
+\[
+  \hat{T}_{lap} = T_{S1,actueel} + T_{S2,actueel} + \overline{T}_{S3,recent}.
+\]
+
+Na sector 3 wordt de voorspelling niet vervangen door de echte rondetijd. Zo blijft zichtbaar wat na sector 2 voorspeld was. Tussen de finish en de nieuwe sector 1 toont het dashboard de afwijking tussen voorspelling en gerealiseerde ronde. Dit geeft onmiddellijke feedback over de kwaliteit van het model.
+
+Voor een nieuwe piloot is na zijn eerste geldige volledige ronde voldoende basisdata beschikbaar om vanaf sector 1 van zijn tweede ronde een eerste voorspelling te maken. Wanneer een piloot eerder al een stint reed, wordt zijn eigen historische sectordata opnieuw gebruikt. Een schuivend venster zorgt ervoor dat oude droge data bij regen geleidelijk plaatsmaakt voor recente natte data. De voorspelling convergeert daardoor zonder de oude kennis abrupt te verwijderen.
+
+\section{Referentietijden}
+De gebruiker kan een referentierondetijd en drie sectorreferenties ingeven via editknoppen in de betrokken vakken. De waarden worden per sessiemodus opgeslagen. \code{normReference.js} berekent de delta en deelt de toestand in als veilig, nabij of kritisch. De grenswaarden zijn centraal configureerbaar.
+
+Het vak voor predicted lap time krijgt een duidelijke groene, oranje of rode achtergrond. De ideal time is de som van de beste sectoren van de wagen, niet enkel van de huidige piloot, en krijgt eveneens een status. Bij elke sectorreferentie worden twee marges getoond: die van de laatste sector en die van de beste sector. Hierdoor ziet de engineer zowel de actuele uitvoering als het theoretische risico.
+
+\section{Gevechten binnen de klasse}
+Een tijdsverschil tussen twee klassewagens mag niet worden afgeleid door alleen hun zichtbare klassepositie te vergelijken. Er kunnen wagens uit andere klassen tussen staan. Voor GetRaceResults telt \code{classBattle.js} daarom de opeenvolgende DIFF-waarden in de algemene rangschikking op. Voor RIS Timing worden providerafhankelijke intervallen verwerkt en kunnen ronde-eenheden met representatieve rondetijden worden benaderd.
+
+Wanneer wagens in dezelfde ronde zitten, combineert de applicatie de actuele gap met het verschil tussen recente gemiddelden. Zo ontstaat een indicatie van het aantal ronden of de tijd tot een mogelijke inhaalactie. Wanneer de rondeafstand of de data onvoldoende betrouwbaar is, wordt geen schijnpreciese voorspelling getoond.
+
+\section{Pitstopplanner}
+De pitstopplanner gebruikt configureerbare regels voor totale raceduur, verboden eerste en laatste 25 minuten, cooldown na een geldige stop, aantal verplichte stops en geschatte pitduur. De balk toont rode en groene zones en bewaart reeds verstreken rode cooldownsegmenten. Alleen stops die binnen een geldig groen venster plaatsvinden, tellen mee voor het verplichte aantal.
+
+De planner berekent ook het laatste veilige moment waarop nog voldoende verplichte stops met cooldown kunnen plaatsvinden. Hierdoor wordt zichtbaar wanneer een ogenschijnlijk toegestane late stop de resterende strategie onmogelijk zou maken. De pitduur blijft tijdens de race aanpasbaar, omdat een bandenwissel en een pilotenwissel verschillende tijden kunnen vragen.
+
+Voor de projectie na een pitstop worden de relatieve verschillen in de algemene rangschikking opgebouwd totdat de geschatte pit loss is overschreden. Vervolgens wordt bepaald tussen welke klassewagens de eigen wagen zou uitkomen. Dit lost het probleem op waarbij een wagen uit een andere klasse tussen twee relevante klassewagens stond. Rondeverschillen worden niet als seconden gelezen; ze worden met beschikbare gemiddelde rondetijden geïnterpreteerd.
+
+\section{Full Course Yellow}
+Onder FCY rijdt het veld met een opgelegde snelheid en kan de relatieve pit loss kleiner zijn. Circuitprofielen bevatten daarom de afstand die een niet-pittende wagen tussen pit entry en pit exit over het gewone circuit aflegt en de FCY-snelheid. De tijd op dat traject is:
+
+\[
+  T_{track,FCY} = \frac{d_{track}}{v_{FCY}/3{,}6}.
+\]
+
+De geschatte netto pit loss vergelijkt deze trajecttijd met de ingestelde pitduur. Omdat timinggaps vlak na de overgang naar FCY nog kunnen veranderen, bewaart de app opeenvolgende signatures en markeert de projectie eerst als voorlopig. Zodra een nieuwe passage en stabiele gaps zijn waargenomen, kan de projectie betrouwbaarder worden gebruikt. Afstanden en snelheden uit een circuitprofiel blijven overschrijfbaar voor afwijkende wedstrijdregels.
+
+Deze berekening blijft een model. Ze kent geen lokale opstopping, pit-entryvertraging, Safety Car-wave-by of onverwachte serviceproblemen. De interface presenteert haar daarom als projectie en niet als garantie.
+
