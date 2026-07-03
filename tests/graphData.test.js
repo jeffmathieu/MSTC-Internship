@@ -26,6 +26,18 @@ const driverLapsWithScGap = graphData.driverLapTimes([
 ], 44);
 assert.deepStrictEqual(driverLapsWithScGap.series[0].points.map((point) => point.x), [1, 2], 'excluded laps leave no gap in valid-lap comparison numbering');
 
+const driverLapsWithStartupOutlier = graphData.driverLapTimes([
+  lap({ carNumber: 30, driverName: 'Spa Driver', lapNumber: 1, lapTimeMs: 2105611 }),
+  lap({ carNumber: 30, driverName: 'Spa Driver', lapNumber: 2, lapTimeMs: 183146 }),
+  lap({ carNumber: 30, driverName: 'Spa Driver', lapNumber: 3, lapTimeMs: 173985 }),
+  lap({ carNumber: 30, driverName: 'Spa Driver', lapNumber: 4, lapTimeMs: 173589 })
+], 30);
+assert.deepStrictEqual(
+  driverLapsWithStartupOutlier.series[0].points.map((point) => point.y),
+  [183146, 173985, 173589],
+  'extreme timing-feed outliers are omitted from pace graphs'
+);
+
 const driverPace = graphData.driverPaceComparison(history, 33, 10);
 assert.strictEqual(driverPace.type, 'bar');
 assert.deepStrictEqual(driverPace.categories, ['Driver 1', 'Driver 2', 'Driver 3']);

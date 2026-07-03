@@ -2,9 +2,11 @@ const assert = require('assert');
 const {
   numberOrNull,
   average,
+  median,
   isNeutralizedFlag,
   captureSectorFlags,
   lapPaceEligible,
+  representativePaceLaps,
   sectorPaceEligible,
   normalizeLap,
   pitCountFromLap,
@@ -32,11 +34,25 @@ assert.strictEqual(numberOrNull('--'), null);
 assert.strictEqual(numberOrNull(undefined), null);
 assert.strictEqual(average([]), null);
 assert.strictEqual(average(['--', undefined, '']), null);
+assert.strictEqual(median([]), null);
+assert.strictEqual(median([3, 1, 2]), 2);
+assert.strictEqual(median([4, 1, 3, 2]), 2.5);
 assert.strictEqual(isNeutralizedFlag('Safety car'), true);
 assert.strictEqual(isNeutralizedFlag('Full Course Yellow'), true);
 assert.strictEqual(isNeutralizedFlag('FCY'), true);
 assert.strictEqual(isNeutralizedFlag('Code 60'), true);
+assert.strictEqual(isNeutralizedFlag('Red flag'), true);
 assert.strictEqual(isNeutralizedFlag('Green flag'), false);
+
+const redFlagLap = normalizeLap({
+  carNumber: 33,
+  lapNumber: 8,
+  lapTimeMs: 500000,
+  sessionFlag: 'Red flag',
+  sector1Flag: 'Red flag'
+});
+assert.strictEqual(lapPaceEligible(redFlagLap), false);
+assert.strictEqual(sectorPaceEligible(redFlagLap, 1), false);
 
 const firstGreenSector = captureSectorFlags({ lastLap: '2:05.000', sector1: '40.000', sector1Flag: '', sector1Eligible: '' }, null, 'Green flag');
 assert.strictEqual(firstGreenSector.sector1Flag, 'Green flag');
@@ -62,6 +78,16 @@ assert.strictEqual(oldShapeLap.teamName, 'Old Shape Team');
 assert.strictEqual(oldShapeLap.driverName, 'Old Driver');
 assert.strictEqual(oldShapeLap.lapTimeMs, 101234);
 assert.strictEqual(lapPaceEligible(oldShapeLap), true);
+
+const recoveredRisSector3 = normalizeLap({
+  sourceProvider: 'ris-timing',
+  carNumber: 33,
+  lapTimeMs: 182091,
+  sector1Ms: 53272,
+  sector2Ms: 81504,
+  sector3Ms: ''
+});
+assert.strictEqual(recoveredRisSector3.sector3Ms, 47315);
 
 const explicitFalseLap = normalizeLap({
   carNumber: null,
@@ -121,6 +147,43 @@ const missingSectorStats = statsForLaps([
 assert.strictEqual(missingSectorStats.averageLapMs, 100000);
 assert.strictEqual(missingSectorStats.bestSector1Ms, null);
 assert.strictEqual(missingSectorStats.bestSector2Ms, 40000);
+
+// RIS can expose elapsed session time as the first LAST value when collection
+// starts mid-session. It remains stored but must not distort pace statistics.
+const spaStartupLaps = [
+  lap({ carNumber: 33, driverName: 'JANSSENS Robbe', lapNumber: 1, lapTimeMs: 2105611 }),
+  lap({ carNumber: 33, driverName: 'JANSSENS Robbe', lapNumber: 2, lapTimeMs: 183146 }),
+  lap({ carNumber: 33, driverName: 'JANSSENS Robbe', lapNumber: 3, lapTimeMs: 173985 }),
+  lap({ carNumber: 33, driverName: 'JANSSENS Robbe', lapNumber: 4, lapTimeMs: 173589 })
+].map(normalizeLap);
+const representativeSpaLaps = representativePaceLaps(spaStartupLaps);
+assert.deepStrictEqual(representativeSpaLaps.map((entry) => entry.lapNumber), [2, 3, 4]);
+const spaStartupStats = statsForLaps(spaStartupLaps);
+assert.strictEqual(spaStartupStats.paceLapCount, 3);
+assert.strictEqual(spaStartupStats.excludedOutlierLapCount, 1);
+assert.strictEqual(spaStartupStats.averageLapMs, 176906.66666666666);
+assert.strictEqual(spaStartupStats.lastLapMs, 173589);
+
+// Do not classify ordinary variation or a one-minute weather shift as garbage.
+const weatherTransition = [120000, 122000, 180000].map((lapTimeMs, index) => normalizeLap({
+  carNumber: 7,
+  lapNumber: index + 1,
+  lapTimeMs
+}));
+assert.strictEqual(representativePaceLaps(weatherTransition).length, 3);
+assert.strictEqual(representativePaceLaps(spaStartupLaps, { minimumSamples: 5 }).length, 4);
+
+// A genuinely slow lap with a matching full sectorsum is evidence, not an
+// outlier: rain, a spin, or traffic may explain it and it must remain included.
+const confirmedSlowLap = normalizeLap({
+  carNumber: 7,
+  lapNumber: 4,
+  lapTimeMs: 300000,
+  sector1Ms: 100000,
+  sector2Ms: 110000,
+  sector3Ms: 90000
+});
+assert.strictEqual(representativePaceLaps([...weatherTransition, confirmedSlowLap]).includes(confirmedSlowLap), true);
 
 const neutralizedHistory = [
   lap({ carNumber: 33, teamName: 'Our Team', driverName: 'Driver A', lapNumber: 1, lapTimeMs: 100000, sector1Ms: 30000, sector2Ms: 40000, sector3Ms: 30000, sessionFlag: 'Green flag' }),

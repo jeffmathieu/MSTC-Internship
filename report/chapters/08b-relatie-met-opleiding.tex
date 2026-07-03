@@ -1,0 +1,38 @@
+\chapter{Relatie met de opleiding}
+\label{chap:opleiding}
+
+\section{Softwarearchitectuur}
+De meest directe relatie met de opleiding ligt in softwareontwerp. Het project vereiste duidelijke verantwoordelijkheden tussen infrastructuur, domeinlogica en presentatie. Concepten als encapsulation en separation of concerns kregen een praktisch gevolg: wanneer de renderer zelf een pitstopgap berekende, was die moeilijk afzonderlijk te testen en te hergebruiken. Na modularisatie kon dezelfde berekening het dashboard, opslagbestand en een test voeden.
+
+Ook interfaces tussen componenten waren belangrijk. De parser levert genormaliseerde rijen, analytics ontvangt laprecords en viewmodules leveren schermdata. Deze contracten verminderen de koppeling met één timingprovider of één venster. Het project illustreerde daarmee waarom een architectuur niet alleen een diagram is, maar vooral een verzameling afdwingbare grenzen in de code.
+
+\section{Algoritmen en datastructuren}
+Hoewel de datasets relatief klein zijn, komen klassieke datastructuren voortdurend terug. Maps bewaren de laatste rij en pitstatus per wagen. Sets met lap identities voorkomen duplicaten. Gesorteerde reeksen reconstrueren algemene en klassevolgorde. Schuivende vensters selecteren recente geldige ronden.
+
+De gapberekening is een voorbeeld van algoritmisch redeneren op een sequentie. Om het verschil tussen twee klassewagens te kennen, wordt niet alleen naar hun eigen rij gekeken. Alle tussenliggende algemene rijen worden doorlopen en geldige opeenvolgende intervallen worden opgeteld. Edgecases zoals ronde-eenheden, ontbrekende waarden en omgekeerde volgorde maken van een eenvoudige som een domeinalgoritme met precondities.
+
+\section{Data-analyse en modellering}
+Gemiddelden, minima en rolling windows zijn eenvoudige statistieken, maar hun kwaliteit hangt af van dataselectie. De stage maakte concreet dat preprocessing vaak belangrijker is dan het model. Een gemiddelde met Safety Car-ronden is rekenkundig correct en inhoudelijk waardeloos voor tempoanalyse.
+
+De rondevoorspelling is een baseline-regressiemodel. De fout kan na iedere ronde direct worden gemeten. Dit sluit aan bij de opleidingsprincipes rond train/testscheiding, geschikte evaluatiemetrieken en het vergelijken met een eenvoudige baseline. De huidige implementatie gebruikt nog geen formele offline modeltraining, maar legt wel de datakwaliteits- en evaluatiebasis voor een latere uitbreiding.
+
+\section{Softwaretesten}
+De tests dwongen tot het expliciet formuleren van verwachte domeinregels. Branchcoverage wees op niet-uitgevoerde fallbackpaden, maar handberekende scenario's bepaalden of de code inhoudelijk juist was. Dit onderscheid tussen verificatie van uitvoering en validatie van betekenis is een belangrijk software-engineeringinzicht.
+
+Continue integratie breidde dit uit naar het ontwikkelproces. Een lokale succesvolle test is niet voldoende wanneer een dependency of platformomgeving afwijkt. GitHub Actions installeert vanaf een schone checkout en voert de volledige suite opnieuw uit. Releases worden pas na dezelfde tests gebouwd.
+
+\section{Human-computer interaction}
+De raceomgeving stelt specifieke HCI-eisen. Een gebruiker heeft geen tijd om meerdere geneste menu's te doorlopen of lange uitleg te lezen. Informatiehiërarchie, stabiele vakafmetingen en kleurstatussen moesten daarom samen worden ontworpen. Het verschil tussen een dunne rode rand en een volledig lichtrood predictionvak bleek operationeel relevant: de tweede variant trekt sneller aandacht.
+
+Tegelijk mag kleur niet de enige informatiedrager zijn. Labels, delta's en statustekst blijven zichtbaar. De keuze om grafieken in een afzonderlijk venster te plaatsen is eveneens een HCI-afweging: detailanalyse blijft beschikbaar zonder het primaire racescherm permanent te belasten.
+
+\section{Communicatie en professionele vaardigheden}
+De opleiding biedt een technische basis, maar deze stage vroeg ook vertaling tussen twee vakgebieden. De opdrachtgever formuleerde wensen vanuit racesituaties, niet als softwaretickets. Ik moest doorvragen naar uitzonderingen, voorbeelden met concrete wagens uitwerken en vervolgens technische beperkingen begrijpelijk uitleggen.
+
+Het project leerde mij ook onzekerheid expliciet te communiceren. Wanneer timingdata onvoldoende betrouwbaar is, is ``onbekend'' professioneler dan een exact ogend fout getal. Dit geldt zowel voor de interface als voor overleg. Technische geloofwaardigheid ontstaat niet door altijd een antwoord te tonen, maar door duidelijk te maken waarop een antwoord gebaseerd is.
+
+\section{Ontbrekende of verder te ontwikkelen kennis}
+Voor een volgende fase zou meer kennis over officiële motorsporttimingprotocollen en racecontrolregels nuttig zijn. Ook code signing, notarization en productieobservability kwamen slechts beperkt in de opleiding aan bod maar zijn belangrijk voor distributie van desktopsoftware. Aan de datazijde zijn onzekerheidsintervallen en concept drift relevante onderwerpen wanneer de voorspelling verder wordt uitgebouwd.
+
+De stage toonde daarmee zowel de toepasbaarheid als de grenzen van de academische voorbereiding. De opleiding leverde het gereedschap om een modulair systeem te ontwerpen en problemen analytisch op te lossen. De operationele context leerde welke details bepalen of dat systeem werkelijk bruikbaar is.
+

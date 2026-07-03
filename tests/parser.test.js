@@ -6,8 +6,10 @@ const {
   parseInteger,
   parseLapTimeToMs,
   formatMs,
+  splitTeamInfo,
   parseTimingRow,
-  looksLikeTimingHeaders
+  looksLikeTimingHeaders,
+  parseSessionInfo
 } = require('../src/shared/parser');
 
 // Lap-time parsing protects the formats seen in live timing tables. Add new
@@ -34,6 +36,10 @@ assert.strictEqual(canonicalHeader('#'), 'carNumber');
 assert.strictEqual(canonicalHeader('Driver in car'), 'driver');
 assert.strictEqual(canonicalHeader('Class / PIC'), 'className');
 assert.strictEqual(canonicalHeader('Sector 2'), 'sector2');
+assert.strictEqual(canonicalHeader('43.575 | S1'), 'sector1');
+assert.strictEqual(canonicalHeader('1:14.821 | S2'), 'sector2');
+assert.strictEqual(canonicalHeader('39.376 | S3'), 'sector3');
+assert.strictEqual(canonicalHeader('2:50.798 | BEST'), 'bestLap');
 assert.strictEqual(canonicalHeader('Unmapped Header'), 'unmappedheader');
 assert.strictEqual(parseInteger('--'), null);
 assert.strictEqual(parseInteger('P12'), 12);
@@ -94,6 +100,24 @@ assert.strictEqual(risScreenshotRow.sector3Ms, null);
 assert.strictEqual(risScreenshotRow.pit, '9');
 assert.strictEqual(risScreenshotRow.lastPit, '0:55');
 
+// Current Spa RIS layout: session-best values share the sector headers and the
+// TEAM INFO cell has team on line one and "driver - car" on line two.
+const spaRisHeaders = ['P', 'STATE', 'CLASS', 'PIC', '#', 'TEAM INFO', 'LAPS', 'GAP', '43.575 | S1', '1:14.821 | S2', '39.376 | S3', 'LAST', 'BEST', 'ETA', 'PIT'];
+const spaRisCells = ['8', 'RUN', 'C.CHA', '1', '33', 'MSTC | JANSSENS Robbe - Mazda MX-5', '1', '--', '54.998', '--', '--', '35:05.611', '--', '02:17', '--'];
+const spaRisRow = parseTimingRow(spaRisHeaders, spaRisCells);
+assert.strictEqual(spaRisRow.team, 'MSTC');
+assert.strictEqual(spaRisRow.driver, 'JANSSENS Robbe');
+assert.strictEqual(spaRisRow.car, 'Mazda MX-5');
+assert.strictEqual(spaRisRow.sector1, '54.998');
+assert.strictEqual(spaRisRow.sector1Ms, 54998);
+assert.strictEqual(spaRisRow.sector2Ms, null);
+assert.strictEqual(spaRisRow.sector3Ms, null);
+assert.deepStrictEqual(splitTeamInfo('MSTC | JANSSENS Robbe - Mazda MX-5'), {
+  team: 'MSTC',
+  driver: 'JANSSENS Robbe',
+  car: 'Mazda MX-5'
+});
+
 const risLegacyHeaders = ['POS', 'NOW', 'NUM', 'CAT', '', 'TEAM', 'Drivers', 'S1', 'S2', 'S3', 'Lap', 'GAP', 'Last time', 'PS'];
 const risLegacyCells = ['2', 'RUN', '18', 'GT+', '.', 'SPEEDLOVER', 'VERHOEVEN Jay', '30.049', '', '', '27', '17.129', '1:34.175', '.'];
 const risLegacyRow = parseTimingRow(risLegacyHeaders, risLegacyCells);
@@ -125,5 +149,46 @@ assert.strictEqual(sparseRow.team, '');
 assert.strictEqual(looksLikeTimingHeaders(headers), true);
 assert.strictEqual(looksLikeTimingHeaders(['TEAM', 'DRIVER', 'LAST']), false);
 assert.strictEqual(looksLikeTimingHeaders(['NR', 'TEAM', 'DRIVER']), true);
+
+const risSession = parseSessionInfo({
+  title: 'RIS Live Timing',
+  location: 'https://results.ris-timing.be/example',
+  bodyText: 'LIVE DATA COMPACT FULLSCREEN Ligier Js Cup • Paying Practice Status: GREEN Elapsed: 22:59 Remaining: 02:07:01 09:23:02'
+});
+assert.strictEqual(risSession.timeToGo, '02:07:01');
+assert.strictEqual(risSession.elapsed, '22:59');
+assert.strictEqual(risSession.statusText, 'GREEN');
+assert.strictEqual(risSession.flag, 'Green flag');
+assert.strictEqual(risSession.sessionName, 'Ligier Js Cup - Paying Practice');
+
+const structuredRisSession = parseSessionInfo({
+  title: 'RIS Live Timing',
+  bodyText: '',
+  sessionFields: {
+    sessionName: 'Ligier Js Cup - Paying Practice',
+    status: 'RED FLAG',
+    elapsed: '38:28',
+    remaining: '01:51:32'
+  }
+});
+assert.strictEqual(structuredRisSession.sessionName, 'Ligier Js Cup - Paying Practice');
+assert.strictEqual(structuredRisSession.timeToGo, '01:51:32');
+assert.strictEqual(structuredRisSession.elapsed, '38:28');
+assert.strictEqual(structuredRisSession.statusText, 'RED FLAG');
+assert.strictEqual(structuredRisSession.flag, 'Red flag');
+
+const risFcySession = parseSessionInfo({
+  bodyText: 'Status: FULL COURSE YELLOW Elapsed: 01:12:30 Remaining: 22:47:30'
+});
+assert.strictEqual(risFcySession.timeToGo, '22:47:30');
+assert.strictEqual(risFcySession.elapsed, '01:12:30');
+assert.strictEqual(risFcySession.flag, 'Full course yellow');
+
+const getRaceResultsSession = parseSessionInfo({
+  bodyText: 'Green flag To go: 01:45:00 Spa Test - Practice Page updated 09:23:02 (UTC)'
+});
+assert.strictEqual(getRaceResultsSession.timeToGo, '01:45:00');
+assert.strictEqual(getRaceResultsSession.sessionName, 'Spa Test - Practice');
+assert.strictEqual(getRaceResultsSession.flag, 'Green flag');
 
 console.log('Parser tests passed.');

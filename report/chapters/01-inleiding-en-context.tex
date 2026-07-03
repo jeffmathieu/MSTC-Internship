@@ -1,0 +1,35 @@
+\chapter{Inleiding en context}
+\label{chap:context}
+
+\section{Motorsport als beslissingsomgeving}
+Een endurancewedstrijd is niet alleen een snelheidswedstrijd. Een team moet gedurende meerdere uren de prestaties van de wagen, verschillende piloten, concurrenten in dezelfde klasse, neutralisaties en verplichte pitstops opvolgen. Beslissingen worden genomen terwijl de wedstrijd blijft doorgaan. Informatie heeft daardoor alleen operationele waarde wanneer ze actueel, correct en snel interpreteerbaar is.
+
+De publieke timingpagina is de primaire gegevensbron. Ze toont onder meer positie, klassepositie, wagen- en pilootinformatie, aantal ronden, laatste en beste rondetijd, sectortijden en verschillen tussen wagens. Deze tabel is ontworpen voor een algemeen publiek en voor het wedstrijdverloop als geheel. Een race-engineer stelt echter andere vragen: hoe verhoudt de huidige piloot zich tot zijn teamgenoot, hoe evolueert het tempo van de klasseleider, waar komt de wagen vermoedelijk uit na een pitstop, en nadert de voorspelde rondetijd een opgelegde referentietijd? Het voortdurend handmatig combineren van deze gegevens verhoogt de cognitieve belasting en de kans op rekenfouten.
+
+\section{Stageplaats en opdracht}
+De stage werd uitgevoerd voor MotorSport Training Center. De opdrachtgever bracht de motorsportkennis en de operationele verwachtingen aan; de technische analyse en implementatie gebeurden grotendeels zelfstandig. Hierdoor had de opdracht zowel het karakter van softwareontwikkeling als van technische consultancy. Een praktische vraag van de klant moest telkens worden omgezet in ondubbelzinnige gegevens, regels, algoritmes en schermcomponenten.
+
+Het concrete doel was een desktopdashboard dat naast de officiële timingpagina kan draaien. De applicatie moest live data volgen, relevante historiek lokaal bewaren en de informatie specifiek voor het eigen team presenteren. De software moest bruikbaar zijn op Windows tijdens races, maar werd tijdens de stage hoofdzakelijk op macOS ontwikkeld. Platformonafhankelijkheid, eenvoudige installatie en herstel na een onderbreking waren daarom vanaf het begin belangrijke aandachtspunten.
+
+\section{Doelstellingen}
+De uiteindelijke opdracht bestond uit de volgende hoofddoelen:
+
+\begin{itemize}
+  \item live timingdata van meerdere websites betrouwbaar lezen en naar één intern formaat vertalen;
+  \item een historiek van rondes, sectortijden en sessiecontext lokaal opslaan;
+  \item maximaal drie wagens volgen zonder de timingwebsite drie keer te bevragen;
+  \item analyses berekenen voor race, kwalificatie en vrije training;
+  \item actuele rondevoorspellingen en configureerbare referentietijden tonen;
+  \item een pitstopvenster en een projectie van de positie na een pitstop aanbieden;
+  \item neutralisaties, pitstops, outlaps en onvolledige data correct behandelen;
+  \item de logica modulair en automatisch testbaar maken;
+  \item installaties en updates voor macOS en Windows via GitHub Releases ondersteunen.
+\end{itemize}
+
+\section{Afbakening}
+De applicatie vervangt de officiële timing niet en neemt geen autonome strategische beslissingen. Ze gebruikt uitsluitend informatie die op de timingpagina beschikbaar is of vooraf door de gebruiker wordt geconfigureerd. Brandstofverbruik, bandentemperaturen, telemetrie uit de wagen en weersvoorspellingen maken geen deel uit van de huidige versie. De voorspellingen zijn beslissingsondersteuning en moeten altijd samen met de actuele wedstrijdcontext worden geïnterpreteerd.
+
+Aanvankelijk werd ook gedacht aan replayfunctionaliteit en een uitgebreider machine-learningmodel. Tijdens de iteraties bleek dat betrouwbare live dataverwerking, uitlegbare berekeningen en racebestendige foutafhandeling meer waarde hadden binnen de beschikbare zes weken. Replayfunctionaliteit werd daarom uit de productieapp verwijderd. Voor tests werd wel een lokale simulator gebouwd op basis van historische wedstrijddata uit Assen. De rondevoorspelling gebruikt bewust een transparant model met recente sectorgemiddelden in plaats van een moeilijk uitlegbaar model.
+
+\section{Leeswijzer}
+Hoofdstuk~\ref{chap:requirements} beschrijft het iteratieve requirementsproces. Hoofdstuk~\ref{chap:architectuur} behandelt de softwarearchitectuur. Hoofdstukken~\ref{chap:data} en~\ref{chap:analyse} bespreken de dataverwerking en domeinlogica. Hoofdstuk~\ref{chap:interface} behandelt de interface. Daarna volgen verificatie en oplevering, de kritische reflectie en een afzonderlijk hoofdstuk met de nog uit te voeren validatie in Spa.

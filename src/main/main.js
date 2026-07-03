@@ -6,12 +6,14 @@ const crypto = require('crypto');
 const {
   cleanText,
   parseTimingRow,
-  looksLikeTimingHeaders
+  looksLikeTimingHeaders,
+  parseSessionInfo
 } = require('../shared/parser');
 const {
   LAP_HISTORY_COLUMNS,
   normalizeForStorage,
   lapRecordFromNormalizedRow,
+  completedLapRowFromLiveRow,
   lapIdentity,
   toCsvRows,
   detectSourceProvider
@@ -19,6 +21,7 @@ const {
 const {
   completedLaps,
   lapPaceEligible,
+  representativePaceLaps,
   captureSectorFlags,
   driverStats,
   carStats,
@@ -330,64 +333,52 @@ function addError(error, context = '') {
 // here before changing the parser.
 const pageExtractionScript = String.raw`(() => {
   const clean = (value) => String(value || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  // Preserve visual line boundaries inside RIS TEAM INFO cells. Plain
+  // textContent flattens "team" and "driver - car" into one ambiguous string.
+  const cellText = (cell) => clean(String(cell.innerText || cell.textContent || '').replace(/(?:\r?\n)+/g, ' | '));
   const tables = Array.from(document.querySelectorAll('table')).map((table, tableIndex) => {
     const rows = Array.from(table.querySelectorAll('tr'));
     let headerCells = [];
     const explicitHeader = table.querySelector('thead tr');
     if (explicitHeader) {
-      headerCells = Array.from(explicitHeader.querySelectorAll('th,td')).map((cell) => clean(cell.textContent || cell.innerText));
+      headerCells = Array.from(explicitHeader.querySelectorAll('th,td')).map(cellText);
     } else {
       const firstHeaderRow = rows.find((row) => Array.from(row.querySelectorAll('th')).length > 0) || rows[0];
-      headerCells = firstHeaderRow ? Array.from(firstHeaderRow.querySelectorAll('th,td')).map((cell) => clean(cell.textContent || cell.innerText)) : [];
+      headerCells = firstHeaderRow ? Array.from(firstHeaderRow.querySelectorAll('th,td')).map(cellText) : [];
     }
     const bodyRows = rows
-      .map((row) => Array.from(row.querySelectorAll('td,th')).map((cell) => clean(cell.textContent || cell.innerText)))
+      .map((row) => Array.from(row.querySelectorAll('td,th')).map(cellText))
       .filter((cells) => cells.length > 0)
       .filter((cells) => cells.join('|') !== headerCells.join('|'));
     return { tableIndex, headers: headerCells, rows: bodyRows, rowCount: bodyRows.length, className: table.className || '', id: table.id || '' };
   });
   const allText = clean(document.body ? (document.body.textContent || document.body.innerText) : '');
+  const labelledValue = (label) => {
+    const labelElement = Array.from(document.querySelectorAll('body *'))
+      .find((element) => clean(element.textContent || '') === label);
+    if (!labelElement || !labelElement.parentElement) return '';
+    const parentText = clean(labelElement.parentElement.innerText || labelElement.parentElement.textContent || '');
+    return parentText.toLowerCase().startsWith(label.toLowerCase())
+      ? clean(parentText.slice(label.length))
+      : parentText;
+  };
+  const sessionHeading = document.querySelector('h1');
+  const sessionFields = {
+    status: labelledValue('Status:'),
+    elapsed: labelledValue('Elapsed:'),
+    remaining: labelledValue('Remaining:'),
+    sessionName: sessionHeading && sessionHeading.parentElement
+      ? clean(sessionHeading.parentElement.innerText || sessionHeading.parentElement.textContent || '').replace(/\s*[•·]\s*/, ' - ')
+      : ''
+  };
   const inputs = Array.from(document.querySelectorAll('input, select')).map((el) => ({ tag: el.tagName.toLowerCase(), type: el.getAttribute('type') || '', value: el.value || '', name: el.getAttribute('name') || '', id: el.id || '', placeholder: el.getAttribute('placeholder') || '' }));
-  return { location: window.location.href, title: document.title || '', bodyText: allText.slice(0, 12000), tables, inputs, collectedAt: new Date().toISOString() };
+  return { location: window.location.href, title: document.title || '', bodyText: allText.slice(0, 12000), sessionFields, tables, inputs, collectedAt: new Date().toISOString() };
 })()`;
 
 // Creates a checksum for snapshot rows. The UI/debug view can use this to see
 // whether table contents changed between polls.
 function hashObject(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
-}
-
-// Extracts race/session metadata from the page text. These regexes are tuned to
-// common GetRaceResults wording; add patterns here when supporting new timing
-// providers or different language/page layouts.
-function parseSessionInfo(snapshot) {
-  const text = cleanText(snapshot.bodyText || '');
-  const session = { pageTitle: snapshot.title, url: snapshot.location, statusText: '', timeToGo: '', flag: '', sessionName: '', circuit: '', pageUpdated: '' };
-
-  const toGo = text.match(/To go:\s*([^A-Z\n\r]+?)\s+([A-Z][A-Za-z0-9 .:&'()\-]+?\s-\s(?:Race|Qualifying|Practice|Session|Warm.?up))/i);
-  if (toGo) {
-    session.timeToGo = cleanText(toGo[1]);
-    session.sessionName = cleanText(toGo[2]);
-  } else {
-    const simpleToGo = text.match(/To go:\s*([^\n\r]+)/i);
-    if (simpleToGo) session.timeToGo = cleanText(simpleToGo[1]).split(/\s{2,}/)[0];
-  }
-
-  const flagMatch = text.match(/(Green flag|Red flag|Yellow flag|Safety car|Full course yellow|Code 60|Finished flag)/i);
-  if (flagMatch) session.flag = cleanText(flagMatch[1]);
-
-  const commonStatus = ['No active heat', 'Waiting for the LiveTiming data', 'Not connected to the LiveTiming server', 'Trying to reconnect to the LiveTiming server', 'Connecting to the LiveTiming server'];
-  const foundStatus = commonStatus.find((line) => text.includes(line));
-  if (foundStatus) session.statusText = foundStatus;
-
-  if (!session.sessionName) {
-    const sessionMatch = text.match(/([A-Z][A-Za-z0-9 .:&'()\-]+?\s-\s(?:Race|Qualifying|Practice|Session|Warm.?up))/i);
-    if (sessionMatch) session.sessionName = cleanText(sessionMatch[1]);
-  }
-
-  const updated = text.match(/Page updated\s*([0-9:]+\s*\(UTC\))?/i);
-  if (updated) session.pageUpdated = cleanText(updated[1] || '');
-  return session;
 }
 
 // Converts a raw page snapshot into the normalized shape used by the UI and
@@ -672,7 +663,7 @@ function buildAnalyticsSummary(settings, context, rows = []) {
     sessionMode,
     selectedComparisonCar: selectedCarNumber,
     lapCount: laps.length,
-    paceLapCount: laps.filter(lapPaceEligible).length,
+    paceLapCount: representativePaceLaps(laps).length,
     cars: carNumbers.map((carNumber) => compactStats(carStats(history, carNumber))),
     classes: classNames.map((className) => ({
       className,
@@ -736,6 +727,8 @@ function parserDebugFromNormalized(normalized, storageRows, context, lastError =
   return {
     timingUrl: context.timingUrl || '',
     sourceProvider: context.sourceProvider || 'unknown',
+    session: normalized.session || {},
+    bodyTextSample: normalized.diagnostics?.bodyTextSample || '',
     detectedHeaders: normalized.headers || [],
     rowCount: storageRows.length,
     parsedCarNumbers: storageRows.map((row) => row.carNumber).filter(Boolean),
@@ -785,43 +778,6 @@ function loadExistingPitStates(settings) {
 
 function liveRowKey(row) {
   return [row.sourceProvider, row.timingUrl, row.sessionName, row.carNumber].join('|');
-}
-
-// Clears live sector fields when the previous row is unavailable. This avoids
-// assigning current in-progress sectors to a completed lap with no evidence.
-function withoutCurrentSectors(row) {
-  return {
-    ...row,
-    sector1: '',
-    sector2: '',
-    sector3: '',
-    sector1Flag: '',
-    sector2Flag: '',
-    sector3Flag: '',
-    sector1Eligible: '',
-    sector2Eligible: '',
-    sector3Eligible: ''
-  };
-}
-
-// Builds the completed-lap row from the newly changed LAST value. The previous
-// live row carries the sector values for that lap because live timing sector
-// columns normally describe the lap currently being driven.
-function completedLapRowFromLiveRow(row, previousRow) {
-  if (!previousRow) return withoutCurrentSectors(row);
-  return {
-    ...row,
-    driverName: previousRow.driverName || row.driverName,
-    sector1: previousRow.sector1 || '',
-    sector2: previousRow.sector2 || '',
-    sector3: previousRow.sector3 || row.sector3 || '',
-    sector1Flag: previousRow.sector1Flag || '',
-    sector2Flag: previousRow.sector2Flag || '',
-    sector3Flag: previousRow.sector3Flag || row.sector3Flag || '',
-    sector1Eligible: previousRow.sector1Eligible || '',
-    sector2Eligible: previousRow.sector2Eligible || '',
-    sector3Eligible: previousRow.sector3Eligible || row.sector3Eligible || ''
-  };
 }
 
 // Stores newly completed laps from provider-independent normalized storage rows.

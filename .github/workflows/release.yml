@@ -21,6 +21,7 @@ jobs:
           - platform: macOS
             os: macos-15
             build-command: npx electron-builder --mac dmg zip --publish never
+            update-manifest: dist/latest-mac.yml
             artifact-name: macos-release
             artifact-paths: |
               dist/*.dmg
@@ -31,6 +32,7 @@ jobs:
           - platform: Windows
             os: windows-latest
             build-command: npx electron-builder --win nsis --publish never
+            update-manifest: dist/latest.yml
             artifact-name: windows-release
             artifact-paths: |
               dist/*.exe
@@ -66,6 +68,9 @@ jobs:
           # Future Windows signing secrets:
           # WIN_CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
           # WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+
+      - name: Verify updater manifest assets
+        run: node tests/verify-release-assets.js "${{ matrix.update-manifest }}"
 
       - name: List dist files
         shell: pwsh

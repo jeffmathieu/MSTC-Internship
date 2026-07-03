@@ -1,0 +1,49 @@
+\chapter{Technische architectuur}
+\label{chap:architectuur}
+
+\section{Electron als desktopplatform}
+De applicatie is gebouwd met Electron en JavaScript. Electron combineert een Chromium-renderer met een Node.js-mainproces. Deze keuze maakte het mogelijk om een webgebaseerde interface te bouwen en tegelijk lokale bestanden, native dialoogvensters en meerdere desktopvensters te beheren. Dezelfde codebasis kan voor macOS en Windows worden verpakt.
+
+Het mainproces in \code{src/main/main.js} beheert de levenscyclus van de applicatie, instellingen, vensters, polling, opslag en IPC-handlers. Het verborgen livevenster laadt de echte timingwebsite. Een extractiescript wordt in die pagina uitgevoerd om tabelkoppen, cellen en sessie-informatie uit de gerenderde DOM te lezen. Hierdoor kan de applicatie ook dynamische websites verwerken die niet als eenvoudige statische HTML beschikbaar zijn.
+
+\section{Proces- en modulegrenzen}
+De code is bewust in drie zones verdeeld:
+
+\begin{itemize}
+  \item \code{src/main}: Electron-specifieke infrastructuur, vensters, updates en bestands-I/O;
+  \item \code{src/shared}: pure domeinfuncties voor parsing, analyse, voorspelling, pitstops en viewmodellen;
+  \item \code{src/renderer}: HTML, CSS en code die reeds berekende data op het scherm zet.
+\end{itemize}
+
+De preloadlaag vormt de gecontroleerde brug tussen renderer en mainproces. \code{contextIsolation} staat aan en \code{nodeIntegration} uit, zodat de renderer niet rechtstreeks toegang krijgt tot Node.js. Alleen expliciet aangeboden functies, zoals instellingen ophalen, collectie starten of een grafiekvenster openen, zijn beschikbaar.
+
+De scheiding tussen renderer en domeinlogica was een belangrijke verbetering tijdens de stage. Vroege versies bevatten berekeningen in de UI-code. Daardoor was het moeilijk om te bewijzen dat een waarde correct was en konden verschillende schermen dezelfde berekening anders uitvoeren. In de huidige architectuur leveren modules zoals \code{lapAnalytics.js}, \code{classBattle.js}, \code{lapPrediction.js} en \code{pitstopPlanner.js} volledige resultaten. De renderer beperkt zich tot selectie, presentatie en gebruikersinteractie.
+
+\section{Vensterarchitectuur}
+Er is één hoofdvenster voor de primaire wagen. Wanneer de gebruiker via de setup een tweede of derde wagen toevoegt, opent voor elke extra wagen een dashboardvenster met dezelfde renderer en een andere wagenparameter. Alle vensters ontvangen dezelfde collectorstatus. De timingwebsite wordt dus slechts eenmaal geladen en bevraagd.
+
+Grafieken worden in afzonderlijke vensters geopend. Ook zij gebruiken de reeds opgeslagen lap history en starten geen eigen collector. Deze aanpak houdt het hoofdscherm compact en maakt het mogelijk om analysevensters alleen te openen wanneer ze nodig zijn.
+
+Een verborgen BrowserWindow blijft tijdens collectie actief. Wanneer de gebruiker de timingpagina ter debugging toont en daarna sluit, wordt dit venster normaal verborgen in plaats van vernietigd. De algemene applicatielifecycle vormt daarop een uitzondering: bij een echte Quit worden polling en close-to-hide uitgeschakeld. Deze aparte lifecyclemodule lost een macOS-probleem op waarbij de app anders in de Dock actief bleef en alleen met Force Quit kon worden beëindigd.
+
+\section{Datastroom}
+Elke poll doorloopt dezelfde keten:
+
+\begin{enumerate}
+  \item Het extractiescript leest tabellen en sessievelden uit de livepagina.
+  \item De parser herkent bruikbare headers en zet elke rij om naar canonieke velden.
+  \item De storage-normalizer voegt provider- en sessiecontext toe.
+  \item Nieuwe voltooide ronden worden via een stabiele identiteit ontdubbeld.
+  \item De lap history en actuele rijen worden aan de analysemodules doorgegeven.
+  \item Voor elke gevolgde wagen worden dashboardanalyse, voorspelling en pitstopplan berekend.
+  \item De volledige collectorstatus wordt opgeslagen en via IPC naar alle vensters gestuurd.
+\end{enumerate}
+
+De UI en de berekeningen worden dus gevoed door dezelfde consistente snapshot. Dit voorkomt dat een grafiek bijvoorbeeld met gegevens van een andere poll rekent dan het hoofdscherm.
+
+\section{Instellingen en configuratie}
+Instellingen worden als JSON in de Electron user-datafolder bewaard. Ze omvatten timing-URL, gevolgde wagens, modus, thema, opslagmap, referentietijden en pitstopregels. Referentietijden zijn afzonderlijk per sessiemodus opgeslagen, zodat een qualifyingreferentie een racereferentie niet overschrijft. Circuitprofielen voor Spa, Zolder en Assen bevatten standaardwaarden voor de relevante afstand en FCY-snelheid. In de pitstopsetup kunnen deze waarden per evenement worden overschreven wanneer het reglement afwijkt.
+
+\section{Bewuste technische beperkingen}
+De timingwebsite blijft een externe afhankelijkheid. Een wijziging van DOM-structuur of kolomnamen kan parseraanpassingen vereisen. Daarom bewaart de applicatie parserdiagnostiek en blijft de livepagina zichtbaar via een debugactie. Ook worden onbekende of onbetrouwbare waarden niet stilzwijgend als nul geïnterpreteerd: analysefuncties retourneren waar mogelijk een expliciete onbeschikbare toestand.
+

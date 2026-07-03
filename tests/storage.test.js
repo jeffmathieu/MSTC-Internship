@@ -4,6 +4,8 @@ const {
   LAP_HISTORY_COLUMNS,
   normalizeForStorage,
   lapRecordFromNormalizedRow,
+  currentSectorsMatchCompletedLap,
+  completedLapRowFromLiveRow,
   lapIdentity,
   toCsvRows,
   detectSourceProvider
@@ -85,6 +87,33 @@ assert.strictEqual(risScreenshotStorageRow.teamName, 'Zeknova3 by a roule CITROE
 assert.strictEqual(risScreenshotStorageRow.diff, '1.350');
 assert.strictEqual(risScreenshotStorageRow.interval, '1.350');
 assert.strictEqual(risScreenshotStorageRow.lastPit, '0:55');
+
+const risCompletedLiveRow = {
+  sourceProvider: 'ris-timing',
+  driverName: 'DE JONG Alain',
+  lastLap: '3:02.091',
+  sector1: '53.272',
+  sector2: '1:21.504',
+  sector3: '47.315',
+  sector1Flag: 'Green flag',
+  sector2Flag: 'Green flag',
+  sector3Flag: 'Green flag'
+};
+assert.strictEqual(currentSectorsMatchCompletedLap(risCompletedLiveRow), true);
+const completedFromCurrentRisRow = completedLapRowFromLiveRow(risCompletedLiveRow, {
+  driverName: 'DE JONG Alain',
+  sector1: '53.000',
+  sector2: '1:20.000',
+  sector3: ''
+});
+assert.strictEqual(completedFromCurrentRisRow.sector1, '53.272');
+assert.strictEqual(completedFromCurrentRisRow.sector2, '1:21.504');
+assert.strictEqual(completedFromCurrentRisRow.sector3, '47.315');
+
+const nonMatchingCurrentRow = { ...risCompletedLiveRow, sector3: '10.000' };
+const previousEvidence = { driverName: 'Previous Driver', sector1: '52.000', sector2: '1:20.000', sector3: '46.000' };
+assert.strictEqual(currentSectorsMatchCompletedLap(nonMatchingCurrentRow), false);
+assert.strictEqual(completedLapRowFromLiveRow(nonMatchingCurrentRow, previousEvidence).sector3, '46.000');
 
 const fallbackContextRow = normalizeForStorage({
   movement: 'up',

@@ -180,6 +180,52 @@ function lapRecordFromNormalizedRow(row) {
   };
 }
 
+// Verifies whether the sectors visible in the current live row belong to its
+// newly completed LAST lap. RIS publishes S3 and LAST together; their exact sum
+// is stronger evidence than provider-specific timing assumptions.
+function currentSectorsMatchCompletedLap(row, toleranceMs = 2000) {
+  const lapMs = parseLapTimeToMs(row?.lastLap);
+  const sectors = [row?.sector1, row?.sector2, row?.sector3].map(parseLapTimeToMs);
+  if (!Number.isFinite(lapMs) || sectors.some((value) => !Number.isFinite(value))) return false;
+  return Math.abs(sectors.reduce((sum, value) => sum + value, 0) - lapMs) <= toleranceMs;
+}
+
+function withoutCurrentSectors(row) {
+  return {
+    ...row,
+    sector1: '',
+    sector2: '',
+    sector3: '',
+    sector1Flag: '',
+    sector2Flag: '',
+    sector3Flag: '',
+    sector1Eligible: '',
+    sector2Eligible: '',
+    sector3Eligible: ''
+  };
+}
+
+// Selects sector evidence for a completed lap. Current-row sectors are used
+// only when they reconcile with LAST; otherwise the previous snapshot remains
+// the conservative source used by GetRaceResults-style feeds.
+function completedLapRowFromLiveRow(row, previousRow) {
+  const evidence = currentSectorsMatchCompletedLap(row) ? row : previousRow;
+  if (!evidence) return withoutCurrentSectors(row);
+  return {
+    ...row,
+    driverName: previousRow?.driverName || row.driverName,
+    sector1: evidence.sector1 || '',
+    sector2: evidence.sector2 || '',
+    sector3: evidence.sector3 || '',
+    sector1Flag: evidence.sector1Flag || '',
+    sector2Flag: evidence.sector2Flag || '',
+    sector3Flag: evidence.sector3Flag || '',
+    sector1Eligible: evidence.sector1Eligible || '',
+    sector2Eligible: evidence.sector2Eligible || '',
+    sector3Eligible: evidence.sector3Eligible || ''
+  };
+}
+
 // Builds a duplicate-detection key for completed laps. Lap number is preferred;
 // when missing, driver + last lap is the fallback because some providers do not
 // expose lap numbers reliably.
@@ -195,6 +241,8 @@ module.exports = {
   normalizeStorageField,
   normalizeForStorage,
   lapRecordFromNormalizedRow,
+  currentSectorsMatchCompletedLap,
+  completedLapRowFromLiveRow,
   lapIdentity,
   toCsvRows,
   detectSourceProvider

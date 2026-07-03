@@ -317,6 +317,8 @@ module.exports = (async () => {
 
   assert.strictEqual(document.getElementById('session-name').textContent, 'Test Race');
   assert.strictEqual(document.getElementById('session-time').textContent, '55:54');
+  assert.strictEqual(document.getElementById('status-text').textContent, '—');
+  assert.strictEqual(document.getElementById('collector-health').classList.contains('is-ok'), true);
   assert.strictEqual(document.getElementById('info-car').textContent, '13');
   assert.strictEqual(document.getElementById('info-driver').textContent, 'Nigel Moore');
   assert.strictEqual(document.getElementById('info-class-pic').textContent, 'LMP3 / 1');
@@ -348,6 +350,17 @@ module.exports = (async () => {
 
   assert.strictEqual(document.getElementById('best-sector-1').textContent, '0:41.000');
   assert.strictEqual(document.getElementById('best-sector-2').textContent, '0:46.000');
+  collectorUpdate({ ...updatedState, session: { ...updatedState.session, flag: 'Full course yellow' } });
+  assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-caution'), true);
+  assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-red'), false);
+  assert.strictEqual(document.getElementById('status-text').textContent, 'FULL COURSE YELLOW');
+  collectorUpdate({ ...updatedState, session: { ...updatedState.session, flag: 'Red flag' } });
+  assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-red'), true);
+  assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-caution'), false);
+  assert.strictEqual(document.getElementById('status-text').textContent, 'RED FLAG');
+  collectorUpdate({ ...updatedState, status: 'error', message: 'Timing page unavailable' });
+  assert.strictEqual(document.getElementById('collector-health').classList.contains('is-error'), true);
+  assert.strictEqual(document.getElementById('collector-health').attributes.title, 'Timing page unavailable');
   assert.strictEqual(document.getElementById('best-sector-3').textContent, '0:36.000');
   assert.strictEqual(document.getElementById('ideal-time').textContent, '2:03.000');
   assert.strictEqual(document.getElementById('ideal-time-delta').textContent, 'Delta -1.500s');

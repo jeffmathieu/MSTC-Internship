@@ -36,8 +36,10 @@
   // and outlaps remain stored but are deliberately absent from readable graphs.
   function driverLapTimes(history, carNumber) {
     const groups = new Map();
-    followedCarLaps(history, carNumber).forEach((lap, index) => {
-      if (!lapAnalytics.lapPaceEligible(lap)) return;
+    const laps = followedCarLaps(history, carNumber);
+    const representative = new Set(lapAnalytics.representativePaceLaps(laps));
+    laps.forEach((lap, index) => {
+      if (!representative.has(lap)) return;
       const driver = lap.driverName || 'Unknown';
       if (!groups.has(driver)) groups.set(driver, []);
       const driverLapNumber = groups.get(driver).length + 1;
@@ -66,7 +68,7 @@
     const drivers = lapAnalytics.driverStats(history, carNumber);
     const categories = drivers.map((driver) => driver.driverName);
     const recentAverage = (driver) => {
-      const recent = driver.laps.filter(lapAnalytics.lapPaceEligible).slice(-recentLapCount);
+      const recent = lapAnalytics.representativePaceLaps(driver.laps).slice(-recentLapCount);
       return average(recent.map((lap) => lap.lapTimeMs));
     };
     if (mode === 'qualifying') {
@@ -121,7 +123,7 @@
   // use the data already available; after `windowSize` laps it becomes a fixed
   // rolling window. This lets the graph appear before five laps are complete.
   function rollingAveragePoints(laps, windowSize = 5) {
-    const eligible = laps.filter(lapAnalytics.lapPaceEligible);
+    const eligible = lapAnalytics.representativePaceLaps(laps);
     return eligible.map((lap, index) => {
       const window = eligible.slice(Math.max(0, index - windowSize + 1), index + 1);
       return {
@@ -147,8 +149,7 @@
         name: `#${car.carNumber}${car.teamName ? ` ${car.teamName}` : ''}`,
         carNumber: car.carNumber,
         highlight: String(car.carNumber) === String(carNumber),
-        points: car.laps
-          .filter(lapAnalytics.lapPaceEligible)
+        points: lapAnalytics.representativePaceLaps(car.laps)
           .map((lap, index) => ({
             x: chartLapNumber(lap, index),
             y: lap.lapTimeMs,

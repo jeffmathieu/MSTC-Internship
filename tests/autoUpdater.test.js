@@ -6,7 +6,9 @@ function fakeUpdater() {
   const updater = new EventEmitter();
   updater.checkCount = 0;
   updater.installCount = 0;
+  updater.downloadCount = 0;
   updater.checkForUpdates = async () => { updater.checkCount += 1; };
+  updater.downloadUpdate = async () => { updater.downloadCount += 1; };
   updater.quitAndInstall = () => { updater.installCount += 1; };
   return updater;
 }
@@ -27,7 +29,7 @@ assert.strictEqual(setupAutoUpdates({
 assert.strictEqual(developmentUpdater.checkCount, 0);
 assert.strictEqual(developmentUpdater.listenerCount('update-downloaded'), 0);
 
-const responses = [1, 0];
+const responses = [0, 1, 0];
 const dialogCalls = [];
 const dialog = {
   showMessageBox: async (...args) => {
@@ -53,11 +55,14 @@ async function flushAsyncEvents() {
 module.exports = (async () => {
   await flushAsyncEvents();
   assert.strictEqual(updater.checkCount, 1);
-  assert.strictEqual(updater.autoDownload, true);
+  assert.strictEqual(updater.autoDownload, false);
   assert.strictEqual(updater.autoInstallOnAppQuit, true);
 
   updater.emit('checking-for-update');
   updater.emit('update-available', { version: '1.1.0' });
+  await flushAsyncEvents();
+  assert.strictEqual(updater.downloadCount, 1, 'accepted available-update prompt starts the download');
+  assert.strictEqual(dialogCalls[0][1].title, 'Update available');
   updater.emit('update-not-available', {});
   updater.emit('download-progress', { percent: 42.25, bytesPerSecond: 1200.7 });
   updater.emit('download-progress', {});
@@ -69,7 +74,7 @@ module.exports = (async () => {
   updater.emit('update-downloaded', { version: '1.1.0' });
   await flushAsyncEvents();
   assert.strictEqual(updater.installCount, 0, 'Later keeps the current app running');
-  assert.strictEqual(dialogCalls[0][0], parentWindow);
+  assert.strictEqual(dialogCalls[1][0], parentWindow);
 
   updater.emit('update-downloaded', { version: '1.1.1' });
   await flushAsyncEvents();
