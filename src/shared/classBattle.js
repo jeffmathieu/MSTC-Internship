@@ -74,6 +74,36 @@ function parseLapGap(value) {
   return match ? Number(match[1]) : null;
 }
 
+// RIS can expose only GAP, where every value is cumulative to the overall
+// leader. In that layout GAP must be subtracted, never added row by row.
+function usesCumulativeGap(rows) {
+  const ordered = overallSortedRows(rows);
+  const hasAdjacentIntervals = ordered.slice(1).some((row) =>
+    parseGapToMs(row.diff) !== null || parseGapToMs(row.interval) !== null ||
+    parseLapGap(row.diff) !== null || parseLapGap(row.interval) !== null);
+  return !hasAdjacentIntervals && ordered.slice(1).some((row) =>
+    parseGapToMs(row.gap) !== null || parseLapGap(row.gap) !== null);
+}
+
+// Converts one cumulative GAP-to-leader value to milliseconds. Numeric GAP is
+// exact. A lap deficit is necessarily approximate and uses a representative
+// lap time; completed-lap counters win over provider text when available.
+function cumulativeGapToLeaderMs(rows, row, averageLapMs = null) {
+  const ordered = overallSortedRows(rows);
+  const index = ordered.findIndex((candidate) => String(candidate.carNumber) === String(row?.carNumber));
+  if (index < 0) return null;
+  if (index === 0) return 0;
+  const numericGap = parseGapToMs(row?.gap);
+  if (Number.isFinite(numericGap)) return numericGap;
+  if (!Number.isFinite(averageLapMs) || averageLapMs <= 0) return null;
+  const leaderLap = numberOrNull(ordered[0]?.lapNumber);
+  const rowLap = numberOrNull(row?.lapNumber);
+  const lapDeficit = leaderLap !== null && rowLap !== null
+    ? Math.max(0, leaderLap - rowLap)
+    : parseLapGap(row?.gap);
+  return Number.isFinite(lapDeficit) ? lapDeficit * averageLapMs : null;
+}
+
 // Formats gap deltas for compact class-table cells.
 function formatSeconds(ms) {
   return Number.isFinite(ms) ? `${(ms / 1000).toFixed(3)}s` : '—';
@@ -157,11 +187,16 @@ function relativeClassGap(rows, classRows, fromRow, toRow) {
 // Adds the provider's DIFF/INT chain through the complete overall table. This
 // remains correct when other classes sit between two class rivals because each
 // row contributes its interval to the immediately preceding overall car.
-function overallRelativeGap(rows, fromRow, toRow) {
+function overallRelativeGap(rows, fromRow, toRow, averageLapMs = null) {
   const ordered = overallSortedRows(rows);
   const fromIndex = ordered.findIndex((row) => String(row.carNumber) === String(fromRow?.carNumber));
   const toIndex = ordered.findIndex((row) => String(row.carNumber) === String(toRow?.carNumber));
   if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return null;
+  if (usesCumulativeGap(rows)) {
+    const fromGap = cumulativeGapToLeaderMs(rows, fromRow, averageLapMs);
+    const toGap = cumulativeGapToLeaderMs(rows, toRow, averageLapMs);
+    return Number.isFinite(fromGap) && Number.isFinite(toGap) ? Math.abs(toGap - fromGap) : null;
+  }
   const fromLap = numberOrNull(fromRow?.lapNumber);
   const toLap = numberOrNull(toRow?.lapNumber);
   if (fromLap !== null && toLap !== null && fromLap !== toLap) return null;
@@ -224,7 +259,10 @@ function buildBattleItem({ rows, classRows, followed, row, history, lapWindow })
   const ourAvg = recentAverageForCar(history, followed.carNumber, lapWindow) ?? parseTimeToMs(followed.lastLap);
   const theirAvg = recentAverageForCar(history, row.carNumber, lapWindow) ?? parseTimeToMs(row.lastLap);
   const relation = rowSortNumber(row.classPosition) < rowSortNumber(followed.classPosition) ? 'ahead' : 'behind';
-  const relativeGap = overallRelativeGap(rows, followed, row);
+  const representativeLapMs = Number.isFinite(ourAvg) && Number.isFinite(theirAvg)
+    ? (ourAvg + theirAvg) / 2
+    : ourAvg ?? theirAvg;
+  const relativeGap = overallRelativeGap(rows, followed, row, representativeLapMs);
   const lapGap = lapGapBetween(rows, followed, row);
   const ourLastLapMs = parseTimeToMs(followed.lastLap) ?? numberOrNull(followed.lastLapMs);
   const theirLastLapMs = parseTimeToMs(row.lastLap) ?? numberOrNull(row.lastLapMs);
@@ -234,7 +272,7 @@ function buildBattleItem({ rows, classRows, followed, row, history, lapWindow })
   let minutesToCatch = null;
   let estimate = 'class gap unknown';
   let estimatedGapMs = null;
-  let gapIsEstimate = false;
+  let gapIsEstimate = usesCumulativeGap(rows) && (parseLapGap(followed.gap) !== null || parseLapGap(row.gap) !== null || (numberOrNull(followed.lapNumber) !== numberOrNull(row.lapNumber)));
 
   if (Number.isFinite(ourAvg) && Number.isFinite(theirAvg)) {
     // For an ahead rival, its pace estimates the time represented by its lead.
@@ -348,6 +386,8 @@ return {
   parseTimeToMs,
   parseLapGap,
   parseGapToMs,
+  usesCumulativeGap,
+  cumulativeGapToLeaderMs,
   formatSeconds,
   formatSignedSeconds,
   rowSortNumber,

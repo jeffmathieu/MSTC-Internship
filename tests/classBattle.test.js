@@ -12,6 +12,8 @@ const {
   classGapToPrevious,
   relativeClassGap,
   overallRelativeGap,
+  usesCumulativeGap,
+  cumulativeGapToLeaderMs,
   lapGapBetween,
   lapsForCar,
   recentAverageForCar,
@@ -212,5 +214,36 @@ assert.strictEqual(textLapSummary.behind.gapLabel, '3L');
 assert.strictEqual(textLapSummary.behind.estimatedGapMs, null);
 assert.strictEqual(textLapSummary.behind.lapsToCatch, null);
 assert.strictEqual(lapGapBetween(textLapGapRows, textLapGapRows[0], textLapGapRows[2]), null);
+
+// RIS GAP-only timing: GAP is cumulative to the overall leader, including cars
+// from other classes. The class gap is therefore the difference between the two
+// cumulative values, not their sum and not the visual row interval.
+const risCumulativeRows = [
+  { sourceProvider: 'ris-timing', position: 1, carNumber: 1, className: 'PRO', classPosition: 1, lapNumber: 50, gap: '--', lastLap: '2:00.000' },
+  { sourceProvider: 'ris-timing', position: 2, carNumber: 90, className: 'OTHER', classPosition: 1, lapNumber: 50, gap: '12.000', lastLap: '2:01.000' },
+  { sourceProvider: 'ris-timing', position: 3, carNumber: 33, className: 'CC', classPosition: 1, lapNumber: 50, gap: '20.000', lastLap: '2:05.000' },
+  { sourceProvider: 'ris-timing', position: 4, carNumber: 77, className: 'OTHER', classPosition: 2, lapNumber: 50, gap: '24.000', lastLap: '2:03.000' },
+  { sourceProvider: 'ris-timing', position: 5, carNumber: 65, className: 'CC', classPosition: 2, lapNumber: 50, gap: '30.000', lastLap: '2:04.000' }
+];
+assert.strictEqual(usesCumulativeGap(risCumulativeRows), true);
+assert.strictEqual(cumulativeGapToLeaderMs(risCumulativeRows, risCumulativeRows[4], 125000), 30000);
+assert.strictEqual(overallRelativeGap(risCumulativeRows, risCumulativeRows[2], risCumulativeRows[4], 125000), 10000);
+const risCumulativeBattle = buildAdjacentClassBattles(risCumulativeRows, [
+  { carNumber: 33, lapNumber: 49, lapTimeMs: 125000 },
+  { carNumber: 65, lapNumber: 49, lapTimeMs: 124000 }
+], 33);
+assert.strictEqual(risCumulativeBattle.behind.relativeGap, 10000);
+assert.strictEqual(risCumulativeBattle.behind.lapsToCatch, 10);
+
+// A lap-valued cumulative GAP remains usable as an explicit estimate. The
+// leader row's lap counter is authoritative, so its display text is never
+// mistaken for a 50-lap deficit.
+const risLapGapRows = [
+  { sourceProvider: 'ris-timing', position: 1, carNumber: 1, className: 'PRO', classPosition: 1, lapNumber: 50, gap: '50 laps', lastLap: '2:00.000' },
+  { sourceProvider: 'ris-timing', position: 2, carNumber: 33, className: 'CC', classPosition: 1, lapNumber: 49, gap: '1L', lastLap: '2:05.000' },
+  { sourceProvider: 'ris-timing', position: 3, carNumber: 65, className: 'CC', classPosition: 2, lapNumber: 47, gap: '3 laps', lastLap: '2:04.000' }
+];
+assert.strictEqual(cumulativeGapToLeaderMs(risLapGapRows, risLapGapRows[0], 125000), 0);
+assert.strictEqual(overallRelativeGap(risLapGapRows, risLapGapRows[1], risLapGapRows[2], 125000), 250000);
 
 console.log('Class battle tests passed.');
