@@ -460,4 +460,33 @@ const unreliableProjection = projectClassAfterPit([
 ], '33', 75000);
 assert.strictEqual(unreliableProjection.available, false);
 
+// RIS GAP-only projection subtracts cumulative leader gaps. Other-class cars
+// can sit between class rivals without changing the result.
+const risGapProjection = projectClassAfterPit([
+  { sourceProvider: 'ris-timing', position: 1, carNumber: 1, className: 'PRO', classPosition: 1, lapNumber: 50, gap: '--', lastLapMs: 120000 },
+  { sourceProvider: 'ris-timing', position: 2, carNumber: 33, className: 'CC', classPosition: 1, lapNumber: 50, gap: '20.000', lastLapMs: 125000 },
+  { sourceProvider: 'ris-timing', position: 3, carNumber: 90, className: 'OTHER', classPosition: 1, lapNumber: 50, gap: '40.000', lastLapMs: 126000 },
+  { sourceProvider: 'ris-timing', position: 4, carNumber: 65, className: 'CC', classPosition: 2, lapNumber: 50, gap: '70.000', lastLapMs: 124000 },
+  { sourceProvider: 'ris-timing', position: 5, carNumber: 56, className: 'CC', classPosition: 3, lapNumber: 50, gap: '110.000', lastLapMs: 126000 }
+], '33', 75000, { averageLapMs: 125000 });
+assert.strictEqual(risGapProjection.available, true);
+assert.strictEqual(risGapProjection.gapSource, 'cumulative-gap');
+assert.strictEqual(risGapProjection.projectedClassPosition, 2);
+assert.strictEqual(risGapProjection.carAhead.carNumber, '65');
+assert.strictEqual(risGapProjection.carAhead.projectedGapToUsMs, -25000);
+assert.strictEqual(risGapProjection.carBehind.carNumber, '56');
+assert.strictEqual(risGapProjection.carBehind.projectedGapToUsMs, 15000);
+
+// Lap-valued GAP uses the representative lap time and is clearly marked as an
+// estimate. A 75-second stop cannot erase a multi-lap deficit.
+const risLapProjection = projectClassAfterPit([
+  { sourceProvider: 'ris-timing', position: 1, carNumber: 1, className: 'PRO', classPosition: 1, lapNumber: 50, gap: '50 laps', lastLapMs: 120000 },
+  { sourceProvider: 'ris-timing', position: 2, carNumber: 33, className: 'CC', classPosition: 1, lapNumber: 49, gap: '1L', lastLapMs: 125000 },
+  { sourceProvider: 'ris-timing', position: 3, carNumber: 65, className: 'CC', classPosition: 2, lapNumber: 46, gap: '4L', lastLapMs: 124000 }
+], '33', 75000, { averageLapMs: 125000 });
+assert.strictEqual(risLapProjection.gapSource, 'cumulative-gap-estimated');
+assert.strictEqual(risLapProjection.projectedClassPosition, 1);
+assert.strictEqual(risLapProjection.carBehind.carNumber, '65');
+assert.strictEqual(risLapProjection.carBehind.projectedGapToUsMs, 300000);
+
 console.log('Pitstop planner tests passed.');

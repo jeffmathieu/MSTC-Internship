@@ -342,6 +342,75 @@ function intervalForRow(row) {
   return parseGapToMs(row.interval) ?? parseGapToMs(row.diff) ?? parseGapToMs(row.gap);
 }
 
+// Detects a provider layout with only cumulative GAP-to-leader information.
+// In this mode adding GAP values would multiply the distance incorrectly.
+function usesCumulativeGap(rows) {
+  const ordered = overallSortedRows(rows);
+  const hasAdjacentIntervals = ordered.slice(1).some((row) =>
+    parseGapToMs(row.interval) !== null || parseGapToMs(row.diff) !== null ||
+    parseLapGap(row.interval) !== null || parseLapGap(row.diff) !== null);
+  return !hasAdjacentIntervals && ordered.slice(1).some((row) =>
+    parseGapToMs(row.gap) !== null || parseLapGap(row.gap) !== null);
+}
+
+function parseLapGap(value) {
+  const match = String(value || '').trim().match(/(?:^|\s|-)(\d+)\s*(?:l|laps?)(?:\s|$|-)/i);
+  return match ? Number(match[1]) : null;
+}
+
+// Places every car on one cumulative time-behind-leader axis. Lap deficits are
+// estimates because a lap counter does not include the car's position in-lap.
+function cumulativeGapToLeaderMs(rows, row, averageLapMs) {
+  const ordered = overallSortedRows(rows);
+  const index = ordered.findIndex((candidate) => String(candidate.carNumber) === String(row?.carNumber));
+  if (index < 0) return null;
+  if (index === 0) return 0;
+  const numericGap = parseGapToMs(row?.gap);
+  if (Number.isFinite(numericGap)) return numericGap;
+  if (!Number.isFinite(averageLapMs) || averageLapMs <= 0) return null;
+  const leaderLap = lapNumber(ordered[0]);
+  const currentLap = lapNumber(row);
+  const laps = Number.isFinite(leaderLap) && Number.isFinite(currentLap)
+    ? Math.max(0, leaderLap - currentLap)
+    : parseLapGap(row?.gap);
+  return Number.isFinite(laps) ? laps * averageLapMs : null;
+}
+
+// Projects the followed car on the cumulative GAP axis after adding pit loss.
+// This is the correct RIS fallback when DIFF/INT are absent.
+function projectFromCumulativeGap(rows, rowsInClass, followed, pitLossMs, averageLapMs) {
+  if (!Number.isFinite(pitLossMs)) return null;
+  const coordinates = rowsInClass.map((row) => ({
+    row,
+    gapMs: cumulativeGapToLeaderMs(rows, row, averageLapMs),
+    estimated: parseLapGap(row.gap) !== null
+  })).filter((item) => Number.isFinite(item.gapMs));
+  const our = coordinates.find((item) => String(item.row.carNumber) === String(followed.carNumber));
+  if (!our) return null;
+  const ourProjectedGapMs = our.gapMs + pitLossMs;
+  const projected = coordinates.map((item) => {
+    const isOurCar = String(item.row.carNumber) === String(followed.carNumber);
+    return {
+      carNumber: String(item.row.carNumber), team: item.row.team || '', driver: item.row.driver || '',
+      currentClassPosition: item.row.classPosition || null,
+      lapDeltaToUs: Number.isFinite(lapNumber(item.row)) && Number.isFinite(lapNumber(followed)) ? lapNumber(item.row) - lapNumber(followed) : null,
+      projectedGapToUsMs: isOurCar ? 0 : item.gapMs - ourProjectedGapMs,
+      estimatedFromLapGap: item.estimated,
+      isOurCar
+    };
+  }).sort((a, b) => a.projectedGapToUsMs - b.projectedGapToUsMs);
+  const ourIndex = projected.findIndex((item) => item.isOurCar);
+  return {
+    available: true,
+    projectedClassPosition: ourIndex + 1,
+    averageLapMs,
+    gapSource: coordinates.some((item) => item.estimated) ? 'cumulative-gap-estimated' : 'cumulative-gap',
+    carAhead: ourIndex > 0 ? projected[ourIndex - 1] : null,
+    carBehind: ourIndex < projected.length - 1 ? projected[ourIndex + 1] : null,
+    items: projected
+  };
+}
+
 // Estimates a representative lap time for converting lap differences into race
 // distance. A provided average wins; otherwise the median live last-lap value is
 // used because it is less sensitive to one bad/slow car than a mean.
@@ -413,6 +482,10 @@ function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) 
   const { followed, rows: rowsInClass } = classRows(rows, followedCarNumber);
   if (!followed || !rowsInClass.length) return { available: false, reason: 'No class data yet', items: [] };
   const averageLapMs = estimateAverageLapMs(rowsInClass, options.averageLapMs);
+  if (usesCumulativeGap(rows)) {
+    const cumulativeProjection = projectFromCumulativeGap(rows, rowsInClass, followed, pitLossMs, averageLapMs);
+    if (cumulativeProjection) return cumulativeProjection;
+  }
   const overallBehind = overallGapsBehindFollowed(rows, followedCarNumber, averageLapMs);
   const classBehind = overallBehind.filter((item) => item.row.className === followed.className);
   const followedLap = lapNumber(followed);
@@ -625,6 +698,9 @@ return {
   pitCountFromRow,
   nextPitStateFromRow,
   estimateAverageLapMs,
+  usesCumulativeGap,
+  cumulativeGapToLeaderMs,
+  projectFromCumulativeGap,
   raceClockFromSession,
   isFcySession,
   fcyRowSignatures,
