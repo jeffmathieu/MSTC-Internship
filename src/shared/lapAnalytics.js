@@ -34,6 +34,13 @@ function min(values) {
   return usable.length ? Math.min(...usable) : null;
 }
 
+function median(values) {
+  const usable = values.map(numberOrNull).filter((value) => value !== null).sort((a, b) => a - b);
+  if (!usable.length) return null;
+  const middle = Math.floor(usable.length / 2);
+  return usable.length % 2 ? usable[middle] : (usable[middle - 1] + usable[middle]) / 2;
+}
+
 // Reads booleans stored as booleans, numbers, or CSV strings.
 function boolOrNull(value) {
   if (value === true || value === 'true' || value === 1 || value === '1') return true;
@@ -45,7 +52,7 @@ function boolOrNull(value) {
 // from pace averages.
 function isNeutralizedFlag(value) {
   const text = String(value || '').toLowerCase();
-  return /safety\s*car|full\s*course\s*yellow|\bfcy\b|code\s*60|yellow/.test(text);
+  return /safety\s*car|full\s*course\s*yellow|\bfcy\b|code\s*60|yellow|red\s*flag|\bred\b/.test(text);
 }
 
 // Treats empty flags as green because most timing pages only show exceptional
@@ -81,6 +88,16 @@ function captureSectorFlags(row, previous = null, currentFlag = '') {
 // compatible with the same calculations.
 function normalizeLap(entry) {
   const lapTimeMs = numberOrNull(entry.lapTimeMs ?? entry.lastLapMs);
+  const sector1Ms = numberOrNull(entry.sector1Ms);
+  const sector2Ms = numberOrNull(entry.sector2Ms);
+  let sector3Ms = numberOrNull(entry.sector3Ms);
+  // Older RIS history created before current-row sector reconciliation can miss
+  // only S3. Recover it from LAST - S1 - S2 when the result is positive and a
+  // plausible fraction of the lap; the original JSONL record remains untouched.
+  if (sector3Ms === null && entry.sourceProvider === 'ris-timing' && lapTimeMs !== null && sector1Ms !== null && sector2Ms !== null) {
+    const derived = lapTimeMs - sector1Ms - sector2Ms;
+    if (derived >= 5000 && derived <= lapTimeMs * 0.6) sector3Ms = derived;
+  }
   const sessionFlag = String(entry.sessionFlag ?? entry.flagState ?? entry.lapFlag ?? '');
   return {
     ...entry,
@@ -91,9 +108,9 @@ function normalizeLap(entry) {
     lapNumber: numberOrNull(entry.lapNumber),
     lapTimeMs,
     lastLapMs: lapTimeMs,
-    sector1Ms: numberOrNull(entry.sector1Ms),
-    sector2Ms: numberOrNull(entry.sector2Ms),
-    sector3Ms: numberOrNull(entry.sector3Ms),
+    sector1Ms,
+    sector2Ms,
+    sector3Ms,
     sessionFlag,
     lapFlag: String(entry.lapFlag ?? sessionFlag),
     sector1Flag: String(entry.sector1Flag ?? ''),
@@ -160,6 +177,38 @@ function lapPaceEligible(lap) {
   return true;
 }
 
+// Removes only extreme timing-feed anomalies from pace calculations. The
+// default requires at least three green/pit-free samples and rejects a lap only
+// when it differs from their median by both 60 seconds and 50%. This catches a
+// session-elapsed value such as 35:05 among 2:53 laps without discarding normal
+// traffic, mistakes, or a roughly one-minute wet-weather pace change.
+function representativePaceLaps(laps, options = {}) {
+  const eligible = (laps || []).filter(lapPaceEligible);
+  const minimumSamples = Number.isFinite(Number(options.minimumSamples)) ? Number(options.minimumSamples) : 3;
+  if (eligible.length < minimumSamples) return eligible;
+
+  const baselineMs = median(eligible.map((lap) => lap.lapTimeMs));
+  if (!Number.isFinite(baselineMs) || baselineMs <= 0) return eligible;
+  const absoluteThresholdMs = Number.isFinite(Number(options.absoluteThresholdMs))
+    ? Number(options.absoluteThresholdMs)
+    : 60000;
+  const relativeThreshold = Number.isFinite(Number(options.relativeThreshold))
+    ? Number(options.relativeThreshold)
+    : 0.5;
+  const allowedDeviationMs = Math.max(absoluteThresholdMs, baselineMs * relativeThreshold);
+  return eligible.filter((lap) => {
+    if (Math.abs(lap.lapTimeMs - baselineMs) <= allowedDeviationMs) return true;
+
+    // A complete sectorsum is stronger evidence than a statistical threshold:
+    // spins, rain, and other genuine slow laps must remain part of the average.
+    const sectors = [lap.sector1Ms, lap.sector2Ms, lap.sector3Ms].map(numberOrNull);
+    if (sectors.some((value) => value === null)) return false;
+    const sectorSumMs = sectors.reduce((sum, value) => sum + value, 0);
+    const reconciliationToleranceMs = Math.max(2000, lap.lapTimeMs * 0.02);
+    return Math.abs(sectorSumMs - lap.lapTimeMs) <= reconciliationToleranceMs;
+  });
+}
+
 // Decides whether one sector should count for sector averages/bests. This is
 // deliberately more granular than lapPaceEligible: a lap can become FCY in S3
 // while S1/S2 remain valid.
@@ -209,7 +258,8 @@ function statsForLaps(laps) {
     if (lapDelta) return lapDelta;
     return new Date(a.recordedAt || 0) - new Date(b.recordedAt || 0);
   });
-  const paceLaps = sorted.filter(lapPaceEligible);
+  const rawPaceLaps = sorted.filter(lapPaceEligible);
+  const paceLaps = representativePaceLaps(sorted);
   const lapTimes = paceLaps.map((lap) => lap.lapTimeMs);
   const sectorValues = (sectorNumber) => sorted
     .filter((lap) => sectorPaceEligible(lap, sectorNumber))
@@ -217,6 +267,7 @@ function statsForLaps(laps) {
   return {
     lapCount: sorted.length,
     paceLapCount: paceLaps.length,
+    excludedOutlierLapCount: rawPaceLaps.length - paceLaps.length,
     averageLapMs: average(lapTimes),
     bestLapMs: min(lapTimes),
     lastLapMs: paceLaps.length ? paceLaps.at(-1).lapTimeMs : null,
@@ -363,9 +414,11 @@ function buildDashboardAnalysis(history, options = {}) {
 return {
   numberOrNull,
   average,
+  median,
   isNeutralizedFlag,
   captureSectorFlags,
   lapPaceEligible,
+  representativePaceLaps,
   sectorPaceEligible,
   normalizeLap,
   pitCountFromLap,

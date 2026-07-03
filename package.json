@@ -44,7 +44,7 @@
     },
     "win": {
       "target": "nsis",
-      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+      "artifactName": "MSTC-Race-Engineer-Dashboard-Setup-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -57,7 +57,7 @@
         "zip"
       ],
       "category": "public.app-category.sports",
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "artifactName": "MSTC-Race-Engineer-Dashboard-${version}-${arch}.${ext}"
     }
   },
   "dependencies": {

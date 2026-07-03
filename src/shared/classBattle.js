@@ -212,8 +212,7 @@ function lapsForCar(history, carNumber) {
 // Averages the last N valid laps for one car. This makes catch estimates react
 // to current pace instead of full-race averages.
 function recentAverageForCar(history, carNumber, lapWindow = 10) {
-  const laps = lapAnalytics.lapsForCar(history, carNumber)
-    .filter(lapAnalytics.lapPaceEligible)
+  const laps = lapAnalytics.representativePaceLaps(lapAnalytics.lapsForCar(history, carNumber))
     .slice(-lapWindow)
     .map(historyLapForAnalysis);
   return average(laps.map((entry) => entry.lastLapMs));

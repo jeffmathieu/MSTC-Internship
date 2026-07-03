@@ -8,11 +8,39 @@ function setupAutoUpdates({ app, dialog, autoUpdater, getParentWindow = () => nu
     return false;
   }
 
-  autoUpdater.autoDownload = true;
+  // Ask before downloading. This makes a successful check visible immediately
+  // and avoids silently using roughly 100 MB of trackside bandwidth.
+  autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
+  let updatePromptOpen = false;
 
   autoUpdater.on('checking-for-update', () => logger.info('[auto-update] Checking for update.'));
-  autoUpdater.on('update-available', (info) => logger.info(`[auto-update] Update available: ${info?.version || 'unknown version'}.`));
+  autoUpdater.on('update-available', async (info) => {
+    logger.info(`[auto-update] Update available: ${info?.version || 'unknown version'}.`);
+    if (updatePromptOpen) return;
+    updatePromptOpen = true;
+    try {
+      const options = {
+        type: 'info',
+        buttons: ['Download update', 'Later'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+        title: 'Update available',
+        message: `MSTC Race Engineer Dashboard ${info?.version || ''} is available.`,
+        detail: 'Download the update now? You can keep using the dashboard while it downloads.'
+      };
+      const parent = getParentWindow();
+      const result = parent
+        ? await dialog.showMessageBox(parent, options)
+        : await dialog.showMessageBox(options);
+      if (result.response === 0) await autoUpdater.downloadUpdate();
+    } catch (error) {
+      logger.error('[auto-update] Update download failed:', error);
+    } finally {
+      updatePromptOpen = false;
+    }
+  });
   autoUpdater.on('update-not-available', (info) => logger.info(`[auto-update] App is current (${info?.version || app.getVersion()}).`));
   autoUpdater.on('error', (error) => logger.error('[auto-update] Update error:', error));
   autoUpdater.on('download-progress', (progress) => {

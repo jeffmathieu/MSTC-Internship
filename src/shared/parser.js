@@ -83,11 +83,18 @@ function canonicalHeader(header) {
 
   if (direct[compact]) return direct[compact];
 
+  // RIS puts the session-best lap above BEST in the same header cell, e.g.
+  // "2:50.798 | BEST", which compacts to 250798BEST.
+  if (/^\d+BEST$/.test(compact)) return 'bestLap';
+
   // Sector headers vary a lot between providers, so these regexes accept common
   // spellings like SECT-1, SECTOR 1, SECT1, and S1.
-  if (/^SECT?OR?1$/.test(compact) || compact === 'SECT1' || compact === 'S1') return 'sector1';
-  if (/^SECT?OR?2$/.test(compact) || compact === 'SECT2' || compact === 'S2') return 'sector2';
-  if (/^SECT?OR?3$/.test(compact) || compact === 'SECT3' || compact === 'S3') return 'sector3';
+  // RIS Timing places the session-best sector above the label in the same
+  // header cell, producing text such as "43.575 | S1". After compaction this
+  // becomes 43575S1, so accept a numeric prefix before the exact S1/S2/S3 tag.
+  if (/^SECT?OR?1$/.test(compact) || compact === 'SECT1' || /^(?:\d+)?S1$/.test(compact)) return 'sector1';
+  if (/^SECT?OR?2$/.test(compact) || compact === 'SECT2' || /^(?:\d+)?S2$/.test(compact)) return 'sector2';
+  if (/^SECT?OR?3$/.test(compact) || compact === 'SECT3' || /^(?:\d+)?S3$/.test(compact)) return 'sector3';
   if (compact.includes('DRIVER') && compact.includes('CAR')) return 'driver';
   if (compact.includes('CLASS')) return 'className';
   return compact.toLowerCase();
@@ -185,6 +192,34 @@ function valueAt(cells, headerMap, key) {
   return index === undefined ? '' : cleanText(cells[index]);
 }
 
+// RIS Timing puts team name on the first line of TEAM INFO and driver/car on
+// the second line, for example "MSTC | JANSSENS Robbe - Mazda MX-5". The page
+// extractor preserves that line boundary as " | ", allowing this parser to
+// recover all three fields without guessing where the team name ends.
+function splitTeamInfo(teamValue, driverValue = '', carValue = '') {
+  const parts = String(teamValue ?? '')
+    .split(/\s+\|\s+/)
+    .map(cleanText)
+    .filter(Boolean);
+  if (parts.length < 2) {
+    return { team: cleanText(teamValue), driver: cleanText(driverValue), car: cleanText(carValue) };
+  }
+
+  const team = parts[0];
+  const details = parts.slice(1).join(' | ');
+  const separator = details.match(/\s+-\s+/);
+  if (!separator) {
+    return { team, driver: cleanText(driverValue), car: cleanText(carValue) };
+  }
+
+  const separatorIndex = separator.index;
+  return {
+    team,
+    driver: cleanText(driverValue) || cleanText(details.slice(0, separatorIndex)),
+    car: cleanText(carValue) || cleanText(details.slice(separatorIndex + separator[0].length))
+  };
+}
+
 // Converts one raw HTML table row into the normalized shape consumed by the app.
 // If the UI needs a new column, add the canonical header above and map it here.
 // Keep raw/headerMap in the result: parser_debug.json depends on that extra
@@ -202,6 +237,11 @@ function parseTimingRow(headers, cells) {
 
   const carNumberRaw = valueAt(cells, headerMap, 'carNumber');
   const carNumber = parseInteger(carNumberRaw);
+  const teamInfo = splitTeamInfo(
+    valueAt(cells, headerMap, 'team'),
+    valueAt(cells, headerMap, 'driver'),
+    valueAt(cells, headerMap, 'car')
+  );
 
   return {
     position: parseInteger(valueAt(cells, headerMap, 'position')),
@@ -210,9 +250,9 @@ function parseTimingRow(headers, cells) {
     carNumber,
     carNumberRaw,
     eta: valueAt(cells, headerMap, 'eta'),
-    team: valueAt(cells, headerMap, 'team'),
-    car: valueAt(cells, headerMap, 'car'),
-    driver: valueAt(cells, headerMap, 'driver'),
+    team: teamInfo.team,
+    car: teamInfo.car,
+    driver: teamInfo.driver,
     className: valueAt(cells, headerMap, 'className'),
     classPosition: parseInteger(valueAt(cells, headerMap, 'classPosition')),
     gap: valueAt(cells, headerMap, 'gap'),
@@ -246,6 +286,94 @@ function looksLikeTimingHeaders(headers) {
   return score >= 3 && map.carNumber !== undefined;
 }
 
+// Extracts provider-independent session metadata from the flattened page text.
+// GetRaceResults labels the countdown "To go", while current RIS Timing pages
+// use "Elapsed" and "Remaining" in their top status bar.
+function parseSessionInfo(snapshot = {}) {
+  const text = cleanText(snapshot.bodyText || '');
+  const fields = snapshot.sessionFields || {};
+  const session = {
+    pageTitle: snapshot.title || '',
+    url: snapshot.location || '',
+    statusText: '',
+    timeToGo: '',
+    elapsed: '',
+    flag: '',
+    sessionName: '',
+    circuit: '',
+    pageUpdated: ''
+  };
+
+  if (fields.remaining) session.timeToGo = cleanText(fields.remaining);
+  if (fields.elapsed) session.elapsed = cleanText(fields.elapsed);
+  if (fields.sessionName) session.sessionName = cleanText(fields.sessionName);
+
+  const risRemaining = text.match(/\bRemaining:\s*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)/i);
+  const risElapsed = text.match(/\bElapsed:\s*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)/i);
+  const risStatus = text.match(/\bStatus:\s*([A-Z][A-Z ]*?)(?=\s+Elapsed:|\s+Remaining:|$)/i);
+  if (!session.timeToGo && risRemaining) session.timeToGo = cleanText(risRemaining[1]);
+  if (!session.elapsed && risElapsed) session.elapsed = cleanText(risElapsed[1]);
+  const structuredOrParsedStatus = cleanText(fields.status || (risStatus ? risStatus[1] : ''));
+  if (structuredOrParsedStatus) {
+    session.statusText = structuredOrParsedStatus;
+    const status = session.statusText.toLowerCase();
+    if (status === 'green') session.flag = 'Green flag';
+    else if (/fcy|full course yellow/.test(status)) session.flag = 'Full course yellow';
+    else if (/safety car/.test(status)) session.flag = 'Safety car';
+    else if (/yellow/.test(status)) session.flag = 'Yellow flag';
+    else if (/red/.test(status)) session.flag = 'Red flag';
+  }
+
+  // RIS displays event and session as "Ligier Js Cup • Paying Practice".
+  // Flattening the page prepends navigation labels, which are removed before
+  // exposing this value to the dashboard.
+  const risSession = text.match(/(.{1,180}?)\s*[•·]\s*([^•·]{1,80}?)\s+Status:/i);
+  if (!session.sessionName && risSession) {
+    const eventName = cleanText(risSession[1])
+      .replace(/^.*RACES INFORMATION SERVICES\s+/i, '')
+      .replace(/^(?:(?:LIVE DATA|OFFLINE|COMPACT|FULLSCREEN)\s+)+/i, '');
+    const sessionType = cleanText(risSession[2]);
+    if (eventName && sessionType) session.sessionName = `${eventName} - ${sessionType}`;
+  }
+
+  const toGo = text.match(/To go:\s*([^A-Z\n\r]+?)\s+([A-Z][A-Za-z0-9 .:&'()\-]+?\s-\s(?:Race|Qualifying|Practice|Session|Warm.?up))/i);
+  if (toGo) {
+    if (!session.timeToGo) session.timeToGo = cleanText(toGo[1]);
+    session.sessionName = cleanText(toGo[2]);
+  } else if (!session.timeToGo) {
+    const simpleToGo = text.match(/To go:\s*([^\n\r]+)/i);
+    if (simpleToGo) session.timeToGo = cleanText(simpleToGo[1]).split(/\s{2,}/)[0];
+  }
+
+  const flagMatch = text.match(/(Green flag|Red flag|Yellow flag|Safety car|Full course yellow|Code 60|Finished flag)/i);
+  if (flagMatch) {
+    const flag = cleanText(flagMatch[1]).toLowerCase();
+    const canonicalFlags = {
+      'green flag': 'Green flag',
+      'red flag': 'Red flag',
+      'yellow flag': 'Yellow flag',
+      'safety car': 'Safety car',
+      'full course yellow': 'Full course yellow',
+      'code 60': 'Code 60',
+      'finished flag': 'Finished flag'
+    };
+    session.flag = canonicalFlags[flag] || cleanText(flagMatch[1]);
+  }
+
+  const commonStatus = ['No active heat', 'Waiting for the LiveTiming data', 'Not connected to the LiveTiming server', 'Trying to reconnect to the LiveTiming server', 'Connecting to the LiveTiming server'];
+  const foundStatus = commonStatus.find((line) => text.includes(line));
+  if (foundStatus) session.statusText = foundStatus;
+
+  if (!session.sessionName) {
+    const sessionMatch = text.match(/([A-Z][A-Za-z0-9 .:&'()\-]+?\s-\s(?:Race|Qualifying|Practice|Session|Warm.?up))/i);
+    if (sessionMatch) session.sessionName = cleanText(sessionMatch[1]);
+  }
+
+  const updated = text.match(/Page updated\s*([0-9:]+\s*\(UTC\))?/i);
+  if (updated) session.pageUpdated = cleanText(updated[1] || '');
+  return session;
+}
+
 // Export each parser primitive separately so tests can cover small pieces and
 // the main process can compose them into higher-level collection logic.
 module.exports = {
@@ -255,6 +383,8 @@ module.exports = {
   parseInteger,
   parseLapTimeToMs,
   formatMs,
+  splitTeamInfo,
   parseTimingRow,
-  looksLikeTimingHeaders
+  looksLikeTimingHeaders,
+  parseSessionInfo
 };

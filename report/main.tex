@@ -20,7 +20,7 @@
 \usepackage{titlesec}
 
 \geometry{left=2.7cm,right=2.7cm,top=2.5cm,bottom=2.5cm}
-\onehalfspacing
+%\onehalfspacing
 \setlength{\parskip}{0.6em}
 \setlength{\parindent}{0pt}
 \emergencystretch=2em
@@ -29,7 +29,7 @@
 \definecolor{pendingred}{RGB}{170,35,45}
 \newcommand{\pending}[1]{%
   \par\noindent\fcolorbox{pendingred}{pendingred!8}{%
-    \parbox{0.94\textwidth}{\textbf{NOG UIT TE VOEREN:} #1}}\par}
+    \parbox[t]{0.94\textwidth}{\raggedright\textbf{NOG UIT TE VOEREN:} #1}}\par}
 % detokenize makes file names such as lap_history.jsonl safe in normal text.
 \newcommand{\code}[1]{\texttt{\detokenize{#1}}}
 

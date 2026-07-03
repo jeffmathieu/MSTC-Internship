@@ -51,10 +51,19 @@ function statusClass(status) {
   return 'bad';
 }
 
-// Updates the compact status text in the top information strip.
+// Updates only the collector-health dot. Race-control status is rendered by
+// updateSession(), so collection health and session flags cannot be confused.
 function setStatus(status, message) {
-  const target = $('status-text');
-  if (target) target.textContent = String(status || 'idle').toUpperCase();
+  const dot = $('collector-health');
+  if (!dot) return;
+  const normalized = String(status || 'idle').toLowerCase();
+  dot.classList.remove('is-ok', 'is-error', 'is-neutral');
+  if (['collecting', 'connected'].includes(normalized)) dot.classList.add('is-ok');
+  else if (normalized === 'error' || normalized === 'parser_error') dot.classList.add('is-error');
+  else dot.classList.add('is-neutral');
+  const tooltip = String(message || normalized || 'Collector idle');
+  dot.setAttribute('title', tooltip);
+  dot.setAttribute('aria-label', tooltip);
 }
 
 // Displays missing table values consistently.
@@ -370,6 +379,15 @@ function lapsForCar(history, carNumber) {
 function updateSession(session = {}) {
   setText('session-name', session.sessionName || session.pageTitle || '—');
   setText('session-time', session.timeToGo || session.pageUpdated || '—');
+  const statusBlock = $('session-status-block');
+  const raceControlText = String(session.statusText || session.flag || '').trim();
+  setText('status-text', raceControlText ? raceControlText.toUpperCase() : '—');
+  if (statusBlock) {
+    const raceControl = String(session.flag || session.statusText || '').toLowerCase();
+    statusBlock.classList.remove('flag-caution', 'flag-red');
+    if (/red flag|\bred\b/.test(raceControl)) statusBlock.classList.add('flag-red');
+    else if (/safety\s*car|full\s*course\s*yellow|\bfcy\b|code\s*60|yellow/.test(raceControl)) statusBlock.classList.add('flag-caution');
+  }
 }
 
 // Updates the followed-car values shown in the compact session panel.
