@@ -12,6 +12,7 @@ const {
 const {
   LAP_HISTORY_COLUMNS,
   normalizeForStorage,
+  analysisRowsFromParsedRows,
   lapRecordFromNormalizedRow,
   completedLapRowFromLiveRow,
   lapIdentity,
@@ -635,7 +636,11 @@ function buildAnalyticsSummary(settings, context, rows = []) {
     carNumber,
     compactDashboardAnalysis(buildDashboardAnalysis(history, {
       ourCarNumber: carNumber,
-      selectedCarNumber
+      selectedCarNumber,
+      currentDriverName: (() => {
+        const liveRow = rows.find((row) => String(row.carNumber) === String(carNumber));
+        return liveRow?.driver || liveRow?.driverName || '';
+      })()
     }))
   ]));
   const adjacentClassBattlesByCar = Object.fromEntries(followedCars.map((carNumber) => [
@@ -657,6 +662,12 @@ function buildAnalyticsSummary(settings, context, rows = []) {
   return {
     storageSchemaVersion: 1,
     generatedFrom: 'lap_history',
+    analyticsSourceOfTruth: true,
+    paceSelectionRules: {
+      fullLap: 'green sectors only; excludes pit-in, pit-out and timing outliers',
+      sector: 'sector must be green and not pit-affected',
+      outlier: 'after 3 eligible laps, excludes deviations greater than both 60 seconds and 50 percent unless sectors reconcile'
+    },
     updatedAt: context?.collectedAt || new Date().toISOString(),
     followedCar: primaryCar,
     followedCars,
@@ -814,12 +825,13 @@ function saveLatestSnapshot(settings, normalized) {
     const collectedAt = new Date().toISOString();
     const context = storageContext(settings, normalized, collectedAt);
     const storageRows = annotateLiveSectorFlags(normalizeRowsForStorage(normalized.rows, context), context);
+    const analysisRows = analysisRowsFromParsedRows(normalized.rows, storageRows);
     writeLatestRows(settings, storageRows);
     writeParserDebug(settings, parserDebugFromNormalized(normalized, storageRows, context));
     writeSessionMetadata(settings, context);
-    return { storageRows, context };
+    return { storageRows, analysisRows, context };
   } catch (error) { addError(error, 'saveLatestSnapshot'); }
-  return { storageRows: [], context: null };
+  return { storageRows: [], analysisRows: [], context: null };
 }
 
 // Reads the hidden live timing page once, normalizes the data, updates history,
@@ -831,15 +843,15 @@ async function pollLivePage() {
     const settings = loadSettings();
     const snapshot = await liveWindow.webContents.executeJavaScript(pageExtractionScript, true);
     const normalized = normalizeSnapshot(snapshot);
-    const { storageRows, context } = saveLatestSnapshot(settings, normalized);
+    const { storageRows, analysisRows, context } = saveLatestSnapshot(settings, normalized);
     const newLapCount = updateLapHistory(settings, storageRows);
     let analyticsSummary = collectorState.analyticsSummary;
     let lapPredictionsByCar = collectorState.lapPredictionsByCar;
     let pitstopPlansByCar = collectorState.pitstopPlansByCar;
-    try { analyticsSummary = writeAnalyticsSummary(settings, context, normalized.rows); } catch (error) { addError(error, 'writeAnalyticsSummary'); }
-    try { lapPredictionsByCar = writeLapPredictions(settings, context, normalized.rows); } catch (error) { addError(error, 'writeLapPredictions'); }
+    try { analyticsSummary = writeAnalyticsSummary(settings, context, analysisRows); } catch (error) { addError(error, 'writeAnalyticsSummary'); }
+    try { lapPredictionsByCar = writeLapPredictions(settings, context, analysisRows); } catch (error) { addError(error, 'writeLapPredictions'); }
     if (normalizeMode(settings.sessionMode) === 'race') {
-      try { pitstopPlansByCar = writePitstopPlans(settings, context, normalized.rows); } catch (error) { addError(error, 'writePitstopPlans'); }
+      try { pitstopPlansByCar = writePitstopPlans(settings, context, analysisRows); } catch (error) { addError(error, 'writePitstopPlans'); }
     } else {
       pitstopPlansByCar = {};
       collectorState.pitstopPlansByCar = {};
@@ -851,12 +863,12 @@ async function pollLivePage() {
       mode: 'live',
       status: normalized.status,
       message: newLapCount ? `${normalized.message} Stored ${newLapCount} new completed lap(s).` : normalized.message,
-      lastSuccessAt: new Date().toISOString(), headers: normalized.headers, rows: normalized.rows, session: normalized.session, diagnostics: normalized.diagnostics,
+      lastSuccessAt: new Date().toISOString(), headers: normalized.headers, rows: analysisRows, session: normalized.session, diagnostics: normalized.diagnostics,
       storage: storageInfo(settings), analyticsSummary, lapPredictionsByCar, pitstopPlansByCar,
       lapPrediction: lapPredictionsByCar?.[primaryCar] || null,
       pitstopPlan: pitstopPlansByCar?.[primaryCar] || null,
       pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS),
-      snapshots: [{ at: new Date().toISOString(), checksum: hashObject(normalized.rows), rowCount: normalized.rows.length, newLapCount }, ...collectorState.snapshots].slice(0, 20)
+      snapshots: [{ at: new Date().toISOString(), checksum: hashObject(analysisRows), rowCount: analysisRows.length, newLapCount }, ...collectorState.snapshots].slice(0, 20)
     };
   } catch (error) {
     collectorState.status = 'error'; collectorState.message = 'Could not read the live timing page. See Debug for details.'; addError(error, 'pollLivePage');

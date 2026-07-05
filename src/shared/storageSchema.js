@@ -157,6 +157,22 @@ function normalizeForStorage(row, context = {}) {
   return normalized;
 }
 
+// Reattaches storage annotations to rich parser rows. Calculations keep parser
+// numeric fields while sharing the exact flags/eligibility written to disk.
+function analysisRowsFromParsedRows(parsedRows = [], storageRows = []) {
+  return parsedRows.map((row, index) => ({
+    ...row,
+    sessionFlag: storageRows[index]?.sessionFlag || '',
+    lapFlag: storageRows[index]?.lapFlag || '',
+    sector1Flag: storageRows[index]?.sector1Flag || '',
+    sector2Flag: storageRows[index]?.sector2Flag || '',
+    sector3Flag: storageRows[index]?.sector3Flag || '',
+    sector1Eligible: storageRows[index]?.sector1Eligible || '',
+    sector2Eligible: storageRows[index]?.sector2Eligible || '',
+    sector3Eligible: storageRows[index]?.sector3Eligible || ''
+  }));
+}
+
 // Converts a normalized live row into a completed lap record. The app stores lap
 // time strings and parsed millisecond values so humans and calculations can use
 // the same file.
@@ -205,13 +221,17 @@ function withoutCurrentSectors(row) {
   };
 }
 
+function isNeutralizedFlag(value) {
+  return /safety\s*car|full\s*course\s*yellow|\bfcy\b|code\s*60|yellow|red\s*flag|\bred\b/i.test(String(value || ''));
+}
+
 // Selects sector evidence for a completed lap. Current-row sectors are used
 // only when they reconcile with LAST; otherwise the previous snapshot remains
 // the conservative source used by GetRaceResults-style feeds.
 function completedLapRowFromLiveRow(row, previousRow) {
   const evidence = currentSectorsMatchCompletedLap(row) ? row : previousRow;
   if (!evidence) return withoutCurrentSectors(row);
-  return {
+  const completed = {
     ...row,
     driverName: previousRow?.driverName || row.driverName,
     sector1: evidence.sector1 || '',
@@ -224,6 +244,12 @@ function completedLapRowFromLiveRow(row, previousRow) {
     sector2Eligible: evidence.sector2Eligible || '',
     sector3Eligible: evidence.sector3Eligible || ''
   };
+  const neutralizedSectorFlag = [completed.sector1Flag, completed.sector2Flag, completed.sector3Flag].find(isNeutralizedFlag);
+  if (neutralizedSectorFlag) {
+    completed.lapFlag = neutralizedSectorFlag;
+    completed.paceEligible = 'false';
+  }
+  return completed;
 }
 
 // Builds a duplicate-detection key for completed laps. Lap number is preferred;
@@ -240,6 +266,7 @@ module.exports = {
   LAP_HISTORY_COLUMNS,
   normalizeStorageField,
   normalizeForStorage,
+  analysisRowsFromParsedRows,
   lapRecordFromNormalizedRow,
   currentSectorsMatchCompletedLap,
   completedLapRowFromLiveRow,

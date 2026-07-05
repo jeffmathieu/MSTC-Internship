@@ -3,6 +3,7 @@ const {
   NORMALIZED_ROW_COLUMNS,
   LAP_HISTORY_COLUMNS,
   normalizeForStorage,
+  analysisRowsFromParsedRows,
   lapRecordFromNormalizedRow,
   currentSectorsMatchCompletedLap,
   completedLapRowFromLiveRow,
@@ -62,6 +63,12 @@ assert.strictEqual(risRow.diff, '1.234');
 assert.strictEqual(risRow.interval, '1.234');
 assert.strictEqual(risRow.sessionName, 'Demo Race');
 assert.strictEqual(risRow.sessionFlag, 'Full Course Yellow');
+const annotatedAnalysisRows = analysisRowsFromParsedRows([
+  { carNumber: 33, sector1Ms: 50000, sector1: '50.000' }
+], [{ carNumber: '33', sessionFlag: 'FCY', sector1Flag: 'FCY', sector1Eligible: 'false' }]);
+assert.strictEqual(annotatedAnalysisRows[0].sector1Ms, 50000);
+assert.strictEqual(annotatedAnalysisRows[0].sector1Flag, 'FCY');
+assert.strictEqual(annotatedAnalysisRows[0].sector1Eligible, 'false');
 
 const risScreenshotStorageRow = normalizeForStorage({
   position: 12,
@@ -109,6 +116,22 @@ const completedFromCurrentRisRow = completedLapRowFromLiveRow(risCompletedLiveRo
 assert.strictEqual(completedFromCurrentRisRow.sector1, '53.272');
 assert.strictEqual(completedFromCurrentRisRow.sector2, '1:21.504');
 assert.strictEqual(completedFromCurrentRisRow.sector3, '47.315');
+
+const completedMixedFlagLap = completedLapRowFromLiveRow({
+  ...risCompletedLiveRow,
+  lastLap: '3:30.000',
+  sector1: '55.000',
+  sector2: '1:40.000',
+  sector3: '55.000',
+  sessionFlag: 'Green flag',
+  lapFlag: 'Green flag',
+  sector1Flag: 'Green flag',
+  sector2Flag: 'Full Course Yellow',
+  sector3Flag: 'Full Course Yellow',
+  paceEligible: 'true'
+}, null);
+assert.strictEqual(completedMixedFlagLap.lapFlag, 'Full Course Yellow');
+assert.strictEqual(completedMixedFlagLap.paceEligible, 'false');
 
 const nonMatchingCurrentRow = { ...risCompletedLiveRow, sector3: '10.000' };
 const previousEvidence = { driverName: 'Previous Driver', sector1: '52.000', sector2: '1:20.000', sector3: '46.000' };

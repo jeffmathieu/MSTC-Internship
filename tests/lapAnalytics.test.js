@@ -11,7 +11,9 @@ const {
   normalizeLap,
   pitCountFromLap,
   pitAffectedLap,
+  rowShowsInPit,
   annotatePitPhases,
+  baseLapExclusionReasons,
   completedLaps,
   lapsForCar,
   lapsForDriver,
@@ -62,6 +64,33 @@ assert.strictEqual(sameSectorAfterFcy.sector1Flag, 'Green flag');
 assert.strictEqual(sameSectorAfterFcy.sector1Eligible, 'true');
 assert.strictEqual(sameSectorAfterFcy.sector2Flag, 'Full Course Yellow');
 assert.strictEqual(sameSectorAfterFcy.sector2Eligible, 'false');
+
+// Spa regression: FCY starts while the car is in S2, before S2 has a visible
+// time. The pending S2 flag must survive both the later S2 time and a return to
+// green before S3 is completed.
+const spaS1Green = captureSectorFlags({ lastLap: '3:01.000', sector1: '55.000', sector2: '', sector3: '' }, null, 'Green flag');
+const spaFcyDuringS2 = captureSectorFlags({ lastLap: '3:01.000', sector1: '55.000', sector2: '', sector3: '' }, spaS1Green, 'Full Course Yellow');
+assert.strictEqual(spaFcyDuringS2.sector1Flag, 'Green flag');
+assert.strictEqual(spaFcyDuringS2.sector2Flag, 'Full Course Yellow');
+assert.strictEqual(spaFcyDuringS2.sector2Eligible, 'false');
+const spaS2CompletedUnderFcy = captureSectorFlags({ lastLap: '3:01.000', sector1: '55.000', sector2: '1:40.000', sector3: '' }, spaFcyDuringS2, 'Full Course Yellow');
+assert.strictEqual(spaS2CompletedUnderFcy.sector2Flag, 'Full Course Yellow');
+assert.strictEqual(spaS2CompletedUnderFcy.sector3Flag, 'Full Course Yellow');
+const spaGreenBeforeS3 = captureSectorFlags({ lastLap: '3:01.000', sector1: '55.000', sector2: '1:40.000', sector3: '' }, spaS2CompletedUnderFcy, 'Green flag');
+assert.strictEqual(spaGreenBeforeS3.sector3Flag, 'Full Course Yellow');
+const spaCompletedLapFlags = captureSectorFlags({ lastLap: '3:30.000', sector1: '55.000', sector2: '1:40.000', sector3: '55.000' }, spaGreenBeforeS3, 'Green flag');
+assert.strictEqual(spaCompletedLapFlags.sector1Flag, 'Green flag');
+assert.strictEqual(spaCompletedLapFlags.sector2Flag, 'Full Course Yellow');
+assert.strictEqual(spaCompletedLapFlags.sector3Flag, 'Full Course Yellow');
+const fcyDuringS1 = captureSectorFlags({ lastLap: '3:01.000', sector1: '', sector2: '', sector3: '' }, null, 'Full Course Yellow');
+assert.strictEqual(fcyDuringS1.sector1Flag, 'Full Course Yellow');
+assert.strictEqual(fcyDuringS1.sector1Eligible, 'false');
+const greenThroughS2 = captureSectorFlags({ lastLap: '3:01.000', sector1: '55.000', sector2: '1:20.000', sector3: '' }, null, 'Green flag');
+const redDuringS3 = captureSectorFlags({ lastLap: '3:01.000', sector1: '55.000', sector2: '1:20.000', sector3: '' }, greenThroughS2, 'Red flag');
+assert.strictEqual(redDuringS3.sector1Flag, 'Green flag');
+assert.strictEqual(redDuringS3.sector2Flag, 'Green flag');
+assert.strictEqual(redDuringS3.sector3Flag, 'Red flag');
+assert.strictEqual(redDuringS3.sector3Eligible, 'false');
 
 const oldShapeLap = normalizeLap({
   carNumber: 7,
@@ -228,6 +257,25 @@ assert.strictEqual(lapPaceEligible(annotatedPitSequence[2]), false);
 assert.strictEqual(lapPaceEligible(annotatedPitSequence[3]), true);
 assert.strictEqual(sectorPaceEligible(annotatedPitSequence[2], 1), false, 'outlap sectors do not affect sector averages');
 
+const spaPitSequence = annotatePitPhases([
+  normalizeLap({ carNumber: 33, lapNumber: 22, lapTimeMs: 180000, pitInfo: '--', state: 'RUN' }),
+  normalizeLap({ carNumber: 33, lapNumber: 23, lapTimeMs: 181000, pitInfo: '--', state: 'IN' }),
+  normalizeLap({ carNumber: 33, lapNumber: 24, lapTimeMs: 420000, pitInfo: '1', state: 'RUN' }),
+  normalizeLap({ carNumber: 33, lapNumber: 25, lapTimeMs: 182000, pitInfo: '1', state: 'RUN' })
+]);
+assert.strictEqual(rowShowsInPit(spaPitSequence[1]), true);
+assert.strictEqual(spaPitSequence[1].lapPhase, 'inlap');
+assert.strictEqual(spaPitSequence[2].lapPhase, 'outlap');
+assert.strictEqual(spaPitSequence[3].lapPhase, '');
+assert.deepStrictEqual(baseLapExclusionReasons(spaPitSequence[1]), ['pit-in']);
+
+const auditableStats = statsForLaps(spaPitSequence);
+assert.strictEqual(auditableStats.selection.lap.includedCount, 2);
+assert.strictEqual(auditableStats.selection.lap.excludedCount, 2);
+assert.strictEqual(auditableStats.selection.lap.excludedByReason['pit-in'], 1);
+assert.strictEqual(auditableStats.selection.lap.excludedByReason['pit-out'], 1);
+assert.deepStrictEqual(auditableStats.selection.lap.excludedLaps.map((lapEntry) => lapEntry.lapNumber), [23, 24]);
+
 const neutralizedStats = statsForLaps(normalizedNeutralized);
 assert.strictEqual(neutralizedStats.lapCount, 4);
 assert.strictEqual(neutralizedStats.paceLapCount, 2);
@@ -328,6 +376,14 @@ const dashboardAnalysis = buildDashboardAnalysis(stintHistory, { ourCarNumber: 3
 assert.strictEqual(dashboardAnalysis.currentDriverName, 'Driver 3');
 assert.strictEqual(dashboardAnalysis.driverComparison.deltas.bestDriverAverageToCurrentAverageMs, 1950);
 assert.strictEqual(dashboardAnalysis.classComparison.deltas.currentStintAverageToSelectedCarAverageMs, 1450);
+const liveDriverOverrideAnalysis = buildDashboardAnalysis(stintHistory, {
+  ourCarNumber: 33,
+  selectedCarNumber: 9,
+  currentDriverName: 'Driver 1'
+});
+assert.strictEqual(liveDriverOverrideAnalysis.currentDriverName, 'Driver 1');
+assert.strictEqual(liveDriverOverrideAnalysis.driverComparison.currentDriver.driverName, 'Driver 1');
+assert.strictEqual(liveDriverOverrideAnalysis.classComparison.ourCurrentStint.driverName, 'Driver 1');
 assert.strictEqual(buildDashboardAnalysis(stintHistory), null);
 
 console.log('Lap analytics tests passed.');

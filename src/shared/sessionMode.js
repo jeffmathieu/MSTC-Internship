@@ -60,8 +60,8 @@
         { topLabel: 'Best D1', topMs: best?.bestLapMs, bottomLabel: 'Last D2', bottomMs: current?.lastLapMs, deltaLabel: 'Delta D1 - D2', deltaMs: subtract(best?.bestLapMs, current?.lastLapMs) },
         { topLabel: 'Best D1', topMs: best?.bestLapMs, bottomLabel: 'Best D2', bottomMs: current?.bestLapMs, deltaLabel: 'Delta D1 - D2', deltaMs: subtract(best?.bestLapMs, current?.bestLapMs) },
         { topLabel: 'Average D1', topMs: best?.averageLapMs, bottomLabel: 'Average D2', bottomMs: current?.averageLapMs, deltaLabel: 'Delta D1 - D2', deltaMs: subtract(best?.averageLapMs, current?.averageLapMs) },
-        { topLabel: 'Average BIC', topMs: bic?.averageLapMs, bottomLabel: 'Average Dact', bottomMs: bicDriver?.averageLapMs, deltaLabel: 'Delta BIC - Dact', deltaMs: subtract(bic?.averageLapMs, bicDriver?.averageLapMs) },
-        { topLabel: 'Average XIC', topMs: xic?.averageLapMs, bottomLabel: 'Average Dact', bottomMs: xicDriver?.averageLapMs, deltaLabel: 'Delta XIC - Dact', deltaMs: subtract(xic?.averageLapMs, xicDriver?.averageLapMs) }
+        { targetCarNumber: bic?.carNumber || '', topScope: 'car', bottomScope: 'current-driver', topLabel: 'Average BIC', topMs: bic?.averageLapMs, bottomLabel: 'Average Dact', bottomMs: bicDriver?.averageLapMs, deltaLabel: 'Delta BIC - Dact', deltaMs: subtract(bic?.averageLapMs, bicDriver?.averageLapMs) },
+        { targetCarNumber: xic?.carNumber || '', topScope: 'car', bottomScope: 'current-driver', topLabel: 'Average XIC', topMs: xic?.averageLapMs, bottomLabel: 'Average Dact', bottomMs: xicDriver?.averageLapMs, deltaLabel: 'Delta XIC - Dact', deltaMs: subtract(xic?.averageLapMs, xicDriver?.averageLapMs) }
       ]
     };
   }

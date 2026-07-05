@@ -59,6 +59,13 @@ assert.strictEqual(raceView.columns[0].topMs, 100000, 'race D1 is selected by av
 assert.strictEqual(raceView.columns[0].bottomMs, 130000);
 assert.strictEqual(raceView.columns[2].topLabel, 'Average D1');
 assert.strictEqual(raceView.columns[3].topMs, 99500);
+const sameTargetView = buildComparisonView({ history, rows, ourCarNumber: 13, selectedCarNumber: 2, mode: 'race' });
+assert.strictEqual(sameTargetView.columns[3].targetCarNumber, '2');
+assert.strictEqual(sameTargetView.columns[4].targetCarNumber, '2');
+assert.strictEqual(sameTargetView.columns[3].topMs, sameTargetView.columns[4].topMs);
+assert.strictEqual(sameTargetView.columns[3].bottomMs, sameTargetView.columns[4].bottomMs);
+assert.strictEqual(sameTargetView.columns[3].topScope, 'car');
+assert.strictEqual(sameTargetView.columns[3].bottomScope, 'current-driver');
 
 const practiceView = buildComparisonView({ history, rows, ourCarNumber: 13, selectedCarNumber: 9, mode: 'practice' });
 assert.strictEqual(practiceView.mode, 'practice');

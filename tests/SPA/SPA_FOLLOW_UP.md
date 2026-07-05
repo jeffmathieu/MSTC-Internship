@@ -29,6 +29,9 @@ Acceptance criteria:
   statistic scope.
 - Every shown average exposes its scope and sample count in the analytics JSON.
 
+Important: Write extra focused tests for a flag transition during each sector and make sure that old tests dont fail now, and do not change gaps or UI yet.
+
+
 ## Priority 2: stable gaps
 
 Goal: show the last trustworthy gap rather than every volatile timing poll.

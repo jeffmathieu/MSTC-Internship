@@ -28,7 +28,7 @@ function currentSectorUsable(row, sectorNumber) {
   const explicit = row?.[`sector${sectorNumber}Eligible`];
   if (explicit === false || explicit === 'false' || explicit === 0 || explicit === '0') return false;
   const flag = String(row?.[`sector${sectorNumber}Flag`] || row?.lapFlag || row?.sessionFlag || '');
-  return !/safety\s*car|full\s*course\s*yellow|\bfcy\b|code\s*60|yellow/i.test(flag);
+  return !/safety\s*car|full\s*course\s*yellow|\bfcy\b|code\s*60|yellow|red\s*flag|\bred\b/i.test(flag);
 }
 
 function sortLapsChronologically(laps) {
