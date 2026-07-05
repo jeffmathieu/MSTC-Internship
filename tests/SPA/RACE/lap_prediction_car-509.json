@@ -1,0 +1,90 @@
+{
+  "available": true,
+  "carNumber": "509",
+  "driverName": "LEYSEN Ellen",
+  "predictedLapMs": 180079.7,
+  "actualLapMs": 190879,
+  "predictionDeltaMs": 10799.299999999988,
+  "completedSectorCount": 2,
+  "label": "After S2",
+  "sampleSize": 10,
+  "sectors": [
+    {
+      "sectorNumber": 1,
+      "source": "live",
+      "valueMs": 51967,
+      "sampleCount": 10
+    },
+    {
+      "sectorNumber": 2,
+      "source": "live",
+      "valueMs": 83031,
+      "sampleCount": 10
+    },
+    {
+      "sectorNumber": 3,
+      "source": "average",
+      "valueMs": 45081.7,
+      "sampleCount": 10
+    }
+  ],
+  "averages": {
+    "driverName": "LEYSEN Ellen",
+    "carNumber": "509",
+    "sampleSize": 10,
+    "sectors": [
+      {
+        "sectorNumber": 1,
+        "sampleCount": 10,
+        "averageMs": 63192.7,
+        "values": [
+          52303,
+          53435,
+          92609,
+          51303,
+          53586,
+          53808,
+          118700,
+          51853,
+          52363,
+          51967
+        ]
+      },
+      {
+        "sectorNumber": 2,
+        "sampleCount": 10,
+        "averageMs": 83099.7,
+        "values": [
+          81671,
+          82312,
+          101108,
+          78936,
+          79432,
+          79752,
+          82302,
+          82446,
+          80007,
+          83031
+        ]
+      },
+      {
+        "sectorNumber": 3,
+        "sampleCount": 10,
+        "averageMs": 45081.7,
+        "values": [
+          45353,
+          43523,
+          43552,
+          43215,
+          43575,
+          45118,
+          43327,
+          43881,
+          43392,
+          55881
+        ]
+      }
+    ]
+  },
+  "updatedAt": "2026-07-04T11:25:00.143Z"
+}

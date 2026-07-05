@@ -1,0 +1,75 @@
+{
+  "available": true,
+  "carNumber": "33",
+  "driverName": "DE STRIJKER Kris",
+  "predictedLapMs": 193015.2,
+  "actualLapMs": 221818,
+  "predictionDeltaMs": 28802.79999999999,
+  "completedSectorCount": 2,
+  "label": "After S2",
+  "sampleSize": 10,
+  "sectors": [
+    {
+      "sectorNumber": 1,
+      "source": "live",
+      "valueMs": 53032,
+      "sampleCount": 5
+    },
+    {
+      "sectorNumber": 2,
+      "source": "live",
+      "valueMs": 83824,
+      "sampleCount": 5
+    },
+    {
+      "sectorNumber": 3,
+      "source": "average",
+      "valueMs": 56159.2,
+      "sampleCount": 5
+    }
+  ],
+  "averages": {
+    "driverName": "DE STRIJKER Kris",
+    "carNumber": "33",
+    "sampleSize": 10,
+    "sectors": [
+      {
+        "sectorNumber": 1,
+        "sampleCount": 5,
+        "averageMs": 126715.4,
+        "values": [
+          345243,
+          53192,
+          129456,
+          52654,
+          53032
+        ]
+      },
+      {
+        "sectorNumber": 2,
+        "sampleCount": 5,
+        "averageMs": 87481.4,
+        "values": [
+          84970,
+          82363,
+          102564,
+          83686,
+          83824
+        ]
+      },
+      {
+        "sectorNumber": 3,
+        "sampleCount": 5,
+        "averageMs": 56159.2,
+        "values": [
+          48911,
+          49367,
+          48425,
+          49131,
+          84962
+        ]
+      }
+    ]
+  },
+  "updatedAt": "2026-07-03T11:50:04.783Z"
+}

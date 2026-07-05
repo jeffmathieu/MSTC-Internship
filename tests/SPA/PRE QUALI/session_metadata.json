@@ -1,0 +1,14 @@
+{
+  "timingUrl": "https://live.ris-timing.be/",
+  "sourceProvider": "ris-timing",
+  "sessionName": "Ligier Js Cup - Pr Qualifying Practice",
+  "startedAt": "2026-07-03T10:41:28.389Z",
+  "lastUpdatedAt": "2026-07-03T11:50:04.783Z",
+  "followedCar": "33",
+  "followedCars": [
+    "33"
+  ],
+  "baseStorageFolder": "/Users/jeffmathieu/Documents/KULeuven/MAS3/stage/MSTC/project/test timing/SPA TEST/PRE QUALI",
+  "storageFolder": "/Users/jeffmathieu/Documents/KULeuven/MAS3/stage/MSTC/project/test timing/SPA TEST/PRE QUALI",
+  "storageSchemaVersion": 1
+}

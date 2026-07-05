@@ -1,0 +1,90 @@
+{
+  "available": true,
+  "carNumber": "505",
+  "driverName": "HENDRIX Jorg",
+  "predictedLapMs": 177704.6,
+  "actualLapMs": null,
+  "predictionDeltaMs": null,
+  "completedSectorCount": 1,
+  "label": "After S1",
+  "sampleSize": 10,
+  "sectors": [
+    {
+      "sectorNumber": 1,
+      "source": "live",
+      "valueMs": 51357,
+      "sampleCount": 10
+    },
+    {
+      "sectorNumber": 2,
+      "source": "average",
+      "valueMs": 77139.1,
+      "sampleCount": 10
+    },
+    {
+      "sectorNumber": 3,
+      "source": "average",
+      "valueMs": 49208.5,
+      "sampleCount": 10
+    }
+  ],
+  "averages": {
+    "driverName": "HENDRIX Jorg",
+    "carNumber": "505",
+    "sampleSize": 10,
+    "sectors": [
+      {
+        "sectorNumber": 1,
+        "sampleCount": 10,
+        "averageMs": 63971.9,
+        "values": [
+          50800,
+          107974,
+          50811,
+          51022,
+          51021,
+          51482,
+          51341,
+          50661,
+          124027,
+          50580
+        ]
+      },
+      {
+        "sectorNumber": 2,
+        "sampleCount": 10,
+        "averageMs": 77139.1,
+        "values": [
+          76463,
+          76675,
+          76934,
+          76304,
+          76717,
+          76633,
+          79313,
+          76818,
+          78272,
+          77262
+        ]
+      },
+      {
+        "sectorNumber": 3,
+        "sampleCount": 10,
+        "averageMs": 49208.5,
+        "values": [
+          41740,
+          41717,
+          43419,
+          42876,
+          41316,
+          42670,
+          40352,
+          113665,
+          42201,
+          42129
+        ]
+      }
+    ]
+  },
+  "updatedAt": "2026-07-04T10:41:44.406Z"
+}

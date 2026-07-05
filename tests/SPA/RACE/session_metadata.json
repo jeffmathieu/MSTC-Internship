@@ -1,0 +1,15 @@
+{
+  "timingUrl": "https://live.ris-timing.be/",
+  "sourceProvider": "ris-timing",
+  "sessionName": "Ligier Js Cup - Race",
+  "startedAt": "2026-07-04T07:10:10.330Z",
+  "lastUpdatedAt": "2026-07-04T11:25:00.143Z",
+  "followedCar": "33",
+  "followedCars": [
+    "33",
+    "509"
+  ],
+  "baseStorageFolder": "/Users/jeffmathieu/Documents/KULeuven/MAS3/stage/MSTC/project/test timing/SPA TEST/RACE",
+  "storageFolder": "/Users/jeffmathieu/Documents/KULeuven/MAS3/stage/MSTC/project/test timing/SPA TEST/RACE",
+  "storageSchemaVersion": 1
+}
