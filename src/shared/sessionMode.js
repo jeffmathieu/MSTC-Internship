@@ -57,11 +57,11 @@
     return {
       mode: 'race',
       columns: [
-        { topLabel: 'Best D1', topMs: best?.bestLapMs, bottomLabel: 'Last D2', bottomMs: current?.lastLapMs, deltaLabel: 'Delta D1 - D2', deltaMs: subtract(best?.bestLapMs, current?.lastLapMs) },
-        { topLabel: 'Best D1', topMs: best?.bestLapMs, bottomLabel: 'Best D2', bottomMs: current?.bestLapMs, deltaLabel: 'Delta D1 - D2', deltaMs: subtract(best?.bestLapMs, current?.bestLapMs) },
-        { topLabel: 'Average D1', topMs: best?.averageLapMs, bottomLabel: 'Average D2', bottomMs: current?.averageLapMs, deltaLabel: 'Delta D1 - D2', deltaMs: subtract(best?.averageLapMs, current?.averageLapMs) },
-        { targetCarNumber: bic?.carNumber || '', topScope: 'car', bottomScope: 'current-driver', topLabel: 'Average BIC', topMs: bic?.averageLapMs, bottomLabel: 'Average Dact', bottomMs: bicDriver?.averageLapMs, deltaLabel: 'Delta BIC - Dact', deltaMs: subtract(bic?.averageLapMs, bicDriver?.averageLapMs) },
-        { targetCarNumber: xic?.carNumber || '', topScope: 'car', bottomScope: 'current-driver', topLabel: 'Average XIC', topMs: xic?.averageLapMs, bottomLabel: 'Average Dact', bottomMs: xicDriver?.averageLapMs, deltaLabel: 'Delta XIC - Dact', deltaMs: subtract(xic?.averageLapMs, xicDriver?.averageLapMs) }
+        { topLabel: 'Best D1', topMs: best?.bestLapMs, bottomLabel: 'Last D2', bottomMs: current?.lastLapMs, deltaLabel: 'Delta D2 vs D1', deltaMs: subtract(current?.lastLapMs, best?.bestLapMs) },
+        { topLabel: 'Best D1', topMs: best?.bestLapMs, bottomLabel: 'Best D2', bottomMs: current?.bestLapMs, deltaLabel: 'Delta D2 vs D1', deltaMs: subtract(current?.bestLapMs, best?.bestLapMs) },
+        { topLabel: 'Average D1', topMs: best?.averageLapMs, bottomLabel: 'Average D2', bottomMs: current?.averageLapMs, deltaLabel: 'Delta D2 vs D1', deltaMs: subtract(current?.averageLapMs, best?.averageLapMs) },
+        { targetCarNumber: bic?.carNumber || '', topScope: 'car', bottomScope: 'current-driver', topLabel: 'Average BIC', topMs: bic?.averageLapMs, bottomLabel: 'Average Dact', bottomMs: bicDriver?.averageLapMs, deltaLabel: 'Delta Dact vs BIC', deltaMs: subtract(bicDriver?.averageLapMs, bic?.averageLapMs) },
+        { targetCarNumber: xic?.carNumber || '', topScope: 'car', bottomScope: 'current-driver', topLabel: 'Average XIC', topMs: xic?.averageLapMs, bottomLabel: 'Average Dact', bottomMs: xicDriver?.averageLapMs, deltaLabel: 'Delta Dact vs XIC', deltaMs: subtract(xicDriver?.averageLapMs, xic?.averageLapMs) }
       ]
     };
   }
@@ -75,9 +75,9 @@
     return {
       mode: 'qualifying',
       columns: [
-        { topLabel: 'Best team driver', topMs: best?.bestLapMs, bottomLabel: 'Last current', bottomMs: current?.lastLapMs, deltaLabel: 'Delta best - last', deltaMs: subtract(best?.bestLapMs, current?.lastLapMs) },
-        { topLabel: 'Best team driver', topMs: best?.bestLapMs, bottomLabel: 'Best current', bottomMs: current?.bestLapMs, deltaLabel: 'Delta best - best', deltaMs: subtract(best?.bestLapMs, current?.bestLapMs) },
-        { topLabel: 'Last team driver', topMs: best?.lastLapMs, bottomLabel: 'Last current', bottomMs: current?.lastLapMs, deltaLabel: 'Delta last - last', deltaMs: subtract(best?.lastLapMs, current?.lastLapMs) },
+        { topLabel: 'Best team driver', topMs: best?.bestLapMs, bottomLabel: 'Last current', bottomMs: current?.lastLapMs, deltaLabel: 'Delta current vs best', deltaMs: subtract(current?.lastLapMs, best?.bestLapMs) },
+        { topLabel: 'Best team driver', topMs: best?.bestLapMs, bottomLabel: 'Best current', bottomMs: current?.bestLapMs, deltaLabel: 'Delta current vs best', deltaMs: subtract(current?.bestLapMs, best?.bestLapMs) },
+        { topLabel: 'Last team driver', topMs: best?.lastLapMs, bottomLabel: 'Last current', bottomMs: current?.lastLapMs, deltaLabel: 'Delta current vs team', deltaMs: subtract(current?.lastLapMs, best?.lastLapMs) },
         { topLabel: 'Best BIC', topMs: bic?.bestLapMs, bottomLabel: 'Last BIC', bottomMs: bic?.lastLapMs, deltaLabel: 'Delta best - last', deltaMs: subtract(bic?.lastLapMs, bic?.bestLapMs) },
         { topLabel: 'Best XIC', topMs: xic?.bestLapMs, bottomLabel: 'Last XIC', bottomMs: xic?.lastLapMs, deltaLabel: 'Delta best - last', deltaMs: subtract(xic?.lastLapMs, xic?.bestLapMs) }
       ]
@@ -101,13 +101,13 @@
     const itemFor = (row) => {
       if (!row) return null;
       const rivalBestLapMs = lapAnalytics.carStats(history, row.carNumber).bestLapMs;
-      const bestLapDeltaMs = subtract(rivalBestLapMs, ourBestLapMs);
+      const bestLapDeltaMs = subtract(ourBestLapMs, rivalBestLapMs);
       return {
         row,
         ourBestLapMs,
         rivalBestLapMs,
         bestLapDeltaMs,
-        trendState: !Number.isFinite(bestLapDeltaMs) || bestLapDeltaMs === 0 ? 'neutral' : bestLapDeltaMs > 0 ? 'good' : 'bad'
+        trendState: !Number.isFinite(bestLapDeltaMs) || bestLapDeltaMs === 0 ? 'neutral' : bestLapDeltaMs > 0 ? 'bad' : 'good'
       };
     };
     return {

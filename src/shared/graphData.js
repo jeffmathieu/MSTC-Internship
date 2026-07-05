@@ -139,6 +139,8 @@
   function classPaceComparison(history, carNumber, windowSize = 5) {
     const ourCar = lapAnalytics.carStats(history, carNumber);
     const classCars = ourCar.className ? lapAnalytics.carsInClass(history, ourCar.className) : [];
+    const ourLapTimes = new Map(lapAnalytics.representativePaceLaps(ourCar.laps)
+      .map((lap, index) => [chartLapNumber(lap, index), lap.lapTimeMs]));
     return {
       type: 'line',
       title: 'Class pace comparison',
@@ -150,12 +152,17 @@
         carNumber: car.carNumber,
         highlight: String(car.carNumber) === String(carNumber),
         points: lapAnalytics.representativePaceLaps(car.laps)
-          .map((lap, index) => ({
-            x: chartLapNumber(lap, index),
-            y: lap.lapTimeMs,
-            eligible: true,
-            label: `Lap ${chartLapNumber(lap, index)}`
-          }))
+          .map((lap, index) => {
+            const raceLapNumber = chartLapNumber(lap, index);
+            const ourLapMs = ourLapTimes.get(raceLapNumber);
+            return {
+              x: raceLapNumber,
+              y: lap.lapTimeMs,
+              eligible: true,
+              label: `Lap ${raceLapNumber}`,
+              deltaToOurCarMs: Number.isFinite(ourLapMs) ? lap.lapTimeMs - ourLapMs : null
+            };
+          })
       }))
     };
   }

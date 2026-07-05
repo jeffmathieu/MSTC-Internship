@@ -685,10 +685,13 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
   const totalPitStops = Math.max(0, Number(pitState.completedPitStops) || 0);
   const completedPitStops = Math.max(0, Number(pitState.validCompletedPitStops ?? pitState.completedPitStops) || 0);
   const remainingRequiredStops = Math.max(0, normalizedRules.requiredPitStops - completedPitStops);
+  const requirementsComplete = remainingRequiredStops === 0;
   const averageLapMs = normalizedRules.averageLapMs || numberOrNull(pitState.averageLapMs);
   const nearWindowMs = averageLapMs ? averageLapMs * normalizedRules.nearWindowLaps : null;
-  const isNearlyOpen = !windowState.allowed && Number.isFinite(windowState.waitMs) && Number.isFinite(nearWindowMs) && windowState.waitMs <= nearWindowMs;
-  const latestSafePitElapsedMs = latestSafePitElapsedMsForRemainingStops({ clock, rules: normalizedRules, pitState });
+  const isNearlyOpen = !requirementsComplete && !windowState.allowed && Number.isFinite(windowState.waitMs) && Number.isFinite(nearWindowMs) && windowState.waitMs <= nearWindowMs;
+  const latestSafePitElapsedMs = requirementsComplete
+    ? null
+    : latestSafePitElapsedMsForRemainingStops({ clock, rules: normalizedRules, pitState });
   const mustPitSoonMs = latestSafePitElapsedMs !== null && clock.elapsedMs !== null ? latestSafePitElapsedMs - clock.elapsedMs : null;
   const isStrategyUrgent = remainingRequiredStops > 0 && Number.isFinite(mustPitSoonMs) && mustPitSoonMs <= 0;
   const pitLoss = pitLossForSession({ session, rules: normalizedRules, fcyGapState });
@@ -697,12 +700,15 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
     : { available: false, reason: pitLoss.reason, items: [], fcyStatus: pitLoss.status };
 
   let status = 'unknown';
-  if (isStrategyUrgent) status = 'urgent';
+  if (requirementsComplete) status = 'complete';
+  else if (isStrategyUrgent) status = 'urgent';
   else if (windowState.allowed) status = 'open';
   else if (isNearlyOpen) status = 'soon';
   else status = 'closed';
 
-  const label = status === 'open'
+  const label = status === 'complete'
+    ? 'Mandatory pitstops complete'
+    : status === 'open'
     ? 'Pit window open'
     : status === 'soon'
       ? `Pit window soon (${formatDuration(windowState.waitMs)})`
@@ -723,6 +729,7 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
     lastPitElapsedMs: numberOrNull(pitState.lastPitElapsedMs),
     validPitElapsedHistoryMs: (pitState.validPitElapsedHistoryMs || []).map(numberOrNull).filter(Number.isFinite),
     remainingRequiredStops,
+    requirementsComplete,
     latestSafePitElapsedMs,
     mustPitSoonMs,
     projection,

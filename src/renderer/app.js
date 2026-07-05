@@ -298,9 +298,8 @@ function syncSessionMode(mode = currentSettings?.sessionMode || 'race') {
   document.body?.classList.add(`mode-${normalized}`);
 }
 
-// Updates a delta card and applies semantic border color. In this UI positive
-// means good for the displayed comparison because backend deltas are inverted
-// before they arrive here when needed.
+// Updates a delta card using the global current-minus-reference contract:
+// positive means the current value is slower (red), negative is faster (green).
 function setDelta(cardId, textId, deltaMs) {
   const card = $(cardId);
   const numeric = Number.isFinite(deltaMs) ? deltaMs : null;
@@ -308,14 +307,7 @@ function setDelta(cardId, textId, deltaMs) {
   if (!card) return;
   card.classList.remove('good', 'bad', 'neutral');
   if (numeric === null || numeric === 0) card.classList.add('neutral');
-  else card.classList.add(numeric > 0 ? 'good' : 'bad');
-}
-
-// Backend driver deltas are stored as current minus reference. The UI wants
-// green when we are faster/better, so driver deltas are inverted before display.
-function invertedDelta(value) {
-  const n = numericMs(value);
-  return n === null ? null : -n;
+  else card.classList.add(numeric > 0 ? 'bad' : 'good');
 }
 
 // Numeric helper used by driver/stint tables.
@@ -534,34 +526,34 @@ function renderDriverAndClassComparisons(summary, rows) {
 
   setMetric('best-d1-a', formatMs(numericMs(bestDriver?.bestLapMs)));
   setMetric('last-d2', formatMs(numericMs(currentDriver?.lastLapMs)));
-  setDelta('delta-best-last-card', 'delta-best-last', invertedDelta(driverComparison?.deltas?.bestDriverBestLapToCurrentLastLapMs));
+  setDelta('delta-best-last-card', 'delta-best-last', numericMs(driverComparison?.deltas?.bestDriverBestLapToCurrentLastLapMs));
 
   setMetric('best-d1-b', formatMs(numericMs(bestDriver?.bestLapMs)));
   setMetric('best-d2', formatMs(numericMs(currentDriver?.bestLapMs)));
-  setDelta('delta-best-best-card', 'delta-best-best', invertedDelta(driverComparison?.deltas?.bestDriverBestLapToCurrentBestLapMs));
+  setDelta('delta-best-best-card', 'delta-best-best', numericMs(driverComparison?.deltas?.bestDriverBestLapToCurrentBestLapMs));
 
   setMetric('average-d1', formatMs(numericMs(bestDriver?.averageLapMs)));
   setMetric('average-d2', formatMs(numericMs(currentDriver?.averageLapMs)));
-  setDelta('delta-average-drivers-card', 'delta-average-drivers', invertedDelta(driverComparison?.deltas?.bestDriverAverageToCurrentAverageMs));
+  setDelta('delta-average-drivers-card', 'delta-average-drivers', numericMs(driverComparison?.deltas?.bestDriverAverageToCurrentAverageMs));
 
   setMetric('average-bic', formatMs(numericMs(bestClassCar?.averageLapMs)));
   setMetric('average-bic-driver', formatMs(numericMs(bicDriver?.averageLapMs)));
   const bicDelta = numericMs(bestClassCar?.averageLapMs) !== null && numericMs(bicDriver?.averageLapMs) !== null
-    ? numericMs(bestClassCar?.averageLapMs) - numericMs(bicDriver?.averageLapMs)
+    ? numericMs(bicDriver?.averageLapMs) - numericMs(bestClassCar?.averageLapMs)
     : null;
   setDelta('delta-bic-card', 'delta-bic', bicDelta);
 
   setMetric('average-xic', formatMs(numericMs(selectedCar?.averageLapMs)));
   setMetric('average-xic-driver', formatMs(numericMs(xicDriver?.averageLapMs)));
   const xicDelta = numericMs(selectedCar?.averageLapMs) !== null && numericMs(xicDriver?.averageLapMs) !== null
-    ? numericMs(selectedCar?.averageLapMs) - numericMs(xicDriver?.averageLapMs)
+    ? numericMs(xicDriver?.averageLapMs) - numericMs(selectedCar?.averageLapMs)
     : null;
   setDelta('delta-xic-card', 'delta-xic', xicDelta);
 }
 
 // Renders the nearest same-class rivals from the precomputed class battle
 // summary. No gap or pace arithmetic lives here; classBattle.js supplies last-
-// lap deltas, the overall DIFF chain, and ten-lap catch estimates.
+// lap deltas, the confirmed gap chain, and configurable recent-pace estimates.
 function renderAdjacentClassBattles(summary) {
   const battles = summary?.adjacentClassBattles;
   const renderSide = (side, item) => {
@@ -619,7 +611,7 @@ function projectionLabel(projection) {
 // Renders pit window status, required-stop progress, next allowed pit time, and
 // after-pit class projection. All rule calculations come from pitstopPlanner.
 function renderPitstopPlan(plan) {
-  const pitWindow = document.querySelector('.pit-window');
+  const pitWindow = $('pit-window');
   if ($('open-pit-setup')) {
     $('open-pit-setup').disabled = pitSetupLocked();
     $('open-pit-setup').title = pitSetupLocked() ? 'Stop live collection before changing fixed pitstop setup' : '';
@@ -630,13 +622,15 @@ function renderPitstopPlan(plan) {
     setText('pit-projection', '—');
     setText('pit-stops-summary', `0/${$('pit-required-input')?.value || '2'}`);
     setText('pit-detail', 'Waiting for race clock and class gaps.');
-    if (pitWindow) pitWindow.classList.remove('open', 'soon', 'closed', 'urgent');
+    if (pitWindow) pitWindow.classList.remove('open', 'soon', 'closed', 'urgent', 'complete');
     return;
   }
 
   setText('pit-status', plan.label || plan.status);
   setText('pit-stops-summary', `${plan.completedPitStops}/${plan.rules?.requiredPitStops ?? $('pit-required-input')?.value ?? '2'}`);
-  setText('pit-next', plan.canPitNow ? 'Now' : (Number.isFinite(plan.waitMs) ? pitstopPlanner.formatDuration(plan.waitMs) : 'Closed'));
+  setText('pit-next', plan.requirementsComplete
+    ? (plan.canPitNow ? 'Optional' : 'Closed')
+    : plan.canPitNow ? 'Now' : (Number.isFinite(plan.waitMs) ? pitstopPlanner.formatDuration(plan.waitMs) : 'Closed'));
   setText('pit-projection', projectionLabel(plan.projection));
   const detailParts = [
     Number.isFinite(plan.clock?.elapsedMs) ? `Elapsed ${pitstopPlanner.formatDuration(plan.clock.elapsedMs)}` : '',
@@ -650,7 +644,7 @@ function renderPitstopPlan(plan) {
   setText('pit-detail', detailParts.join(' · '));
 
   if (pitWindow) {
-    pitWindow.classList.remove('open', 'soon', 'closed', 'urgent');
+    pitWindow.classList.remove('open', 'soon', 'closed', 'urgent', 'complete');
     pitWindow.classList.add(plan.status || 'closed');
   }
   const progress = $('pit-progress');

@@ -381,11 +381,11 @@ module.exports = (async () => {
 
   assert.strictEqual(document.getElementById('best-d1-a').textContent, '2:03.000');
   assert.strictEqual(document.getElementById('last-d2').textContent, '2:06.500');
-  assert.strictEqual(document.getElementById('delta-best-last').textContent, '-3.500s');
+  assert.strictEqual(document.getElementById('delta-best-last').textContent, '+3.500s');
   assert.ok(document.getElementById('delta-best-last-card').classList.contains('bad'));
-  assert.strictEqual(document.getElementById('delta-bic').textContent, '+0.500s');
+  assert.strictEqual(document.getElementById('delta-bic').textContent, '-0.500s');
   assert.ok(document.getElementById('delta-bic-card').classList.contains('good'));
-  assert.strictEqual(document.getElementById('delta-xic').textContent, '+1.000s');
+  assert.strictEqual(document.getElementById('delta-xic').textContent, '-1.000s');
   assert.ok(document.getElementById('delta-xic-card').classList.contains('good'));
   assert.strictEqual(document.getElementById('pit-status').textContent, 'Pit window open');
   assert.strictEqual(document.getElementById('pit-stops-summary').textContent, '1/2');
@@ -393,6 +393,27 @@ module.exports = (async () => {
   assert.ok(document.getElementById('pit-projection').textContent.includes('PIC 2'));
   assert.ok(document.getElementById('pit-projection').textContent.includes('0:05.000 behind #2'));
   assert.ok(document.getElementById('pit-projection').textContent.includes('0:10.000 ahead #56'));
+  collectorUpdate({
+    ...updatedState,
+    pitstopPlan: {
+      ...updatedState.pitstopPlan,
+      label: 'Mandatory pitstops complete',
+      status: 'complete',
+      requirementsComplete: true,
+      completedPitStops: 2,
+      remainingRequiredStops: 0,
+      mustPitSoonMs: null,
+      latestSafePitElapsedMs: null
+    }
+  });
+  await flushAsync();
+  assert.strictEqual(document.getElementById('pit-status').textContent, 'Mandatory pitstops complete');
+  assert.strictEqual(document.getElementById('pit-next').textContent, 'Optional');
+  assert.ok(document.getElementById('pit-window').classList.contains('complete'));
+  assert.ok(!document.getElementById('pit-detail').textContent.includes('latest safe stop'));
+  assert.ok(document.getElementById('pit-projection').textContent.includes('PIC 2'), 'rejoin projection stays visible after required stops');
+  collectorUpdate(updatedState);
+  await flushAsync();
   assert.strictEqual(document.getElementById('pit-bar').style.gridTemplateColumns, '1500000fr 11400000fr 1500000fr');
   const cooldownPeriods = document.getElementById('pit-cooldown-overlays').children;
   assert.strictEqual(cooldownPeriods.length, 2);
@@ -461,9 +482,9 @@ module.exports = (async () => {
       comparisonView: {
         mode: 'qualifying',
         columns: [
-          { topLabel: 'Best team driver', topMs: 123000, bottomLabel: 'Last current', bottomMs: 124000, deltaLabel: 'Delta best - last', deltaMs: -1000 },
-          { topLabel: 'Best team driver', topMs: 123000, bottomLabel: 'Best current', bottomMs: 123500, deltaLabel: 'Delta best - best', deltaMs: -500 },
-          { topLabel: 'Last team driver', topMs: 124500, bottomLabel: 'Last current', bottomMs: 124000, deltaLabel: 'Delta last - last', deltaMs: 500 },
+          { topLabel: 'Best team driver', topMs: 123000, bottomLabel: 'Last current', bottomMs: 124000, deltaLabel: 'Delta current vs best', deltaMs: 1000 },
+          { topLabel: 'Best team driver', topMs: 123000, bottomLabel: 'Best current', bottomMs: 123500, deltaLabel: 'Delta current vs best', deltaMs: 500 },
+          { topLabel: 'Last team driver', topMs: 124500, bottomLabel: 'Last current', bottomMs: 124000, deltaLabel: 'Delta current vs team', deltaMs: -500 },
           { topLabel: 'Best BIC', topMs: 122000, bottomLabel: 'Last BIC', bottomMs: 123000, deltaLabel: 'Delta best - last', deltaMs: 1000 },
           { topLabel: 'Best XIC', topMs: 125000, bottomLabel: 'Last XIC', bottomMs: 126500, deltaLabel: 'Delta best - last', deltaMs: 1500 }
         ]
@@ -471,8 +492,8 @@ module.exports = (async () => {
       adjacentClassBattles: {
         available: true,
         mode: 'qualifying',
-        ahead: { row: { carNumber: '2' }, ourBestLapMs: 123500, rivalBestLapMs: 122000, bestLapDeltaMs: -1500, trendState: 'bad' },
-        behind: { row: { carNumber: '56' }, ourBestLapMs: 123500, rivalBestLapMs: 125000, bestLapDeltaMs: 1500, trendState: 'good' }
+        ahead: { row: { carNumber: '2' }, ourBestLapMs: 123500, rivalBestLapMs: 122000, bestLapDeltaMs: 1500, trendState: 'bad' },
+        behind: { row: { carNumber: '56' }, ourBestLapMs: 123500, rivalBestLapMs: 125000, bestLapDeltaMs: -1500, trendState: 'good' }
       }
     }
   };
@@ -482,7 +503,7 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('average-d1').textContent, '2:04.500');
   assert.strictEqual(document.getElementById('comparison-4-top-label').textContent, 'Best BIC');
   assert.strictEqual(document.getElementById('delta-bic').textContent, '+1.000s');
-  assert.strictEqual(document.getElementById('battle-ahead-main').textContent, '#2 · Best Δ -1.500s');
+  assert.strictEqual(document.getElementById('battle-ahead-main').textContent, '#2 · Best Δ +1.500s');
   assert.ok(document.getElementById('battle-ahead-detail').textContent.includes('Their best 2:02.000'));
 
   document.getElementById('mode-race').checked = false;

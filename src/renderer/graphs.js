@@ -32,6 +32,11 @@ function formatTime(ms) {
   return `${minutes}:${String(seconds).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
 }
 
+function formatDelta(ms) {
+  if (!Number.isFinite(ms)) return '';
+  return `${ms >= 0 ? '+' : '-'}${(Math.abs(ms) / 1000).toFixed(3)}s`;
+}
+
 function finiteValues(values) {
   return values.filter(Number.isFinite);
 }
@@ -129,7 +134,10 @@ function drawLineChart(context, width, height, chart, viewport = { start: 0, end
       context.beginPath();
       context.arc(x, y, series.highlight ? 4 : 3, 0, Math.PI * 2);
       context.fill();
-      hitPoints.push({ x, y, text: `${series.name} · ${point.label || `Lap ${point.x}`} · ${formatTime(point.y)}${neutralized ? ' · FCY/SC' : ''}` });
+      const delta = Number.isFinite(point.deltaToOurCarMs)
+        ? ` · Δ to our car ${formatDelta(point.deltaToOurCarMs)}`
+        : '';
+      hitPoints.push({ x, y, text: `${formatTime(point.y)}${delta}${neutralized ? ' · FCY/SC' : ''}` });
     });
   });
 

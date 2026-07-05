@@ -347,8 +347,23 @@ const finishClosed = buildPitstopPlan({
   pitState: { completedPitStops: 2 },
   rules
 });
-assert.strictEqual(finishClosed.status, 'closed');
+assert.strictEqual(finishClosed.status, 'complete');
+assert.strictEqual(finishClosed.label, 'Mandatory pitstops complete');
+assert.strictEqual(finishClosed.requirementsComplete, true);
 assert.strictEqual(finishClosed.canPitNow, false);
+assert.strictEqual(finishClosed.latestSafePitElapsedMs, null);
+assert.strictEqual(finishClosed.mustPitSoonMs, null);
+assert.strictEqual(finishClosed.projection.available, true, 'pit-loss projection remains active after mandatory stops');
+
+const requirementsCompleteOpen = buildPitstopPlan({
+  rows: classRows,
+  session: { timeToGo: '1:20:00' },
+  followedCarNumber: '33',
+  pitState: { completedPitStops: 2 },
+  rules
+});
+assert.strictEqual(requirementsCompleteOpen.status, 'complete');
+assert.strictEqual(requirementsCompleteOpen.canPitNow, true, 'optional stop remains possible in an open pit window');
 
 // Strategy can become urgent before the final red zone if there is no longer
 // enough time to complete all required stops with cooldown spacing.

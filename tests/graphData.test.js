@@ -91,6 +91,8 @@ assert.strictEqual(classGraph.series.find((series) => series.carNumber === '33')
 assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').highlight, false);
 assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').points.length, 20);
 assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').points[0].y, 99000);
+assert.strictEqual(classGraph.series.find((series) => series.carNumber === '33').points[0].deltaToOurCarMs, 0);
+assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').points[0].deltaToOurCarMs, -1000);
 
 const otherClass = lap({ carNumber: 77, className: 'GT', teamName: 'GT Team', driverName: 'GT Driver', lapNumber: 1, lapTimeMs: 110000, sector1Ms: 35000, sector2Ms: 40000, sector3Ms: 35000 });
 assert.strictEqual(graphData.classPaceComparison([...history, otherClass], 33).series.some((series) => series.carNumber === '77'), false);

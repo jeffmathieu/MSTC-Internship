@@ -57,8 +57,36 @@ const raceView = buildComparisonView({ history, rows, ourCarNumber: 13, selected
 assert.strictEqual(raceView.mode, 'race');
 assert.strictEqual(raceView.columns[0].topMs, 100000, 'race D1 is selected by average pace');
 assert.strictEqual(raceView.columns[0].bottomMs, 130000);
+assert.strictEqual(raceView.columns[0].deltaMs, 30000, 'slower current time is positive');
+assert.strictEqual(raceView.columns[1].deltaMs, -1000, 'faster current best is negative');
+assert.strictEqual(raceView.columns[2].deltaMs, 9500);
 assert.strictEqual(raceView.columns[2].topLabel, 'Average D1');
 assert.strictEqual(raceView.columns[3].topMs, 99500);
+
+// BIC/XIC use the same current-minus-reference sign contract even when the
+// target car's current driver differs from its full-car average.
+const targetScopeHistory = [
+  makeLap(13, 'LMP3', 'Our Team', 'Our Driver', 1, 120000),
+  makeLap(2, 'LMP3', 'BIC', 'Old BIC Driver', 1, 90000),
+  makeLap(2, 'LMP3', 'BIC', 'Current BIC Driver', 2, 110000),
+  makeLap(9, 'LMP3', 'XIC', 'Old XIC Driver', 1, 120000),
+  makeLap(9, 'LMP3', 'XIC', 'Current XIC Driver', 2, 100000)
+];
+const targetScopeRows = [
+  { carNumber: '13', className: 'LMP3', driver: 'Our Driver' },
+  { carNumber: '2', className: 'LMP3', driver: 'Current BIC Driver' },
+  { carNumber: '9', className: 'LMP3', driver: 'Current XIC Driver' }
+];
+const targetScopeView = buildComparisonView({
+  history: targetScopeHistory,
+  rows: targetScopeRows,
+  ourCarNumber: 13,
+  selectedCarNumber: 9,
+  mode: 'race'
+});
+assert.strictEqual(targetScopeView.columns[3].deltaMs, 10000, 'slower current BIC driver is positive');
+assert.strictEqual(targetScopeView.columns[4].deltaMs, -10000, 'faster current XIC driver is negative');
+
 const sameTargetView = buildComparisonView({ history, rows, ourCarNumber: 13, selectedCarNumber: 2, mode: 'race' });
 assert.strictEqual(sameTargetView.columns[3].targetCarNumber, '2');
 assert.strictEqual(sameTargetView.columns[4].targetCarNumber, '2');
@@ -86,10 +114,10 @@ assert.strictEqual(buildComparisonView({ history, rows, ourCarNumber: 13, select
 const adjacent = qualifyingAdjacentView(history, rows, 13);
 assert.strictEqual(adjacent.available, true);
 assert.strictEqual(adjacent.ahead.row.carNumber, '2');
-assert.strictEqual(adjacent.ahead.bestLapDeltaMs, -1000);
+assert.strictEqual(adjacent.ahead.bestLapDeltaMs, 1000);
 assert.strictEqual(adjacent.ahead.trendState, 'bad');
 assert.strictEqual(adjacent.behind.row.carNumber, '9');
-assert.strictEqual(adjacent.behind.bestLapDeltaMs, 3000);
+assert.strictEqual(adjacent.behind.bestLapDeltaMs, -3000);
 assert.strictEqual(adjacent.behind.trendState, 'good');
 assert.strictEqual(qualifyingAdjacentView(history, rows, 2).ahead, null);
 assert.strictEqual(qualifyingAdjacentView(history, rows, 9).behind, null);

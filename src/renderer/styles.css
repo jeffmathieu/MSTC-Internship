@@ -454,6 +454,9 @@ input {
 .pit-window.soon { border-color: var(--orange); }
 .pit-window.closed { border-color: var(--red); }
 .pit-window.urgent { border-color: var(--red); box-shadow: 0 0 0 4px rgba(217,76,98,.18); }
+.pit-window.complete { border-color: var(--green); }
+.pit-window.complete .pit-bar span,
+.pit-window.complete .pit-bar .pit-cooldown-period { background: var(--green); }
 .pit-detail {
   margin: 0;
   color: var(--muted);
