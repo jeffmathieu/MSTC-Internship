@@ -4,3 +4,5 @@ release/
 out/
 .vscode/
 report/
+tmp/
+output/

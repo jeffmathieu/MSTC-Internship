@@ -1,0 +1,15 @@
+{
+  "driverOverrides": {
+    "33": [
+      {
+        "fromLap": 1,
+        "toLap": 23,
+        "driverName": "JANSSENS Robbe",
+        "reason": "RIS Timing showed incorrect driver names during Robbe's opening stint."
+      }
+    ]
+  },
+  "excludedLaps": {
+    "33": [1, 2, 7, 8, 9, 24, 25, 37, 38, 39, 45, 47, 49, 55, 58, 59]
+  }
+}
