@@ -33,6 +33,11 @@ const CONFIG = {
   analyticsSummaryBytesPerDriver: 700,
   lapPredictionBytes: 3500,
   pitPlanBytes: 5000,
+  gapStateBaseBytes: 2500,
+  gapStateBytesPerStoredCar: 450,
+  gapViewBytesPerFollowedCar: 1200,
+  gapSampleBytes: 300,
+  gapSamplesPerFollowedLap: 2,
   averageDriversPerCar: 4,
 
   // Optional overhead for headers/newlines/session variation.
@@ -75,6 +80,9 @@ function latestSnapshotBytes(carCount, config = CONFIG) {
   const followedCars = Math.max(1, Number(config.followedCars) || 1);
   const lapPredictionBytes = config.lapPredictionBytes * followedCars;
   const pitPlanBytes = (config.pitPlanBytes || 0) * followedCars;
+  const gapStateBytes = (config.gapStateBaseBytes || 0)
+    + carCount * (config.gapStateBytesPerStoredCar || 0)
+    + followedCars * (config.gapViewBytesPerFollowedCar || 0);
   return {
     latestCsvBytes,
     latestJsonBytes,
@@ -83,7 +91,20 @@ function latestSnapshotBytes(carCount, config = CONFIG) {
     analyticsSummaryBytes,
     lapPredictionBytes,
     pitPlanBytes,
-    totalBytes: latestCsvBytes + latestJsonBytes + parserDebugBytes + sessionMetadataBytes + analyticsSummaryBytes + lapPredictionBytes + pitPlanBytes
+    gapStateBytes,
+    totalBytes: latestCsvBytes + latestJsonBytes + parserDebugBytes + sessionMetadataBytes + analyticsSummaryBytes + lapPredictionBytes + pitPlanBytes + gapStateBytes
+  };
+}
+
+// One confirmed sample is stored only at a relevant start/finish crossing, not
+// every poll. Two adjacent class rivals per followed car is the normal maximum.
+function gapHistorySizeBytes(lapsEach, config = CONFIG) {
+  const sampleCount = Math.max(1, Number(config.followedCars) || 1)
+    * lapsEach
+    * (config.gapSamplesPerFollowedLap || 2);
+  return {
+    sampleCount,
+    totalBytes: config.overheadBytesPerFile + sampleCount * (config.gapSampleBytes || 0)
   };
 }
 
@@ -132,7 +153,7 @@ function printScenario(label, result) {
 // Prints one overwritten/latest-files scenario line.
 function printLatestScenario(label, carCount, config) {
   const result = latestSnapshotBytes(carCount, config);
-  console.log(`${label.padEnd(24)} cars=${String(carCount).padStart(2)} latestCSV=${formatBytes(result.latestCsvBytes).padStart(9)} latestJSON=${formatBytes(result.latestJsonBytes).padStart(9)} debug=${formatBytes(result.parserDebugBytes).padStart(9)} analytics=${formatBytes(result.analyticsSummaryBytes).padStart(9)} predictions=${formatBytes(result.lapPredictionBytes).padStart(9)} pitPlans=${formatBytes(result.pitPlanBytes).padStart(9)} total=${formatBytes(result.totalBytes).padStart(9)}`);
+  console.log(`${label.padEnd(24)} cars=${String(carCount).padStart(2)} latestCSV=${formatBytes(result.latestCsvBytes).padStart(9)} latestJSON=${formatBytes(result.latestJsonBytes).padStart(9)} debug=${formatBytes(result.parserDebugBytes).padStart(9)} analytics=${formatBytes(result.analyticsSummaryBytes).padStart(9)} predictions=${formatBytes(result.lapPredictionBytes).padStart(9)} pitPlans=${formatBytes(result.pitPlanBytes).padStart(9)} gapState=${formatBytes(result.gapStateBytes).padStart(9)} total=${formatBytes(result.totalBytes).padStart(9)}`);
 }
 
 // Prints analytics-summary details so driver-count assumptions are visible.
@@ -148,7 +169,8 @@ function main(config = CONFIG) {
   const polls = pollCount(config);
   const history = bytesForScenario(config.storedCars, lapsEach, config);
   const overwritten = latestSnapshotBytes(config.storedCars, config);
-  const totalStoredBytes = history.totalBytes + overwritten.totalBytes;
+  const gapHistory = gapHistorySizeBytes(lapsEach, config);
+  const totalStoredBytes = history.totalBytes + overwritten.totalBytes + gapHistory.totalBytes;
 
   console.log('Storage estimate');
   console.log('----------------');
@@ -167,6 +189,7 @@ function main(config = CONFIG) {
   console.log('Append-only lap history');
   console.log('-----------------------');
   printScenario('All stored cars', history);
+  console.log(`Confirmed gap history    samples=${String(gapHistory.sampleCount).padStart(6)} JSONL=${formatBytes(gapHistory.totalBytes).padStart(9)}`);
   console.log('');
 
   console.log('Current overwritten files');
@@ -193,6 +216,7 @@ module.exports = {
   latestSnapshotBytes,
   analyticsSummarySizeBytes,
   analyticsSummaryBreakdown,
+  gapHistorySizeBytes,
   formatBytes,
   main
 };

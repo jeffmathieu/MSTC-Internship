@@ -117,6 +117,17 @@ assert.deepStrictEqual(splitTeamInfo('MSTC | JANSSENS Robbe - Mazda MX-5'), {
   driver: 'JANSSENS Robbe',
   car: 'Mazda MX-5'
 });
+assert.deepStrictEqual(splitTeamInfo('MSTC | Mazda MX-5', 'Known Driver', 'Known Car'), {
+  team: 'MSTC',
+  driver: 'Known Driver',
+  car: 'Known Car'
+});
+assert.deepStrictEqual(splitTeamInfo('MSTC | JANSSENS Robbe - Mazda MX-5', 'Override Driver', 'Override Car'), {
+  team: 'MSTC',
+  driver: 'Override Driver',
+  car: 'Override Car'
+});
+assert.deepStrictEqual(splitTeamInfo(null), { team: '', driver: '', car: '' });
 
 const risLegacyHeaders = ['POS', 'NOW', 'NUM', 'CAT', '', 'TEAM', 'Drivers', 'S1', 'S2', 'S3', 'Lap', 'GAP', 'Last time', 'PS'];
 const risLegacyCells = ['2', 'RUN', '18', 'GT+', '.', 'SPEEDLOVER', 'VERHOEVEN Jay', '30.049', '', '', '27', '17.129', '1:34.175', '.'];
@@ -190,5 +201,16 @@ const getRaceResultsSession = parseSessionInfo({
 assert.strictEqual(getRaceResultsSession.timeToGo, '01:45:00');
 assert.strictEqual(getRaceResultsSession.sessionName, 'Spa Test - Practice');
 assert.strictEqual(getRaceResultsSession.flag, 'Green flag');
+
+const simpleToGoSession = parseSessionInfo({
+  bodyText: 'To go: 00:42:15  Timing server connected'
+});
+assert.strictEqual(simpleToGoSession.timeToGo, '00:42:15');
+const safetyCarSession = parseSessionInfo({ sessionFields: { status: 'SAFETY CAR' } });
+assert.strictEqual(safetyCarSession.flag, 'Safety car');
+const yellowSession = parseSessionInfo({ sessionFields: { status: 'LOCAL YELLOW' } });
+assert.strictEqual(yellowSession.flag, 'Yellow flag');
+const commonStatusSession = parseSessionInfo({ bodyText: 'Waiting for the LiveTiming data' });
+assert.strictEqual(commonStatusSession.statusText, 'Waiting for the LiveTiming data');
 
 console.log('Parser tests passed.');

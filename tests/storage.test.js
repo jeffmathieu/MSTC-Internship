@@ -2,6 +2,7 @@ const assert = require('assert');
 const {
   NORMALIZED_ROW_COLUMNS,
   LAP_HISTORY_COLUMNS,
+  normalizeStorageField,
   normalizeForStorage,
   analysisRowsFromParsedRows,
   lapRecordFromNormalizedRow,
@@ -11,6 +12,10 @@ const {
   toCsvRows,
   detectSourceProvider
 } = require('../src/shared/storageSchema');
+
+assert.strictEqual(normalizeStorageField(null), '');
+assert.strictEqual(normalizeStorageField(undefined), '');
+assert.strictEqual(normalizeStorageField('  value  '), 'value');
 
 const context = {
   collectedAt: '2026-06-23T10:00:00.000Z',
@@ -137,6 +142,29 @@ const nonMatchingCurrentRow = { ...risCompletedLiveRow, sector3: '10.000' };
 const previousEvidence = { driverName: 'Previous Driver', sector1: '52.000', sector2: '1:20.000', sector3: '46.000' };
 assert.strictEqual(currentSectorsMatchCompletedLap(nonMatchingCurrentRow), false);
 assert.strictEqual(completedLapRowFromLiveRow(nonMatchingCurrentRow, previousEvidence).sector3, '46.000');
+assert.strictEqual(currentSectorsMatchCompletedLap({ lastLap: '--', sector1: '1.000', sector2: '2.000', sector3: '3.000' }), false);
+assert.strictEqual(currentSectorsMatchCompletedLap({ lastLap: '1:40.000', sector1: '30.000', sector2: '', sector3: '30.000' }), false);
+const noSectorEvidence = completedLapRowFromLiveRow({
+  driverName: 'Current Driver',
+  lastLap: '1:40.000',
+  sector1: '',
+  sector2: '',
+  sector3: '',
+  sector1Flag: 'Green flag',
+  sector1Eligible: 'true'
+}, null);
+assert.strictEqual(noSectorEvidence.driverName, 'Current Driver');
+assert.strictEqual(noSectorEvidence.sector1, '');
+assert.strictEqual(noSectorEvidence.sector1Flag, '');
+assert.strictEqual(noSectorEvidence.sector1Eligible, '');
+
+const missingStorageAnnotations = analysisRowsFromParsedRows([{ carNumber: 5 }], []);
+assert.deepStrictEqual({
+  sessionFlag: missingStorageAnnotations[0].sessionFlag,
+  lapFlag: missingStorageAnnotations[0].lapFlag,
+  sector1Flag: missingStorageAnnotations[0].sector1Flag,
+  sector1Eligible: missingStorageAnnotations[0].sector1Eligible
+}, { sessionFlag: '', lapFlag: '', sector1Flag: '', sector1Eligible: '' });
 
 const fallbackContextRow = normalizeForStorage({
   movement: 'up',
@@ -209,6 +237,7 @@ const noLapNumberIdentity = lapIdentity({
 assert.strictEqual(noLapNumberIdentity, 'unknown|https://example.com/live|Demo|7|Fallback Driver|1:40.000');
 assert.strictEqual(detectSourceProvider({ sourceProvider: 'manual-provider', timingUrl: 'https://livetiming.getraceresults.com' }), 'manual-provider');
 assert.strictEqual(detectSourceProvider({ timingUrl: 'https://example.com/RISTiming/live' }), 'ris-timing');
+assert.strictEqual(detectSourceProvider({ timingUrl: 'https://example.com/RIS TIMING/live' }), 'ris-timing');
 assert.strictEqual(detectSourceProvider({}), 'unknown');
 
 console.log('Storage schema tests passed.');

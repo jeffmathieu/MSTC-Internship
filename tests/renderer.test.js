@@ -399,10 +399,11 @@ module.exports = (async () => {
   assert.strictEqual(cooldownPeriods[0].style.left, '25%');
   assert.ok(cooldownPeriods[0].style.width.startsWith('10.416'));
   assert.strictEqual(cooldownPeriods[1].style.left, '50%');
-  assert.strictEqual(document.getElementById('battle-ahead-main').textContent, '#2 · Last Δ +0.500s');
+  assert.strictEqual(document.getElementById('battle-ahead-main').textContent, '#2 · Gap 5.000s');
+  assert.ok(document.getElementById('battle-ahead-detail').textContent.includes('Last lap Δ +0.500s'));
   assert.ok(document.getElementById('battle-ahead-detail').textContent.includes('10.0 laps'));
   assert.ok(document.getElementById('battle-ahead-card').classList.contains('good'));
-  assert.strictEqual(document.getElementById('battle-behind-main').textContent, '#56 · Last Δ -1.000s');
+  assert.strictEqual(document.getElementById('battle-behind-main').textContent, '#56 · Gap 10.000s');
   assert.ok(document.getElementById('battle-behind-card').classList.contains('bad'));
 
   await document.getElementById('open-graphs').trigger('click');

@@ -6,6 +6,7 @@ const {
   latestSnapshotBytes,
   analyticsSummarySizeBytes,
   analyticsSummaryBreakdown,
+  gapHistorySizeBytes,
   formatBytes,
   main
 } = require('../scripts/storage-estimate');
@@ -24,6 +25,11 @@ const config = {
   analyticsSummaryBytesPerDriver: 25,
   lapPredictionBytes: 60,
   pitPlanBytes: 70,
+  gapStateBaseBytes: 80,
+  gapStateBytesPerStoredCar: 10,
+  gapViewBytesPerFollowedCar: 20,
+  gapSampleBytes: 7,
+  gapSamplesPerFollowedLap: 2,
   followedCars: 2,
   averageDriversPerCar: 2.5,
   overheadBytesPerFile: 5
@@ -56,7 +62,9 @@ assert.strictEqual(latest.sessionMetadataBytes, 100);
 assert.strictEqual(latest.analyticsSummaryBytes, 520);
 assert.strictEqual(latest.lapPredictionBytes, 120);
 assert.strictEqual(latest.pitPlanBytes, 140);
-assert.strictEqual(latest.totalBytes, 1135);
+assert.strictEqual(latest.gapStateBytes, 150);
+assert.strictEqual(latest.totalBytes, 1285);
+assert.deepStrictEqual(gapHistorySizeBytes(4, config), { sampleCount: 16, totalBytes: 117 });
 
 assert.strictEqual(formatBytes(999), '999.0 B');
 assert.strictEqual(formatBytes(1024), '1.00 KB');

@@ -195,6 +195,8 @@ Generated files can include:
 - `session_metadata.json`
 - `parser_debug.json`
 - `analytics_summary.json`
+- `gap_state.json`
+- `gap_history.jsonl`
 - `lap_prediction_car-<number>.json`
 - `pitstop_plan_car-<number>.json`
 
@@ -333,12 +335,21 @@ lap_history.jsonl	Stored completed laps in append-friendly JSONL format
 session_metadata.json	Timing URL, provider, followed car, session info and update time
 parser_debug.json	Parser diagnostics for troubleshooting
 analytics_summary.json	Derived pace, lap, sector and comparison statistics
+gap_state.json	Latest start/finish-confirmed per-car gaps and pit-suppression state
+gap_history.jsonl	Append-only confirmed gap samples for battles and future graphs
 lap_prediction_car-<number>.json	Current-lap prediction for a followed car
 pitstop_plan_car-<number>.json	Pitstop strategy output for a followed car
 
 lap_history.csv and lap_history.jsonl are the long-term source of truth.
 
-analytics_summary.json, lap predictions, and pitstop plans are derived files that can be recalculated from the saved lap history.
+`gap_state.json` is restored when the same race folder is reopened, so volatile
+live timing polls cannot replace the last confirmed start/finish gaps after a
+restart. `gap_history.jsonl` grows only when a relevant car crosses the line,
+not every five-second poll. The default catch estimate uses the latest five
+valid laps; a rival that remains in the pits for five of our completed laps is
+temporarily removed from catch output until it resumes.
+
+analytics_summary.json, lap predictions, and pitstop plans are derived files that can be recalculated from the saved lap history and confirmed gap state.
 
 Development
 Requirements

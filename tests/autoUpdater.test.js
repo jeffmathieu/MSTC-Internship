@@ -91,6 +91,71 @@ module.exports = (async () => {
   await flushAsyncEvents();
   assert.strictEqual(dialogCalls.at(-1).length, 1, 'dialog works when the main window is unavailable');
 
+  const declinedUpdater = fakeUpdater();
+  setupAutoUpdates({
+    app: { isPackaged: true, getVersion: () => '1.0.0' },
+    dialog: { showMessageBox: async () => ({ response: 1 }) },
+    autoUpdater: declinedUpdater,
+    logger
+  });
+  declinedUpdater.emit('update-available');
+  await flushAsyncEvents();
+  assert.strictEqual(declinedUpdater.downloadCount, 0, 'Later does not download an available update');
+
+  let releasePrompt;
+  let duplicatePromptCount = 0;
+  const duplicateUpdater = fakeUpdater();
+  setupAutoUpdates({
+    app: { isPackaged: true, getVersion: () => '1.0.0' },
+    dialog: { showMessageBox: () => {
+      duplicatePromptCount += 1;
+      return new Promise((resolve) => { releasePrompt = resolve; });
+    } },
+    autoUpdater: duplicateUpdater,
+    logger
+  });
+  duplicateUpdater.emit('update-available', { version: '2.0.0' });
+  duplicateUpdater.emit('update-available', { version: '2.0.0' });
+  await flushAsyncEvents();
+  assert.strictEqual(duplicatePromptCount, 1, 'duplicate update events share one open prompt');
+  releasePrompt({ response: 1 });
+  await flushAsyncEvents();
+
+  const downloadFailureUpdater = fakeUpdater();
+  downloadFailureUpdater.downloadUpdate = async () => { throw new Error('download failed'); };
+  setupAutoUpdates({
+    app: { isPackaged: true, getVersion: () => '1.0.0' },
+    dialog: { showMessageBox: async () => ({ response: 0 }) },
+    autoUpdater: downloadFailureUpdater,
+    logger
+  });
+  downloadFailureUpdater.emit('update-available', { version: '2.0.1' });
+  await flushAsyncEvents();
+  assert.ok(logEntries.some((entry) => String(entry[1]).includes('Update download failed')));
+
+  const checkFailureUpdater = fakeUpdater();
+  checkFailureUpdater.checkForUpdates = async () => { throw new Error('check failed'); };
+  setupAutoUpdates({
+    app: { isPackaged: true, getVersion: () => '1.0.0' },
+    dialog: { showMessageBox: async () => ({ response: 1 }) },
+    autoUpdater: checkFailureUpdater,
+    logger
+  });
+  await flushAsyncEvents();
+  assert.ok(logEntries.some((entry) => String(entry[1]).includes('Update check failed')));
+
+  const installPromptFailureUpdater = fakeUpdater();
+  setupAutoUpdates({
+    app: { isPackaged: true, getVersion: () => '1.0.0' },
+    dialog: { showMessageBox: async () => { throw new Error('dialog failed'); } },
+    autoUpdater: installPromptFailureUpdater,
+    logger
+  });
+  installPromptFailureUpdater.emit('update-downloaded', { version: '2.0.2' });
+  await flushAsyncEvents();
+  assert.strictEqual(installPromptFailureUpdater.installCount, 0);
+  assert.ok(logEntries.some((entry) => String(entry[1]).includes('Update install prompt failed')));
+
   console.log('Auto updater tests passed.');
 })().catch((error) => {
   console.error(error);

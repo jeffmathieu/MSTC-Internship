@@ -584,8 +584,13 @@ function renderAdjacentClassBattles(summary) {
       }
       return;
     }
-    setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · Last Δ ${item.lastLapDeltaLabel}`);
-    setText(`battle-${side}-detail`, `Gap ${item.gapLabel} · ${item.catchInfo}`);
+    if (item.suppressed) {
+      setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · In pit`);
+      setText(`battle-${side}-detail`, `Catch prediction paused after ${item.rivalPitLaps} of our laps`);
+    } else {
+      setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · Gap ${item.gapLabel}`);
+      setText(`battle-${side}-detail`, `Last lap Δ ${item.lastLapDeltaLabel} · ${item.catchInfo}`);
+    }
     if (card) {
       card.classList.remove('good', 'bad', 'neutral');
       card.classList.add(item.trendState || 'neutral');
