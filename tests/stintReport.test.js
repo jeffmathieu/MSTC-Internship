@@ -1,5 +1,6 @@
 const assert = require('assert');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const {
   numericGapMs,
@@ -8,6 +9,7 @@ const {
   findPdfPython,
   buildPayload
 } = require('../scripts/generate-spa-stint-reports');
+const { renderReportLabPdf } = require('../src/main/stintReports');
 
 const history = fs.readFileSync(path.join(__dirname, 'SPA', 'RACE', 'lap_history.jsonl'), 'utf8')
   .split(/\r?\n/)
@@ -44,5 +46,20 @@ assert.strictEqual(payload.stints[1].laps.find((lap) => lap.lapNumber === 38).st
 assert.strictEqual(numericGapMs('1:05.031'), 65031);
 assert.strictEqual(numericGapMs('1L'), null);
 assert.ok(findPdfPython(), 'a Python interpreter with ReportLab should be discoverable');
+
+// CI installs the same pinned ReportLab dependency used by development. This
+// smoke test proves that Python discovery, the src renderer and its payload
+// contract work together instead of merely checking that an import succeeds.
+const renderFolder = fs.mkdtempSync(path.join(os.tmpdir(), 'mstc-reportlab-smoke-'));
+try {
+  const payloadPath = path.join(renderFolder, 'payload.json');
+  const pdfPath = path.join(renderFolder, 'stint.pdf');
+  fs.writeFileSync(payloadPath, JSON.stringify({ ...payload, stints: [payload.stints[0]] }));
+  const rendered = renderReportLabPdf(payloadPath, pdfPath);
+  assert.strictEqual(rendered.rendered, true, rendered.error || rendered.reason);
+  assert.strictEqual(fs.readFileSync(pdfPath).subarray(0, 5).toString(), '%PDF-');
+} finally {
+  fs.rmSync(renderFolder, { recursive: true, force: true });
+}
 
 console.log('Stint report data tests passed.');
