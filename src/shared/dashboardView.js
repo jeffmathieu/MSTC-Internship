@@ -13,6 +13,7 @@
     return {
       ...summary,
       dashboardAnalysis: summary.dashboardAnalysisByCar?.[key] || (isPrimary ? summary.dashboardAnalysis : null),
+      timingHighlights: summary.timingHighlightsByCar?.[key] || null,
       comparisonView: summary.comparisonViewsByCar?.[key] || (isPrimary ? summary.comparisonView : null),
       adjacentClassBattles: summary.modeAdjacentViewsByCar?.[key]
         || summary.adjacentClassBattlesByCar?.[key]

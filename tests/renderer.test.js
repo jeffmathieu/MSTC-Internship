@@ -9,6 +9,12 @@ assert.strictEqual(
   false,
   'completed mandatory stops keep red pit-history and closed-window segments visible'
 );
+[
+  '--lap-strip-pit-color',
+  '--lap-strip-neutralized-color',
+  '--lap-strip-personal-best-color',
+  '--lap-strip-class-best-color'
+].forEach((variable) => assert.ok(rendererCss.includes(variable), `${variable} remains independently editable`));
 
 // Minimal classList implementation for running app.js without a browser. The
 // renderer only needs add/remove/contains/toggle for these tests.
@@ -244,6 +250,22 @@ const updatedState = {
   analyticsSummary: {
     followedCar: '13',
     cars: [{ carNumber: '13', bestSector1Ms: 41000, bestSector2Ms: 46000, bestSector3Ms: 36000 }],
+    timingHighlightsByCar: {
+      13: {
+        bestLap: { valueMs: 123500, classBestMs: 123500, isClassBest: true },
+        bestSectors: {
+          sector1: { valueMs: 41000, classBestMs: 41000, isClassBest: true },
+          sector2: { valueMs: 46000, classBestMs: 45500, isClassBest: false },
+          sector3: { valueMs: 36000, classBestMs: 36000, isClassBest: true }
+        },
+        lapStrip: [
+          { lapNumber: 1, lapTimeMs: 123500, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'normal', highlight: 'class-best', marker: '', tooltip: 'Nigel Moore · Green flag' },
+          { lapNumber: 2, lapTimeMs: 180000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'neutralized', highlight: 'none', marker: '', tooltip: 'Nigel Moore · FCY' },
+          { lapNumber: 3, lapTimeMs: 140000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'pit-in', highlight: 'none', marker: 'P', tooltip: 'Nigel Moore · pit-in' },
+          { lapNumber: 4, lapTimeMs: 135000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'pit-out', highlight: 'none', marker: '', tooltip: 'Nigel Moore · pit-out' }
+        ]
+      }
+    },
     driversByCar: {
       2: [{ driverName: 'Fast Driver', averageLapMs: 123500 }],
       56: [{ driverName: 'X Driver', averageLapMs: 129000 }]
@@ -372,14 +394,18 @@ module.exports = (async () => {
   assert.strictEqual(lapRows.length, 4, 'all stored laps are rendered in the vertical strip');
   assert.strictEqual(lapRows[0].children[0].textContent, '4', 'newest lap appears first');
   assert.strictEqual(lapRows[0].classList.contains('pit-out'), true);
-  assert.strictEqual(lapRows[0].children[2].textContent, '', 'outlap is red without a P marker');
+  assert.strictEqual(lapRows[0].children[2].textContent, 'NM', 'driver initials sit between time and pit marker');
+  assert.strictEqual(lapRows[0].children[3].textContent, '', 'outlap is red without a P marker');
   assert.strictEqual(lapRows[1].classList.contains('pit-in'), true);
-  assert.strictEqual(lapRows[1].children[2].textContent, 'P');
+  assert.strictEqual(lapRows[1].children[3].textContent, 'P');
   assert.strictEqual(lapRows[2].classList.contains('neutralized'), true);
-  assert.strictEqual(lapRows[3].classList.contains('normal'), true);
+  assert.strictEqual(lapRows[3].classList.contains('class-best'), true);
+  assert.strictEqual(document.getElementById('best-time').classList.contains('class-best-value'), true);
 
   assert.strictEqual(document.getElementById('best-sector-1').textContent, '0:41.000');
   assert.strictEqual(document.getElementById('best-sector-2').textContent, '0:46.000');
+  assert.strictEqual(document.getElementById('best-sector-1').classList.contains('class-best-value'), true);
+  assert.strictEqual(document.getElementById('best-sector-2').classList.contains('class-best-value'), false);
   collectorUpdate({ ...updatedState, session: { ...updatedState.session, flag: 'Full course yellow' } });
   assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-caution'), true);
   assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-red'), false);

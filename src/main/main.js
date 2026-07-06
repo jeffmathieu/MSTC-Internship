@@ -45,6 +45,7 @@ const {
 } = require('../shared/gapMemory');
 const { normalizeMode, buildComparisonView, qualifyingAdjacentView } = require('../shared/sessionMode');
 const { stintsForCar, buildStintState } = require('../shared/stintTracker');
+const { buildTimingHighlights } = require('../shared/timingHighlights');
 const { resolveSessionFolder, loadSessionHistory, loadStoredJson } = require('../shared/storageSession');
 const { setupAutoUpdates } = require('./autoUpdater');
 const { setupAppLifecycle } = require('./appLifecycle');
@@ -708,6 +709,10 @@ function buildAnalyticsSummary(settings, context, rows = []) {
       ? qualifyingAdjacentView(history, rows, carNumber)
       : sessionMode === 'race' ? adjacentClassBattlesByCar[carNumber] : null
   ]));
+  const timingHighlightsByCar = Object.fromEntries(followedCars.map((carNumber) => [
+    carNumber,
+    buildTimingHighlights(history, carNumber)
+  ]));
   const primaryCar = String(settings.followedCar || followedCars[0] || '');
 
   return {
@@ -743,6 +748,7 @@ function buildAnalyticsSummary(settings, context, rows = []) {
       driverStats(history, carNumber).map(compactStats)
     ])),
     stintsByCar: collectorState.stintState?.cars || {},
+    timingHighlightsByCar,
     adjacentClassBattlesByCar,
     comparisonViewsByCar,
     modeAdjacentViewsByCar,

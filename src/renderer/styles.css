@@ -23,8 +23,14 @@
   --shadow: rgba(24, 31, 27, .10);
   --modal-overlay: rgba(12, 17, 15, .48);
   color-scheme: light;
-  --yellow-status: #fcec54;
+  --yellow-status: #fcee59;
   --red-status: rgb(255, 0, 0);
+  /* Lap-strip palette: these four labels can be changed independently. */
+  --lap-strip-pit-color: #d94c62;
+  --lap-strip-neutralized-color: #fcee59;
+  --lap-strip-personal-best-color: #1e9f67;
+  --lap-strip-class-best-color: rgb(177, 80, 196);
+  --class-best-value-color: rgb(177, 80, 196);
 }
 
 :root[data-theme="dark"] {
@@ -52,8 +58,14 @@
   --shadow: rgba(0, 0, 0, .28);
   --modal-overlay: rgba(5, 8, 10, .72);
   color-scheme: dark;
-  --yellow-status: #fcec54;
+  --yellow-status: #fcee59;
   --red-status: rgb(255, 0, 0);
+  /* Dark-mode equivalents of the independently editable lap-strip colors. */
+  --lap-strip-pit-color: #f06a7b;
+  --lap-strip-neutralized-color: #fcee59;
+  --lap-strip-personal-best-color: #42c98c;
+  --lap-strip-class-best-color: #c19cff;
+  --class-best-value-color: #c19cff;
 }
 
 * { box-sizing: border-box; }
@@ -119,7 +131,7 @@ button { cursor: pointer; }
   min-height: 42px;
   padding: 7px 7px;
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) 14px;
+  grid-template-columns: 27px minmax(0, 1fr) 23px 12px;
   gap: 5px;
   align-items: center;
   border-bottom: 1px solid var(--soft-line);
@@ -129,19 +141,41 @@ button { cursor: pointer; }
 }
 .lap-strip-row .lap-number { color: var(--muted); font-size: 11px; font-weight: 900; }
 .lap-strip-row .lap-time { font-size: 13px; font-weight: 900; white-space: nowrap; }
+.lap-strip-row .lap-driver {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  text-align: right;
+  text-overflow: clip;
+  white-space: nowrap;
+}
 .lap-strip-row .lap-marker { text-align: right; font-size: 12px; font-weight: 900; }
 .lap-strip-row.pit-in,
 .lap-strip-row.pit-out {
-  border-left: 5px solid var(--red);
+  border-left: 5px solid var(--lap-strip-pit-color);
   padding-left: 3px;
-  background: var(--status-red-bg);
-  color: var(--red);
+  background: color-mix(in srgb, var(--lap-strip-pit-color) 16%, var(--box));
+  color: var(--lap-strip-pit-color);
 }
 .lap-strip-row.neutralized {
-  border-left: 5px solid var(--orange);
+  border-left: 5px solid var(--lap-strip-neutralized-color);
   padding-left: 3px;
-  background: var(--status-orange-bg);
+  background: color-mix(in srgb, var(--lap-strip-neutralized-color) 18%, var(--box));
 }
+.lap-strip-row.personal-best {
+  border-left: 5px solid var(--lap-strip-personal-best-color);
+  padding-left: 3px;
+  background: color-mix(in srgb, var(--lap-strip-personal-best-color) 16%, var(--box));
+  color: var(--lap-strip-personal-best-color);
+}
+.lap-strip-row.class-best {
+  border-left: 5px solid var(--lap-strip-class-best-color);
+  padding-left: 3px;
+  background: color-mix(in srgb, var(--lap-strip-class-best-color) 17%, var(--box));
+  color: var(--lap-strip-class-best-color);
+}
+.class-best-value { color: var(--class-best-value-color) !important; }
 .lap-strip-empty {
   margin: 0;
   padding: 15px 9px;

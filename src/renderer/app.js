@@ -377,23 +377,14 @@ function lapsForCar(history, carNumber) {
     });
 }
 
-// Maps one stored lap to the compact left-hand strip. Pit phases take visual
-// precedence over race-control color because the engineer must immediately see
-// which lap contains the stop and which following lap is the outlap.
-function lapStripStatus(lap) {
-  if (lap.lapPhase === 'inlap') return 'pit-in';
-  if (lap.lapPhase === 'outlap') return 'pit-out';
-  const flags = [lap.sessionFlag, lap.lapFlag, lap.sector1Flag, lap.sector2Flag, lap.sector3Flag];
-  return flags.some((flag) => lapAnalytics.isNeutralizedFlag(flag)) ? 'neutralized' : 'normal';
-}
-
 // Shows every completed lap for the active dashboard car, newest first. The
-// list remains vertically scrollable for a complete 24-hour history.
-function renderLapStrip(state) {
+// list remains vertically scrollable for a complete 24-hour history. Status,
+// initials and best-lap highlights are precomputed by timingHighlights.js.
+function renderLapStrip(state, timingHighlights = null) {
   const list = $('lap-strip-list');
   if (!list) return;
   const carNumber = activeCarNumber();
-  const laps = lapAnalytics.lapsForCar(state?.lapHistory || [], carNumber).reverse();
+  const laps = [...(timingHighlights?.lapStrip || [])].reverse();
   const currentStint = state?.stintState?.cars?.[carNumber]?.currentStint || null;
   setText('info-stint', currentStint
     ? `Driver stint ${currentStint.driverStintNumber} · ${formatStintClock(currentStint.stintTimeMs)} / total ${formatStintClock(currentStint.totalDriverTimeMs)}`
@@ -408,21 +399,25 @@ function renderLapStrip(state) {
     return;
   }
   laps.forEach((lap, index) => {
-    const status = lapStripStatus(lap);
     const row = document.createElement('div');
-    row.className = `lap-strip-row ${status}`;
-    row.setAttribute('title', `${lap.driverName || 'Unknown driver'} · ${lap.sessionFlag || lap.lapFlag || status}`);
+    row.className = `lap-strip-row ${lap.status || 'normal'} ${lap.highlight || 'none'}`;
+    row.setAttribute('title', lap.tooltip || lap.driverName || 'Unknown driver');
     const number = document.createElement('span');
     number.className = 'lap-number';
     number.textContent = lapDisplayLabel(lap, laps.length - index - 1);
     const time = document.createElement('strong');
     time.className = 'lap-time';
     time.textContent = formatMs(lap.lapTimeMs);
+    const driver = document.createElement('span');
+    driver.className = 'lap-driver';
+    driver.textContent = lap.driverInitials || '';
+    driver.setAttribute('title', lap.driverName || 'Unknown driver');
     const marker = document.createElement('span');
     marker.className = 'lap-marker';
-    marker.textContent = status === 'pit-in' ? 'P' : '';
+    marker.textContent = lap.marker || '';
     row.appendChild(number);
     row.appendChild(time);
+    row.appendChild(driver);
     row.appendChild(marker);
     list.appendChild(row);
   });
@@ -457,7 +452,12 @@ function updateSession(session = {}, hasTimingRows = false) {
 }
 
 // Updates the followed-car values shown in the compact session panel.
-function renderFollowed(rows) {
+function setClassBestValue(id, isClassBest) {
+  const element = $(id);
+  if (element) element.classList.toggle('class-best-value', Boolean(isClassBest));
+}
+
+function renderFollowed(rows, timingHighlights = null) {
   const wanted = String($('followed-car').value || '').trim();
   const match = rows.find((row) => String(row.carNumber) === wanted);
   const row = match || {};
@@ -468,7 +468,9 @@ function renderFollowed(rows) {
   setText('info-driver', row.driver);
   setText('info-class-pic', classPic);
   setMetric('last-time', row.lastLap, { flash: true });
-  setMetric('best-time', row.bestLap, { flash: true });
+  const storedBestLapMs = numericMs(timingHighlights?.bestLap?.valueMs);
+  setMetric('best-time', storedBestLapMs !== null ? formatMs(storedBestLapMs) : row.bestLap, { flash: true });
+  setClassBestValue('best-time', timingHighlights?.bestLap?.isClassBest);
   setMetric('sector-1', row.sector1);
   setMetric('sector-2', row.sector2);
   setMetric('sector-3', row.sector3);
@@ -536,6 +538,9 @@ function renderSectorAnalytics(summary, rows = [], prediction = null) {
   setMetric('best-sector-1', formatMs(bestS1), { flash: true });
   setMetric('best-sector-2', formatMs(bestS2), { flash: true });
   setMetric('best-sector-3', formatMs(bestS3), { flash: true });
+  setClassBestValue('best-sector-1', summary?.timingHighlights?.bestSectors?.sector1?.isClassBest);
+  setClassBestValue('best-sector-2', summary?.timingHighlights?.bestSectors?.sector2?.isClassBest);
+  setClassBestValue('best-sector-3', summary?.timingHighlights?.bestSectors?.sector3?.isClassBest);
   const ideal = [bestS1, bestS2, bestS3].every(Number.isFinite) ? bestS1 + bestS2 + bestS3 : null;
   const idealStatus = normReference.idealReferenceStatus(bestS1, bestS2, bestS3, refs.lapMs);
   setMetric('ideal-time', formatMs(ideal), { flash: true });
@@ -826,9 +831,9 @@ function render(state) {
   $('row-count').textContent = String(rows.length);
   $('history-count').textContent = String(history.length);
   $('last-update').textContent = currentState.lastSuccessAt ? new Date(currentState.lastSuccessAt).toLocaleTimeString() : '—';
-  renderFollowed(rows);
-  renderLapStrip(currentState);
   const activeAnalytics = analyticsForActiveCar(currentState.analyticsSummary || null);
+  renderFollowed(rows, activeAnalytics?.timingHighlights || null);
+  renderLapStrip(currentState, activeAnalytics?.timingHighlights || null);
   syncSessionMode(activeAnalytics?.sessionMode || currentSettings?.sessionMode || 'race');
   renderSectorAnalytics(activeAnalytics, rows, predictionForActiveCar(currentState));
   renderDriverAndClassComparisons(activeAnalytics, rows);

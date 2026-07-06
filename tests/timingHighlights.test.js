@@ -1,0 +1,46 @@
+const assert = require('assert');
+const { lap } = require('./mockLapHistory');
+const {
+  driverInitials,
+  stripStatus,
+  buildTimingHighlights
+} = require('../src/shared/timingHighlights');
+
+assert.strictEqual(driverInitials('Nigel Moore'), 'NM');
+assert.strictEqual(driverInitials('DE JONG Alain'), 'DJA');
+assert.strictEqual(driverInitials(''), '');
+assert.strictEqual(stripStatus({ lapPhase: 'inlap', sessionFlag: 'FCY' }), 'pit-in', 'pit status has visual priority');
+assert.strictEqual(stripStatus({ lapPhase: 'outlap' }), 'pit-out');
+assert.strictEqual(stripStatus({ sessionFlag: 'Safety car' }), 'neutralized');
+assert.strictEqual(stripStatus({ sessionFlag: 'Green flag' }), 'normal');
+
+const personalBestHistory = [
+  lap({ carNumber: 13, className: 'C.CHA', driverName: 'Nigel Moore', lapNumber: 1, lapTimeMs: 125000, sector1Ms: 41000, sector2Ms: 47000, sector3Ms: 37000 }),
+  lap({ carNumber: 13, className: 'C.CHA', driverName: 'Nigel Moore', lapNumber: 2, lapTimeMs: 123000, sector1Ms: 40000, sector2Ms: 46000, sector3Ms: 37000 }),
+  lap({ carNumber: 13, className: 'C.CHA', driverName: 'Nigel Moore', lapNumber: 3, lapTimeMs: 120000, sector1Ms: 39000, sector2Ms: 45000, sector3Ms: 36000, sessionFlag: 'FCY' }),
+  lap({ carNumber: 2, className: 'C.CHA', driverName: 'Fast Driver', lapNumber: 1, lapTimeMs: 122500, sector1Ms: 39500, sector2Ms: 47000, sector3Ms: 36000 })
+];
+const personal = buildTimingHighlights(personalBestHistory, '13');
+assert.strictEqual(personal.bestLap.valueMs, 123000);
+assert.strictEqual(personal.bestLap.classBestMs, 122500);
+assert.strictEqual(personal.bestLap.isClassBest, false);
+assert.strictEqual(personal.lapStrip[1].highlight, 'personal-best');
+assert.strictEqual(personal.lapStrip[2].status, 'neutralized');
+assert.strictEqual(personal.lapStrip[2].highlight, 'none', 'an FCY lap can never receive a best-lap color');
+assert.strictEqual(personal.bestSectors.sector1.isClassBest, false);
+assert.strictEqual(personal.bestSectors.sector2.isClassBest, true);
+assert.strictEqual(personal.bestSectors.sector3.isClassBest, false);
+
+const classBestHistory = personalBestHistory.map((entry) => ({ ...entry }));
+classBestHistory.find((entry) => entry.carNumber === '2').lapTimeMs = 124000;
+const classBest = buildTimingHighlights(classBestHistory, 13);
+assert.strictEqual(classBest.bestLap.isClassBest, true);
+assert.strictEqual(classBest.lapStrip[1].highlight, 'class-best');
+assert.strictEqual(classBest.lapStrip[1].driverInitials, 'NM');
+
+const empty = buildTimingHighlights([], '13');
+assert.strictEqual(empty.bestLap.valueMs, null);
+assert.strictEqual(empty.bestLap.isClassBest, false);
+assert.deepStrictEqual(empty.lapStrip, []);
+
+console.log('Timing highlight tests passed.');
