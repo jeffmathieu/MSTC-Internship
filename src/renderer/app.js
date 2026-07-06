@@ -132,6 +132,16 @@ function formatMs(ms) {
   return `${sign}${minutes}:${String(seconds).padStart(2,'0')}.${String(milli).padStart(3,'0')}`;
 }
 
+// Stint clocks prioritize readability over lap-timing precision. Internal
+// calculations keep milliseconds; the header displays total minutes/seconds.
+function formatStintClock(ms) {
+  if (!Number.isFinite(Number(ms))) return '—';
+  const totalSeconds = Math.max(0, Math.floor(Number(ms) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
 function numericMs(value) {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
@@ -367,13 +377,77 @@ function lapsForCar(history, carNumber) {
     });
 }
 
-// Updates the session summary card in the left column.
-function updateSession(session = {}) {
+// Maps one stored lap to the compact left-hand strip. Pit phases take visual
+// precedence over race-control color because the engineer must immediately see
+// which lap contains the stop and which following lap is the outlap.
+function lapStripStatus(lap) {
+  if (lap.lapPhase === 'inlap') return 'pit-in';
+  if (lap.lapPhase === 'outlap') return 'pit-out';
+  const flags = [lap.sessionFlag, lap.lapFlag, lap.sector1Flag, lap.sector2Flag, lap.sector3Flag];
+  return flags.some((flag) => lapAnalytics.isNeutralizedFlag(flag)) ? 'neutralized' : 'normal';
+}
+
+// Shows every completed lap for the active dashboard car, newest first. The
+// list remains vertically scrollable for a complete 24-hour history.
+function renderLapStrip(state) {
+  const list = $('lap-strip-list');
+  if (!list) return;
+  const carNumber = activeCarNumber();
+  const laps = lapAnalytics.lapsForCar(state?.lapHistory || [], carNumber).reverse();
+  const currentStint = state?.stintState?.cars?.[carNumber]?.currentStint || null;
+  setText('info-stint', currentStint
+    ? `Driver stint ${currentStint.driverStintNumber} · ${formatStintClock(currentStint.stintTimeMs)} / total ${formatStintClock(currentStint.totalDriverTimeMs)}`
+    : 'Waiting for stint data');
+  setText('info-car-stint', currentStint ? `Car stint ${currentStint.stintNumber}` : '—');
+  list.innerHTML = '';
+  if (!laps.length) {
+    const empty = document.createElement('p');
+    empty.className = 'lap-strip-empty';
+    empty.textContent = 'No stored laps yet';
+    list.appendChild(empty);
+    return;
+  }
+  laps.forEach((lap, index) => {
+    const status = lapStripStatus(lap);
+    const row = document.createElement('div');
+    row.className = `lap-strip-row ${status}`;
+    row.setAttribute('title', `${lap.driverName || 'Unknown driver'} · ${lap.sessionFlag || lap.lapFlag || status}`);
+    const number = document.createElement('span');
+    number.className = 'lap-number';
+    number.textContent = lapDisplayLabel(lap, laps.length - index - 1);
+    const time = document.createElement('strong');
+    time.className = 'lap-time';
+    time.textContent = formatMs(lap.lapTimeMs);
+    const marker = document.createElement('span');
+    marker.className = 'lap-marker';
+    marker.textContent = status === 'pit-in' ? 'P' : '';
+    row.appendChild(number);
+    row.appendChild(time);
+    row.appendChild(marker);
+    list.appendChild(row);
+  });
+}
+
+// Converts verbose provider race-control text to labels that fit the compact
+// header. Populated timing rows are stronger live evidence when RIS briefly
+// reports "NO ACTIVE HEAT" despite an active session.
+function compactSessionStatus(session = {}, hasTimingRows = false) {
+  const raw = String(session.statusText || session.flag || '').trim();
+  const normalized = `${session.flag || ''} ${session.statusText || ''}`.trim().toLowerCase();
+  if (/full\s*course\s*yellow|\bfcy\b|code\s*60/.test(normalized)) return 'FCY';
+  if (/safety\s*car|\bsc\b/.test(normalized)) return 'SC';
+  if (/red\s*flag|^red$/.test(normalized)) return 'RED';
+  if (/green/.test(normalized)) return 'GREEN';
+  if (hasTimingRows && /no\s+active\s+heat|no\s+active\s+session/.test(normalized)) return 'GREEN';
+  return raw ? raw.toUpperCase() : '—';
+}
+
+// Updates the session summary card in the top information strip.
+function updateSession(session = {}, hasTimingRows = false) {
   setText('session-name', session.sessionName || session.pageTitle || '—');
   setText('session-time', session.timeToGo || session.pageUpdated || '—');
   const statusBlock = $('session-status-block');
-  const raceControlText = String(session.statusText || session.flag || '').trim();
-  setText('status-text', raceControlText ? raceControlText.toUpperCase() : '—');
+  setText('status-text', compactSessionStatus(session, hasTimingRows));
   if (statusBlock) {
     const raceControl = String(session.flag || session.statusText || '').toLowerCase();
     statusBlock.classList.remove('flag-caution', 'flag-red');
@@ -748,11 +822,12 @@ function render(state) {
   currentState = state || {};
   const rows = currentState.rows || [], history = currentState.lapHistory || [];
   setStatus(currentState.status, currentState.message);
-  updateSession(currentState.session || {});
+  updateSession(currentState.session || {}, rows.length > 0);
   $('row-count').textContent = String(rows.length);
   $('history-count').textContent = String(history.length);
   $('last-update').textContent = currentState.lastSuccessAt ? new Date(currentState.lastSuccessAt).toLocaleTimeString() : '—';
   renderFollowed(rows);
+  renderLapStrip(currentState);
   const activeAnalytics = analyticsForActiveCar(currentState.analyticsSummary || null);
   syncSessionMode(activeAnalytics?.sessionMode || currentSettings?.sessionMode || 'race');
   renderSectorAnalytics(activeAnalytics, rows, predictionForActiveCar(currentState));

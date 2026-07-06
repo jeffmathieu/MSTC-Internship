@@ -68,15 +68,18 @@ Acceptance criteria:
 
 ## Priority 4: stint features and reporting
 
-1. Detect stints from driver transitions and timestamps.
-2. Store current-stint time and cumulative driving time per driver.
-3. Add a scrollable lap strip with lap number and pit/neutralization status.
-4. Generate `STINT_<number>_<driver>` folders automatically at stint close.
-5. Generate a PDF from persisted analytics; combine stint PDFs into driver and
+1. Detect stints from driver transitions and timestamps. (If there is a stint column, this is easy because you can just read it, but if not, you need to detect it from the driver changes and timestamps. make it check automatically for the stint column and if it is not present, detect it from the driver changes and timestamps.)
+2. Store current-stint time and cumulative driving time per driver. show for now in top bar (both stint and cumulative)
+3. Generate map inside race session folder with the pdf names `STINT_<number>_<driver>` automatically at stint close.
+4. Generate a PDF from persisted analytics; combine stint PDFs into driver and
    race summaries after the event.
+5. as you have made in scripts, make sure to generate pdfs as we do there. and now that we have the gap info history we can make the graphs in the pdf for gaps over laps.
+6. make sure that stints are numbered per driver so the first time they get in the car is stint 1, the second time is stint 2, etc. and that the pdfs are named accordingly. But that overall stints are numbered per car, this does not affect the pdf naming, but it is important for the stint detection and analytics and should be mentioned somewhere in the pdf and ui (top bar for now, close to or togheter with driver stint time and cumulative time (so drivers stint number and total stint number)).
 
 Do not start PDF generation before the analytics source and stint boundaries
 are reliable.
+
+put the code for this pdf generation somewhere in src because scripts folder will be deleted from github and not be in the build, but you can use the code that is in there because I like how the pdfs look as they do now!
 
 ## Suggested future prompts
 

@@ -28,6 +28,9 @@
     "appId": "com.jeffmathieu.mstcraceengineerdashboard",
     "productName": "MSTC Race Engineer Dashboard",
     "asar": true,
+    "asarUnpack": [
+      "src/main/reports/*.py"
+    ],
     "electronUpdaterCompatibility": ">=2.16",
     "directories": {
       "output": "dist"

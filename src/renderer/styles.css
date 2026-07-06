@@ -67,13 +67,87 @@ button, input, select { font: inherit; }
 button { cursor: pointer; }
 
 .engineer-dashboard {
-  width: min(1500px, 100vw);
+  width: min(1680px, 100vw);
   min-height: 100vh;
   margin: 0 auto;
   padding: 20px 34px;
   display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
   grid-template-rows: auto auto auto auto auto auto;
   gap: 10px;
+}
+
+.info-strip { grid-column: 1 / -1; }
+.main-times,
+.performance-grid,
+.comparison-grid,
+.battle-strip,
+.pit-window { grid-column: 2; }
+.debug-panel { grid-column: 1 / -1; }
+
+.lap-strip {
+  grid-column: 1;
+  grid-row: 2 / 7;
+  align-self: start;
+  position: sticky;
+  top: 10px;
+  height: min(760px, calc(100vh - 120px));
+  min-height: 360px;
+  padding: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.lap-strip header {
+  padding: 10px 9px 8px;
+  border-bottom: 2px solid var(--line);
+  background: var(--box);
+}
+.lap-strip header span {
+  display: block;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.lap-strip-list {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.lap-strip-row {
+  min-height: 42px;
+  padding: 7px 7px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 14px;
+  gap: 5px;
+  align-items: center;
+  border-bottom: 1px solid var(--soft-line);
+  background: var(--box);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.lap-strip-row .lap-number { color: var(--muted); font-size: 11px; font-weight: 900; }
+.lap-strip-row .lap-time { font-size: 13px; font-weight: 900; white-space: nowrap; }
+.lap-strip-row .lap-marker { text-align: right; font-size: 12px; font-weight: 900; }
+.lap-strip-row.pit-in,
+.lap-strip-row.pit-out {
+  border-left: 5px solid var(--red);
+  padding-left: 3px;
+  background: var(--status-red-bg);
+  color: var(--red);
+}
+.lap-strip-row.neutralized {
+  border-left: 5px solid var(--orange);
+  padding-left: 3px;
+  background: var(--status-orange-bg);
+}
+.lap-strip-empty {
+  margin: 0;
+  padding: 15px 9px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .board-box,
@@ -88,7 +162,7 @@ button { cursor: pointer; }
   min-height: 78px;
   padding: 12px 20px;
   display: grid;
-  grid-template-columns: 1.2fr .8fr .55fr 1fr .75fr .7fr auto;
+  grid-template-columns: 1.1fr .75fr .5fr 1.35fr .7fr .65fr auto;
   gap: 16px;
   align-items: center;
 }
@@ -111,6 +185,19 @@ button { cursor: pointer; }
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 16px;
+}
+.info-strip .driver-summary small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.15;
+  white-space: normal;
+}
+.info-strip .driver-summary #info-car-stint {
+  margin-top: 2px;
+  color: var(--ink);
 }
 .session-status-block {
   padding: 7px 9px;
@@ -455,8 +542,6 @@ input {
 .pit-window.closed { border-color: var(--red); }
 .pit-window.urgent { border-color: var(--red); box-shadow: 0 0 0 4px rgba(217,76,98,.18); }
 .pit-window.complete { border-color: var(--green); }
-.pit-window.complete .pit-bar span,
-.pit-window.complete .pit-bar .pit-cooldown-period { background: var(--green); }
 .pit-detail {
   margin: 0;
   color: var(--muted);
@@ -622,13 +707,22 @@ body.mode-practice .battle-strip,
 body.mode-qualifying .pit-window { display: none; }
 
 @media (max-width: 1050px) {
-  .engineer-dashboard { padding: 16px; }
+  .engineer-dashboard { padding: 16px; grid-template-columns: 1fr; }
+  .info-strip,
+  .lap-strip,
+  .main-times,
+  .performance-grid,
+  .comparison-grid,
+  .battle-strip,
+  .pit-window,
+  .debug-panel { grid-column: 1; grid-row: auto; }
   .info-strip,
   .main-times,
   .performance-grid,
   .comparison-grid,
   .battle-strip,
   .pit-window { grid-template-columns: 1fr; }
+  .lap-strip { position: static; width: 100%; height: 240px; min-height: 240px; }
   .pit-header { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .controls { justify-content: flex-start; flex-wrap: wrap; }
   .compare-stack { grid-template-rows: repeat(3, minmax(70px, auto)); }

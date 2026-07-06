@@ -7,6 +7,7 @@ const {
   analyticsSummarySizeBytes,
   analyticsSummaryBreakdown,
   gapHistorySizeBytes,
+  stintReportSizeBytes,
   formatBytes,
   main
 } = require('../scripts/storage-estimate');
@@ -30,6 +31,14 @@ const config = {
   gapViewBytesPerFollowedCar: 20,
   gapSampleBytes: 7,
   gapSamplesPerFollowedLap: 2,
+  estimatedStintsPerFollowedCar: 3,
+  stintStateBaseBytes: 30,
+  stintStateBytesPerStint: 4,
+  stintJsonBytes: 40,
+  stintPdfBytes: 100,
+  estimatedDriversPerFollowedCar: 2,
+  summaryJsonBytes: 50,
+  summaryPdfBytes: 150,
   followedCars: 2,
   averageDriversPerCar: 2.5,
   overheadBytesPerFile: 5
@@ -63,8 +72,18 @@ assert.strictEqual(latest.analyticsSummaryBytes, 520);
 assert.strictEqual(latest.lapPredictionBytes, 120);
 assert.strictEqual(latest.pitPlanBytes, 140);
 assert.strictEqual(latest.gapStateBytes, 150);
-assert.strictEqual(latest.totalBytes, 1285);
+assert.strictEqual(latest.stintStateBytes, 54);
+assert.strictEqual(latest.totalBytes, 1339);
 assert.deepStrictEqual(gapHistorySizeBytes(4, config), { sampleCount: 16, totalBytes: 117 });
+assert.deepStrictEqual(stintReportSizeBytes(config), {
+  reportCount: 6,
+  summaryCount: 6,
+  jsonBytes: 270,
+  pdfBytes: 630,
+  summaryJsonBytes: 330,
+  summaryPdfBytes: 930,
+  totalBytes: 2160
+});
 
 assert.strictEqual(formatBytes(999), '999.0 B');
 assert.strictEqual(formatBytes(1024), '1.00 KB');
@@ -84,6 +103,7 @@ assert.ok(captured.some((line) => line.includes('Stored cars:         3')));
 assert.ok(captured.some((line) => line.includes('Followed cars:       1')));
 assert.ok(captured.some((line) => line.includes('All stored cars')));
 assert.ok(captured.some((line) => line.includes('Needed averages/stats')));
+assert.ok(captured.some((line) => line.includes('Closed stint reports')));
 assert.ok(captured.some((line) => line.includes('Total estimated stored data:')));
 
 console.log('Storage estimate tests passed.');

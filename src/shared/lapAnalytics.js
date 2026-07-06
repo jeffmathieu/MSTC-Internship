@@ -431,14 +431,22 @@ function bestCarInClassByAverage(history, className) {
     .sort((a, b) => a.averageLapMs - b.averageLapMs)[0] || null;
 }
 
-// Current stint is currently approximated as all laps for the active driver in
-// the car. If stint IDs become reliable later, narrow the filter here.
+// Returns only the final contiguous block for the active driver. A driver can
+// return later in the race, so filtering every lap by name would incorrectly
+// merge two separate stints into the current-stint comparison.
 function currentStintStats(history, carNumber, currentDriver = '') {
   const driver = currentDriverName(history, carNumber, currentDriver);
+  const carLaps = lapsForCar(history, carNumber);
+  const driverKey = String(driver || '').trim().toLocaleLowerCase();
+  const latestDriverKey = String(carLaps.at(-1)?.driverName || '').trim().toLocaleLowerCase();
+  const currentLaps = driverKey && driverKey === latestDriverKey
+    ? carLaps.slice(carLaps.findLastIndex((lap, index) => index === 0
+      || String(carLaps[index - 1]?.driverName || '').trim().toLocaleLowerCase() !== driverKey))
+    : [];
   return {
     driverName: driver,
     carNumber: String(carNumber),
-    ...statsForLaps(lapsForDriver(history, carNumber, driver))
+    ...statsForLaps(currentLaps)
   };
 }
 

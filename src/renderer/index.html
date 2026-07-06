@@ -88,9 +88,11 @@
           <span>Our car</span>
           <strong id="info-car">—</strong>
         </div>
-        <div>
+        <div class="driver-summary">
           <span>Current driver</span>
           <strong id="info-driver">—</strong>
+          <small id="info-stint">Waiting for stint data</small>
+          <small id="info-car-stint">—</small>
         </div>
         <div>
           <span>Class / PIC</span>
@@ -114,6 +116,15 @@
           <button id="open-setup" class="secondary">Setup</button>
         </div>
       </section>
+
+      <aside class="lap-strip board-box" id="lap-strip">
+        <header>
+          <span>Laps</span>
+        </header>
+        <div class="lap-strip-list" id="lap-strip-list">
+          <p class="lap-strip-empty">No stored laps yet</p>
+        </div>
+      </aside>
 
       <section class="main-times">
         <article class="metric-box hero-metric" id="last-time-card">

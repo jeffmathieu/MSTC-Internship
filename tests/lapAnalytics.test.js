@@ -347,6 +347,15 @@ assert.strictEqual(currentStint.driverName, 'Driver 3');
 assert.strictEqual(currentStint.lapCount, 10);
 assert.strictEqual(currentStint.averageLapMs, 102045);
 
+const returningDriverHistory = [
+  lap({ carNumber: 33, driverName: 'Driver A', lapNumber: 1, lapTimeMs: 100000 }),
+  lap({ carNumber: 33, driverName: 'Driver B', lapNumber: 2, lapTimeMs: 110000 }),
+  lap({ carNumber: 33, driverName: 'Driver A', lapNumber: 3, lapTimeMs: 120000 })
+];
+const returningDriverStint = currentStintStats(returningDriverHistory, 33, 'Driver A');
+assert.strictEqual(returningDriverStint.lapCount, 1, 'returning driver current stint excludes their earlier stint');
+assert.strictEqual(returningDriverStint.averageLapMs, 120000);
+
 const missingStint = currentStintStats(stintHistory, 33, 'Driver 404');
 assert.strictEqual(missingStint.driverName, 'Driver 404');
 assert.strictEqual(missingStint.lapCount, 0);

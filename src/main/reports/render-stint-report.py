@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Render one polished landscape page per stint plus a combined PDF."""
+"""Render the dashboard's canonical polished landscape stint reports."""
 import argparse
 import glob
 import json
@@ -164,13 +164,15 @@ def draw_chart(c, x, y, w, h, title, laps, value_key, average=None, annotate=Tru
 def draw_summary(c, x, y, w, h, stint):
     panel(c, x, y, w, h, 'Stint statistics')
     stats = stint['stats']
+    best_sectors = [stats.get('bestSector1Ms'), stats.get('bestSector2Ms'), stats.get('bestSector3Ms')]
+    ideal_time = sum(best_sectors) if all(isinstance(value, (int, float)) and math.isfinite(value) for value in best_sectors) else None
     metrics = [
         ('Stint time', fmt_duration(stint['stintTimeMs'])),
         ('Total driver', fmt_duration(stint['totalDriverTimeMs'])),
         ('Average lap', fmt_time(stats.get('averageLapMs'))),
         ('Best lap', fmt_time(stats.get('bestLapMs'))),
         ('Valid laps', f"{stats.get('paceLapCount', 0)}/{stats.get('lapCount', 0)}"),
-        ('Excluded', str(stats.get('selection', {}).get('lap', {}).get('excludedCount', 0))),
+        ('Ideal time', fmt_time(ideal_time)),
         ('Average S1', fmt_time(stats.get('averageSector1Ms'))),
         ('Average S2', fmt_time(stats.get('averageSector2Ms'))),
         ('Average S3', fmt_time(stats.get('averageSector3Ms'))),
@@ -401,11 +403,24 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', required=True)
     parser.add_argument('--output', required=True)
+    parser.add_argument(
+        '--single-output',
+        help='Render the supplied stints into one exact output path instead of creating the full report set.',
+    )
+    parser.add_argument(
+        '--include-summary',
+        action='store_true',
+        help='Add the full-race overview as the first page when --single-output is used.',
+    )
     args = parser.parse_args()
     with open(args.input, encoding='utf-8') as handle:
         payload = json.load(handle)
     os.makedirs(args.output, exist_ok=True)
     car = payload['race']['carNumber']
+    if args.single_output:
+        os.makedirs(os.path.dirname(os.path.abspath(args.single_output)), exist_ok=True)
+        render_pdf(args.single_output, payload, payload['stints'], include_summary=args.include_summary)
+        return
     # Prevent stale stint pages from remaining when corrected driver boundaries
     # reduce or increase the number of generated stints.
     for old_report in glob.glob(os.path.join(args.output, 'STINT_*.pdf')):

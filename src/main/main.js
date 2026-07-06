@@ -44,9 +44,11 @@ const {
   updateGapMemory
 } = require('../shared/gapMemory');
 const { normalizeMode, buildComparisonView, qualifyingAdjacentView } = require('../shared/sessionMode');
+const { stintsForCar, buildStintState } = require('../shared/stintTracker');
 const { resolveSessionFolder, loadSessionHistory, loadStoredJson } = require('../shared/storageSession');
 const { setupAutoUpdates } = require('./autoUpdater');
 const { setupAppLifecycle } = require('./appLifecycle');
+const { writeClosedStintArtifacts, writeEventSummaryArtifacts } = require('./stintReports');
 
 // Main-process references. Electron keeps UI windows and timers alive through
 // these variables, so every start/stop function below updates them carefully.
@@ -57,6 +59,7 @@ const graphWindowsByCar = new Map();
 let pollTimer;
 let shouldCloseLiveWindow = false;
 let gapMemoryState = null;
+const pendingStintReports = new Set();
 
 // A real application quit must bypass the hidden live window's normal
 // close-to-hide behavior and stop the polling timer before Electron exits.
@@ -106,6 +109,7 @@ let collectorState = {
   pitstopPlan: null,
   pitstopPlansByCar: {},
   gapMemory: null,
+  stintState: null,
   storageSessionFolder: '',
   pollIntervalMs: 5000
 };
@@ -738,6 +742,7 @@ function buildAnalyticsSummary(settings, context, rows = []) {
       carNumber,
       driverStats(history, carNumber).map(compactStats)
     ])),
+    stintsByCar: collectorState.stintState?.cars || {},
     adjacentClassBattlesByCar,
     comparisonViewsByCar,
     modeAdjacentViewsByCar,
@@ -755,6 +760,66 @@ function writeAnalyticsSummary(settings, context, rows = []) {
   fs.writeFileSync(path.join(folder, 'analytics_summary.json'), JSON.stringify(summary, null, 2));
   collectorState.analyticsSummary = summary;
   return summary;
+}
+
+// Reconstructs driver stints from immutable lap history on every update. This
+// makes stint numbering restart-safe: reopening an existing session folder
+// produces the same groups without relying on transient in-memory counters.
+// Closed stints receive one JSON and one Electron-generated PDF report.
+async function writeStintStateAndReports(settings, context, rows = []) {
+  const folder = ensureStorage(settings);
+  const followedCars = normalizeFollowedCars(settings);
+  const generatedAt = context?.collectedAt || new Date().toISOString();
+  const sessionStatus = String(context?.session?.statusText || context?.session?.status || context?.session?.flag || '');
+  const sessionFinished = /finished|complete(?:d)?|checkered|chequered|session\s+ended/i.test(sessionStatus);
+  const stintOptions = {
+    closeFinalAt: sessionFinished ? generatedAt : null,
+    generatedAt,
+    liveRows: rows,
+    previousState: collectorState.stintState
+  };
+  const stintState = buildStintState(collectorState.lapHistory || [], followedCars, generatedAt, stintOptions);
+  fs.writeFileSync(path.join(folder, 'stint_state.json'), JSON.stringify(stintState, null, 2));
+  collectorState.stintState = stintState;
+
+  for (const carNumber of followedCars) {
+    const liveRow = rows.find((row) => String(row.carNumber) === String(carNumber));
+    const closedStints = stintsForCar(collectorState.lapHistory || [], carNumber, {
+      ...stintOptions,
+      liveRow,
+      previousCurrentStint: stintOptions.previousState?.cars?.[carNumber]?.currentStint || null,
+      previousGeneratedAt: stintOptions.previousState?.generatedAt || null
+    }).filter((stint) => stint.closed);
+    for (const stint of closedStints) {
+      const reportKey = `${folder}|${carNumber}|${stint.stintNumber}|${stint.driverName}`;
+      if (pendingStintReports.has(reportKey)) continue;
+      pendingStintReports.add(reportKey);
+      try {
+        await writeClosedStintArtifacts({
+          BrowserWindow,
+          sessionFolder: folder,
+          stint,
+          session: context?.session || collectorState.session || {},
+          gapSamples: gapMemoryState?.samples || [],
+          history: collectorState.lapHistory || []
+        });
+      } finally {
+        pendingStintReports.delete(reportKey);
+      }
+    }
+    if (sessionFinished && closedStints.length) {
+      await writeEventSummaryArtifacts({
+        BrowserWindow,
+        sessionFolder: folder,
+        carNumber,
+        stints: closedStints,
+        session: context?.session || collectorState.session || {},
+        gapSamples: gapMemoryState?.samples || [],
+        history: collectorState.lapHistory || []
+      });
+    }
+  }
+  return stintState;
 }
 
 // Builds and stores the current-lap prediction from live sectors plus completed
@@ -900,9 +965,11 @@ async function pollLivePage() {
     const { storageRows, analysisRows, context } = saveLatestSnapshot(settings, normalized);
     const newLapCount = updateLapHistory(settings, storageRows);
     try { updateAndWriteGapMemory(settings, context, analysisRows); } catch (error) { addError(error, 'updateAndWriteGapMemory'); }
+    let stintState = collectorState.stintState;
     let analyticsSummary = collectorState.analyticsSummary;
     let lapPredictionsByCar = collectorState.lapPredictionsByCar;
     let pitstopPlansByCar = collectorState.pitstopPlansByCar;
+    try { stintState = await writeStintStateAndReports(settings, context, analysisRows); } catch (error) { addError(error, 'writeStintStateAndReports'); }
     try { analyticsSummary = writeAnalyticsSummary(settings, context, analysisRows); } catch (error) { addError(error, 'writeAnalyticsSummary'); }
     try { lapPredictionsByCar = writeLapPredictions(settings, context, analysisRows); } catch (error) { addError(error, 'writeLapPredictions'); }
     if (normalizeMode(settings.sessionMode) === 'race') {
@@ -919,7 +986,7 @@ async function pollLivePage() {
       status: normalized.status,
       message: newLapCount ? `${normalized.message} Stored ${newLapCount} new completed lap(s).` : normalized.message,
       lastSuccessAt: new Date().toISOString(), headers: normalized.headers, rows: analysisRows, session: normalized.session, diagnostics: normalized.diagnostics,
-      storage: storageInfo(settings), analyticsSummary, lapPredictionsByCar, pitstopPlansByCar, gapMemory: gapMemoryState,
+      storage: storageInfo(settings), analyticsSummary, lapPredictionsByCar, pitstopPlansByCar, gapMemory: gapMemoryState, stintState,
       lapPrediction: lapPredictionsByCar?.[primaryCar] || null,
       pitstopPlan: pitstopPlansByCar?.[primaryCar] || null,
       pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS),
@@ -948,7 +1015,9 @@ function storageInfo(settings) {
     lapPredictionJson: path.join(folder, 'lap_prediction.json'),
     pitstopPlanJson: path.join(folder, 'pitstop_plan.json'),
     gapStateJson: path.join(folder, 'gap_state.json'),
-    gapHistoryJsonl: path.join(folder, 'gap_history.jsonl')
+    gapHistoryJsonl: path.join(folder, 'gap_history.jsonl'),
+    stintStateJson: path.join(folder, 'stint_state.json'),
+    stintsFolder: path.join(folder, 'stints')
   };
 }
 
@@ -963,8 +1032,9 @@ async function startCollector(url) {
   fs.mkdirSync(storageSessionFolder, { recursive: true });
   latestPitStateByCar.clear();
   gapMemoryState = null;
-  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, lapPrediction: null, lapPredictionsByCar: {}, pitstopPlan: null, pitstopPlansByCar: {}, gapMemory: null, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
+  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, lapPrediction: null, lapPredictionsByCar: {}, pitstopPlan: null, pitstopPlansByCar: {}, gapMemory: null, stintState: null, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
   collectorState = { ...collectorState, lapHistory: loadExistingHistory(settings), storage: storageInfo(settings) };
+  collectorState.stintState = buildStintState(collectorState.lapHistory, normalizeFollowedCars(settings), startedAt);
   loadExistingPitStates(settings);
   loadExistingGapMemory(settings);
   broadcastState();
@@ -1018,6 +1088,7 @@ ipcMain.handle('settings:set', (_event, settings) => {
     collectorState = {
       ...collectorState,
       lapHistory,
+      stintState: buildStintState(lapHistory, normalizeFollowedCars(merged)),
       storage: storageInfo(merged),
       snapshots: []
     };

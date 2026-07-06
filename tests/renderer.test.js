@@ -3,6 +3,13 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
+const rendererCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'styles.css'), 'utf8');
+assert.strictEqual(
+  /\.pit-window\.complete\s+\.pit-bar/.test(rendererCss),
+  false,
+  'completed mandatory stops keep red pit-history and closed-window segments visible'
+);
+
 // Minimal classList implementation for running app.js without a browser. The
 // renderer only needs add/remove/contains/toggle for these tests.
 class FakeClassList {
@@ -197,6 +204,17 @@ const initialState = {
 
 const updatedState = {
   ...initialState,
+  lapHistory: [
+    { carNumber: '13', driverName: 'Nigel Moore', lapNumber: 1, lapTimeMs: 125000, pitInfo: '0', sessionFlag: 'Green flag', collectedAt: '2026-06-25T10:02:05.000Z' },
+    { carNumber: '13', driverName: 'Nigel Moore', lapNumber: 2, lapTimeMs: 180000, pitInfo: '0', sessionFlag: 'FCY', collectedAt: '2026-06-25T10:05:05.000Z' },
+    { carNumber: '13', driverName: 'Nigel Moore', lapNumber: 3, lapTimeMs: 140000, pitInfo: '1', state: 'IN', sessionFlag: 'Green flag', collectedAt: '2026-06-25T10:07:25.000Z' },
+    { carNumber: '13', driverName: 'Nigel Moore', lapNumber: 4, lapTimeMs: 135000, pitInfo: '1', state: 'RUN', sessionFlag: 'Green flag', collectedAt: '2026-06-25T10:09:40.000Z' }
+  ],
+  stintState: {
+    cars: {
+      13: { currentStint: { stintNumber: 3, driverStintNumber: 2, driverName: 'Nigel Moore', stintTimeMs: 580000, totalDriverTimeMs: 1180000 } }
+    }
+  },
   lapPrediction: {
     available: true,
     predictedLapMs: 124321,
@@ -293,7 +311,7 @@ const liveTiming = {
 };
 
 const context = {
-  window: { location: { search: '' }, liveTiming, classBattle: {}, lapAnalytics: {}, pitstopCircuits: require('../src/shared/pitstopCircuits'), pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
+  window: { location: { search: '' }, liveTiming, classBattle: {}, lapAnalytics: require('../src/shared/lapAnalytics'), pitstopCircuits: require('../src/shared/pitstopCircuits'), pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
   document,
   URLSearchParams,
   console,
@@ -348,16 +366,32 @@ module.exports = (async () => {
   collectorUpdate(updatedState);
   await flushAsync();
 
+  assert.strictEqual(document.getElementById('info-stint').textContent, 'Driver stint 2 · 9:40 / total 19:40');
+  assert.strictEqual(document.getElementById('info-car-stint').textContent, 'Car stint 3');
+  const lapRows = document.getElementById('lap-strip-list').children;
+  assert.strictEqual(lapRows.length, 4, 'all stored laps are rendered in the vertical strip');
+  assert.strictEqual(lapRows[0].children[0].textContent, '4', 'newest lap appears first');
+  assert.strictEqual(lapRows[0].classList.contains('pit-out'), true);
+  assert.strictEqual(lapRows[0].children[2].textContent, '', 'outlap is red without a P marker');
+  assert.strictEqual(lapRows[1].classList.contains('pit-in'), true);
+  assert.strictEqual(lapRows[1].children[2].textContent, 'P');
+  assert.strictEqual(lapRows[2].classList.contains('neutralized'), true);
+  assert.strictEqual(lapRows[3].classList.contains('normal'), true);
+
   assert.strictEqual(document.getElementById('best-sector-1').textContent, '0:41.000');
   assert.strictEqual(document.getElementById('best-sector-2').textContent, '0:46.000');
   collectorUpdate({ ...updatedState, session: { ...updatedState.session, flag: 'Full course yellow' } });
   assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-caution'), true);
   assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-red'), false);
-  assert.strictEqual(document.getElementById('status-text').textContent, 'FULL COURSE YELLOW');
+  assert.strictEqual(document.getElementById('status-text').textContent, 'FCY');
+  collectorUpdate({ ...updatedState, session: { ...updatedState.session, flag: 'Safety car' } });
+  assert.strictEqual(document.getElementById('status-text').textContent, 'SC');
+  collectorUpdate({ ...updatedState, session: { ...updatedState.session, flag: 'NO ACTIVE HEAT' } });
+  assert.strictEqual(document.getElementById('status-text').textContent, 'GREEN', 'active timing rows override stale RIS no-heat text');
   collectorUpdate({ ...updatedState, session: { ...updatedState.session, flag: 'Red flag' } });
   assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-red'), true);
   assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-caution'), false);
-  assert.strictEqual(document.getElementById('status-text').textContent, 'RED FLAG');
+  assert.strictEqual(document.getElementById('status-text').textContent, 'RED');
   collectorUpdate({ ...updatedState, status: 'error', message: 'Timing page unavailable' });
   assert.strictEqual(document.getElementById('collector-health').classList.contains('is-error'), true);
   assert.strictEqual(document.getElementById('collector-health').attributes.title, 'Timing page unavailable');

@@ -269,7 +269,9 @@ function main() {
   const history = applyDriverOverrides(rawHistory, loadOverrides(overridesPath));
   fs.writeFileSync(payloadPath, JSON.stringify(buildPayload(history, carNumber, rawHistory), null, 2));
 
-  const renderer = path.join(__dirname, 'render-stint-report.py');
+  // The CLI and the Electron app intentionally share one renderer. Keeping the
+  // canonical layout under src prevents manual and automatic PDFs from drifting.
+  const renderer = path.join(__dirname, '..', 'src', 'main', 'reports', 'render-stint-report.py');
   const python = findPdfPython();
   if (!python) {
     throw new Error(

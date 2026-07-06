@@ -39,6 +39,14 @@ const CONFIG = {
   gapSampleBytes: 300,
   gapSamplesPerFollowedLap: 2,
   averageDriversPerCar: 4,
+  estimatedStintsPerFollowedCar: 4,
+  stintStateBaseBytes: 1500,
+  stintStateBytesPerStint: 1200,
+  stintJsonBytes: 45000,
+  stintPdfBytes: 220000,
+  estimatedDriversPerFollowedCar: 3,
+  summaryJsonBytes: 120000,
+  summaryPdfBytes: 350000,
 
   // Optional overhead for headers/newlines/session variation.
   overheadBytesPerFile: 2048
@@ -83,6 +91,9 @@ function latestSnapshotBytes(carCount, config = CONFIG) {
   const gapStateBytes = (config.gapStateBaseBytes || 0)
     + carCount * (config.gapStateBytesPerStoredCar || 0)
     + followedCars * (config.gapViewBytesPerFollowedCar || 0);
+  const stintCount = followedCars * (config.estimatedStintsPerFollowedCar || 0);
+  const stintStateBytes = (config.stintStateBaseBytes || 0)
+    + stintCount * (config.stintStateBytesPerStint || 0);
   return {
     latestCsvBytes,
     latestJsonBytes,
@@ -92,7 +103,8 @@ function latestSnapshotBytes(carCount, config = CONFIG) {
     lapPredictionBytes,
     pitPlanBytes,
     gapStateBytes,
-    totalBytes: latestCsvBytes + latestJsonBytes + parserDebugBytes + sessionMetadataBytes + analyticsSummaryBytes + lapPredictionBytes + pitPlanBytes + gapStateBytes
+    stintStateBytes,
+    totalBytes: latestCsvBytes + latestJsonBytes + parserDebugBytes + sessionMetadataBytes + analyticsSummaryBytes + lapPredictionBytes + pitPlanBytes + gapStateBytes + stintStateBytes
   };
 }
 
@@ -105,6 +117,29 @@ function gapHistorySizeBytes(lapsEach, config = CONFIG) {
   return {
     sampleCount,
     totalBytes: config.overheadBytesPerFile + sampleCount * (config.gapSampleBytes || 0)
+  };
+}
+
+// Each followed car produces one JSON and one PDF when a driver stint closes.
+// These files are append-only for the session and therefore belong in the
+// final total rather than the overwritten-snapshot estimate.
+function stintReportSizeBytes(config = CONFIG) {
+  const followedCars = Math.max(1, Number(config.followedCars) || 1);
+  const reportCount = followedCars
+    * Math.max(0, Number(config.estimatedStintsPerFollowedCar) || 0);
+  const jsonBytes = reportCount * ((config.stintJsonBytes || 0) + (config.overheadBytesPerFile || 0));
+  const pdfBytes = reportCount * ((config.stintPdfBytes || 0) + (config.overheadBytesPerFile || 0));
+  const summaryCount = followedCars * (1 + Math.max(0, Number(config.estimatedDriversPerFollowedCar) || 0));
+  const summaryJsonBytes = summaryCount * ((config.summaryJsonBytes || 0) + (config.overheadBytesPerFile || 0));
+  const summaryPdfBytes = summaryCount * ((config.summaryPdfBytes || 0) + (config.overheadBytesPerFile || 0));
+  return {
+    reportCount,
+    summaryCount,
+    jsonBytes,
+    pdfBytes,
+    summaryJsonBytes,
+    summaryPdfBytes,
+    totalBytes: jsonBytes + pdfBytes + summaryJsonBytes + summaryPdfBytes
   };
 }
 
@@ -153,7 +188,7 @@ function printScenario(label, result) {
 // Prints one overwritten/latest-files scenario line.
 function printLatestScenario(label, carCount, config) {
   const result = latestSnapshotBytes(carCount, config);
-  console.log(`${label.padEnd(24)} cars=${String(carCount).padStart(2)} latestCSV=${formatBytes(result.latestCsvBytes).padStart(9)} latestJSON=${formatBytes(result.latestJsonBytes).padStart(9)} debug=${formatBytes(result.parserDebugBytes).padStart(9)} analytics=${formatBytes(result.analyticsSummaryBytes).padStart(9)} predictions=${formatBytes(result.lapPredictionBytes).padStart(9)} pitPlans=${formatBytes(result.pitPlanBytes).padStart(9)} gapState=${formatBytes(result.gapStateBytes).padStart(9)} total=${formatBytes(result.totalBytes).padStart(9)}`);
+  console.log(`${label.padEnd(24)} cars=${String(carCount).padStart(2)} latestCSV=${formatBytes(result.latestCsvBytes).padStart(9)} latestJSON=${formatBytes(result.latestJsonBytes).padStart(9)} debug=${formatBytes(result.parserDebugBytes).padStart(9)} analytics=${formatBytes(result.analyticsSummaryBytes).padStart(9)} predictions=${formatBytes(result.lapPredictionBytes).padStart(9)} pitPlans=${formatBytes(result.pitPlanBytes).padStart(9)} gapState=${formatBytes(result.gapStateBytes).padStart(9)} stintState=${formatBytes(result.stintStateBytes).padStart(9)} total=${formatBytes(result.totalBytes).padStart(9)}`);
 }
 
 // Prints analytics-summary details so driver-count assumptions are visible.
@@ -170,7 +205,8 @@ function main(config = CONFIG) {
   const history = bytesForScenario(config.storedCars, lapsEach, config);
   const overwritten = latestSnapshotBytes(config.storedCars, config);
   const gapHistory = gapHistorySizeBytes(lapsEach, config);
-  const totalStoredBytes = history.totalBytes + overwritten.totalBytes + gapHistory.totalBytes;
+  const stintReports = stintReportSizeBytes(config);
+  const totalStoredBytes = history.totalBytes + overwritten.totalBytes + gapHistory.totalBytes + stintReports.totalBytes;
 
   console.log('Storage estimate');
   console.log('----------------');
@@ -184,12 +220,15 @@ function main(config = CONFIG) {
   console.log(`Bytes/lap CSV:       ${config.csvBytesPerLap}`);
   console.log(`Bytes/lap JSONL:     ${config.jsonlBytesPerLap}`);
   console.log(`Drivers/car estimate:${config.averageDriversPerCar}`);
+  console.log(`Stints/followed car: ${config.estimatedStintsPerFollowedCar}`);
   console.log('');
 
   console.log('Append-only lap history');
   console.log('-----------------------');
   printScenario('All stored cars', history);
   console.log(`Confirmed gap history    samples=${String(gapHistory.sampleCount).padStart(6)} JSONL=${formatBytes(gapHistory.totalBytes).padStart(9)}`);
+  console.log(`Closed stint reports     reports=${String(stintReports.reportCount).padStart(6)} JSON=${formatBytes(stintReports.jsonBytes).padStart(9)} PDF=${formatBytes(stintReports.pdfBytes).padStart(9)}`);
+  console.log(`Race/driver summaries    reports=${String(stintReports.summaryCount).padStart(6)} JSON=${formatBytes(stintReports.summaryJsonBytes).padStart(9)} PDF=${formatBytes(stintReports.summaryPdfBytes).padStart(9)} combined=${formatBytes(stintReports.totalBytes).padStart(9)}`);
   console.log('');
 
   console.log('Current overwritten files');
@@ -217,6 +256,7 @@ module.exports = {
   analyticsSummarySizeBytes,
   analyticsSummaryBreakdown,
   gapHistorySizeBytes,
+  stintReportSizeBytes,
   formatBytes,
   main
 };
