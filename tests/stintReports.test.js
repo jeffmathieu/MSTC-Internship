@@ -22,10 +22,12 @@ const history = [
   lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver Two', lapNumber: 3, lapTimeMs: 181000, sector1Ms: 55000, sector2Ms: 79500, sector3Ms: 46500 })
 ];
 const closedStint = stintsForCar(history, 33)[0];
-const payload = buildStintReportPayload(closedStint, { sessionName: 'Spa <Race>' }, [
+const reportGapSamples = [
   { followedCarNumber: '33', rivalCarNumber: '2', relation: 'ahead', gapMs: 5000, lapGap: 0, confirmedAt: '2026-06-23T11:59:30.000Z' },
+  { followedCarNumber: '33', rivalCarNumber: '9', relation: 'behind', gapMs: 7500, lapGap: 0, confirmedAt: '2026-06-23T11:59:40.000Z', suppressed: true },
   { followedCarNumber: '99', rivalCarNumber: '2', relation: 'ahead', gapMs: 1000, confirmedAt: '2026-06-23T11:59:30.000Z' }
-]);
+];
+const payload = buildStintReportPayload(closedStint, { sessionName: 'Spa <Race>' }, reportGapSamples);
 
 assert.strictEqual(safeFilePart('Driver / One'), 'Driver_One');
 assert.strictEqual(htmlEscape('<MSTC & "team">'), '&lt;MSTC &amp; &quot;team&quot;&gt;');
@@ -45,6 +47,7 @@ assert.ok(buildEventSummaryHtml('Race summary', [payload]).includes('car stint 1
 const canonical = buildCanonicalReportPayload({
   stints: [closedStint],
   session: { sessionName: 'Spa Race', circuit: 'Spa-Francorchamps' },
+  gapSamples: reportGapSamples,
   history,
   carNumber: '33'
 });
@@ -54,6 +57,7 @@ assert.strictEqual(canonical.stints.length, 1);
 assert.strictEqual(canonical.stints[0].driverName, 'Driver / One');
 assert.strictEqual(canonical.stints[0].laps[1].status, 'neutralized');
 assert.strictEqual(canonical.stints[0].teammates[0].driverName, 'Driver Two');
+assert.strictEqual(canonical.stints[0].gapHistory.length, 1, 'suppressed long-pit samples stay out of the PDF');
 
 const output = fs.mkdtempSync(path.join(os.tmpdir(), 'mstc-stint-report-'));
 const paths = artifactPaths(output, closedStint);

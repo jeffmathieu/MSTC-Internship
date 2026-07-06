@@ -4,7 +4,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const lapAnalytics = require('../shared/lapAnalytics');
 
-const REPORT_LAYOUT_VERSION = 'canonical-reportlab-landscape-v1';
+const REPORT_LAYOUT_VERSION = 'canonical-reportlab-landscape-v2';
 
 function safeFilePart(value, fallback = 'Unknown') {
   const safe = String(value || '')
@@ -54,6 +54,7 @@ function gapSamplesForStint(samples = [], stint = {}) {
   const end = new Date(stint.closedAt || '9999-12-31T23:59:59.999Z').getTime();
   return (samples || [])
     .filter((sample) => String(sample.followedCarNumber) === String(stint.carNumber))
+    .filter((sample) => sample.suppressed !== true)
     .filter((sample) => {
       const timestamp = new Date(sample.confirmedAt || 0).getTime();
       return Number.isFinite(timestamp) && timestamp >= start && timestamp <= end;
@@ -181,6 +182,8 @@ function pitStopsFromHistory(history = [], carNumber = '') {
 function canonicalStint(stint, session, gapSamples, driverStats) {
   const legacy = buildStintReportPayload(stint, session, gapSamples);
   const stats = legacy.stint.stats || {};
+  const firstLap = legacy.stint.laps[0];
+  const lastLap = legacy.stint.laps.at(-1);
   const teammates = driverStats
     .filter((driver) => driver.driverName !== legacy.session.driverName)
     .map((driver) => ({
@@ -198,8 +201,8 @@ function canonicalStint(stint, session, gapSamples, driverStats) {
     stintNumber: legacy.stint.stintNumber,
     driverStintNumber: legacy.stint.driverStintNumber,
     driverName: legacy.session.driverName,
-    startLap: legacy.stint.startLap,
-    endLap: legacy.stint.endLap,
+    startLap: legacy.stint.startLap ?? firstLap?.lapNumber ?? null,
+    endLap: legacy.stint.endLap ?? lastLap?.lapNumber ?? null,
     stintTimeMs: legacy.stint.stintTimeMs,
     totalDriverTimeMs: legacy.stint.totalDriverTimeMs,
     stats: compactStats(stats),

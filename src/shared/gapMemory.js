@@ -210,7 +210,9 @@ function updateGapMemory(previous = {}, input = {}) {
   followedCars.forEach((followedCar) => {
     ['ahead', 'behind'].forEach((relation) => {
       const item = viewsByCar[followedCar]?.[relation];
-      if (!item || (!committedCars.has(followedCar) && !committedCars.has(item.rivalCarNumber))) return;
+      // A rival that has remained in the pits is no longer a reliable adjacent
+      // class reference. Do not store those samples in stint gap history.
+      if (!item || item.suppressed || (!committedCars.has(followedCar) && !committedCars.has(item.rivalCarNumber))) return;
       if (!Number.isFinite(item.gapMs) && !Number.isFinite(item.lapGap)) return;
       newSamples.push({
         key: pairKey(followedCar, item.rivalCarNumber),

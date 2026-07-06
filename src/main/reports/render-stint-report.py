@@ -51,9 +51,27 @@ def fmt_delta(ms):
     return f'{ms / 1000:+.3f}s'
 
 
+def fmt_gap(ms, decimals=3):
+    if ms is None or not isinstance(ms, (int, float)) or not math.isfinite(ms):
+        return '-'
+    seconds = abs(ms) / 1000.0
+    if seconds < 60:
+        return f'{seconds:.{decimals}f}s'
+    return fmt_time(ms, decimals)
+
+
 def safe_name(value):
     cleaned = re.sub(r'[^A-Za-z0-9_-]+', '_', value.strip()).strip('_')
     return cleaned or 'Unknown'
+
+
+def race_detail_line(race):
+    details = [
+        race.get('circuit'),
+        f"#{race.get('carNumber', '')} {race.get('teamName', '')}".strip(),
+        race.get('className'),
+    ]
+    return '  |  '.join(str(value) for value in details if value)
 
 
 def status_color(status):
@@ -208,20 +226,80 @@ def draw_teammates(c, x, y, w, h, stint):
 
 def draw_gap_panel(c, x, y, w, h, stint):
     panel(c, x, y, w, h, 'Class gap history')
-    c.setFillColor(YELLOW)
-    c.roundRect(x + 12, y + h - 61, w - 24, 30, 4, fill=1, stroke=0)
-    c.setFillColor(NAVY)
-    c.setFont('Helvetica-Bold', 10)
-    c.drawCentredString(x + w / 2, y + h - 50, 'PLANNED FOR PRIORITY 2')
-    c.setFillColor(MUTED)
-    c.setFont('Helvetica', 7.2)
-    lines = [
-        'The saved lap-only history does not contain stable,',
-        'confirmed class-gap samples. This panel will show',
-        'gap evolution once start/finish memory is implemented.'
+    samples = [
+        sample for sample in stint.get('gapHistory', [])
+        if sample.get('relation') in ('ahead', 'behind')
+        and isinstance(sample.get('gapMs'), (int, float))
+        and math.isfinite(sample.get('gapMs'))
+        and sample.get('gapMs') >= 0
     ]
-    for index, line in enumerate(lines):
-        c.drawString(x + 12, y + h - 82 - index * 11, line)
+    if not samples:
+        c.setFillColor(MUTED)
+        c.setFont('Helvetica-Bold', 8)
+        c.drawString(x + 12, y + h - 42, 'No confirmed class-gap samples in this stint.')
+        c.setFont('Helvetica', 6.8)
+        c.drawString(x + 12, y + h - 57, 'The chart starts after both cars cross the timing line.')
+        return
+
+    latest = {}
+    for sample in samples:
+        latest[sample['relation']] = sample
+    summary_colors = {'ahead': BLUE, 'behind': RED}
+    for relation, summary_x in [('ahead', x + 12), ('behind', x + w / 2 + 3)]:
+        sample = latest.get(relation)
+        if not sample:
+            continue
+        color = summary_colors[relation]
+        c.setFillColor(color)
+        c.circle(summary_x, y + h - 34, 2.5, fill=1, stroke=0)
+        c.setFont('Helvetica-Bold', 6.8)
+        approximation = '~' if sample.get('estimated') else ''
+        label = f"{relation.upper()} #{sample.get('rivalCarNumber') or '?'}  {approximation}{fmt_gap(sample.get('gapMs'))}"
+        c.drawString(summary_x + 6, y + h - 37, label)
+
+    plot_x, plot_y = x + 34, y + 20
+    plot_w, plot_h = w - 46, h - 72
+    values = [sample['gapMs'] for sample in samples]
+    low, high = min(values), max(values)
+    padding = max(500, (high - low) * 0.15)
+    low, high = max(0, low - padding), high + padding
+    if high <= low:
+        high = low + 1000
+
+    y_for = lambda value: plot_y + (value - low) / (high - low) * plot_h
+    x_for = lambda index: plot_x + (0.5 if len(samples) == 1 else index / (len(samples) - 1)) * plot_w
+    c.setStrokeColor(GRID)
+    c.setLineWidth(0.45)
+    for index in range(3):
+        grid_value = low + (high - low) * index / 2
+        grid_y = y_for(grid_value)
+        c.line(plot_x, grid_y, plot_x + plot_w, grid_y)
+        c.setFillColor(MUTED)
+        c.setFont('Helvetica', 5.7)
+        c.drawRightString(plot_x - 4, grid_y - 2, fmt_gap(grid_value, 1))
+
+    series = {}
+    for index, sample in enumerate(samples):
+        key = (sample['relation'], str(sample.get('rivalCarNumber') or ''))
+        series.setdefault(key, []).append((index, sample))
+    for (relation, _rival), points in series.items():
+        color = summary_colors[relation]
+        c.setStrokeColor(color)
+        c.setLineWidth(1.1)
+        previous = None
+        for index, sample in points:
+            px, py = x_for(index), y_for(sample['gapMs'])
+            if previous is not None:
+                c.line(previous[0], previous[1], px, py)
+            previous = (px, py)
+            c.setStrokeColor(color)
+            c.setFillColor(PANEL if sample.get('estimated') else color)
+            c.circle(px, py, 2.4, fill=1, stroke=1)
+
+    c.setFillColor(MUTED)
+    c.setFont('Helvetica', 5.8)
+    c.drawString(plot_x, y + 7, 'first confirmed')
+    c.drawRightString(plot_x + plot_w, y + 7, 'latest')
 
 
 def draw_legend(c, x, y):
@@ -254,7 +332,7 @@ def render_race_summary(c, payload):
     c.setFont('Helvetica-Bold', 15)
     c.drawString(28, PAGE_H - 26, race['sessionName'])
     c.setFont('Helvetica', 8)
-    c.drawString(28, PAGE_H - 43, f"{race['circuit']}  |  #{race['carNumber']} {race['teamName']}  |  {race['className']}")
+    c.drawString(28, PAGE_H - 43, race_detail_line(race))
     c.setFont('Helvetica-Bold', 14)
     c.drawRightString(PAGE_W - 28, PAGE_H - 27, 'FULL RACE OVERVIEW')
 
@@ -352,7 +430,7 @@ def render_race_summary(c, payload):
         yy -= 31
     c.setFillColor(MUTED)
     c.setFont('Helvetica', 6.5)
-    c.drawRightString(PAGE_W - 28, 18, 'Generated from stored Spa race data | race overview')
+    c.drawRightString(PAGE_W - 28, 18, 'Generated from stored race data | race overview')
 
 
 def render_page(c, payload, stint, page_number):
@@ -365,11 +443,14 @@ def render_page(c, payload, stint, page_number):
     c.setFont('Helvetica-Bold', 15)
     c.drawString(28, PAGE_H - 26, race['sessionName'])
     c.setFont('Helvetica', 8)
-    c.drawString(28, PAGE_H - 43, f"{race['circuit']}  |  #{race['carNumber']} {race['teamName']}  |  {race['className']}")
+    c.drawString(28, PAGE_H - 43, race_detail_line(race))
     c.setFont('Helvetica-Bold', 14)
     c.drawRightString(PAGE_W - 28, PAGE_H - 27, stint['driverName'])
     c.setFont('Helvetica', 8)
-    c.drawRightString(PAGE_W - 28, PAGE_H - 43, f"Stint {stint['stintNumber']}  |  laps {stint['startLap']}-{stint['endLap']}")
+    laps = stint.get('laps', [])
+    start_lap = stint.get('startLap') if stint.get('startLap') is not None else (laps[0].get('lapNumber') if laps else '-')
+    end_lap = stint.get('endLap') if stint.get('endLap') is not None else (laps[-1].get('lapNumber') if laps else '-')
+    c.drawRightString(PAGE_W - 28, PAGE_H - 43, f"Stint {stint['stintNumber']}  |  laps {start_lap}-{end_lap}")
 
     draw_chart(c, 28, 328, PAGE_W - 56, 190, 'Lap times', stint['laps'], 'lapTimeMs', stint['stats'].get('averageLapMs'), True, 'status')
     chart_w = (PAGE_W - 72) / 3
@@ -384,7 +465,7 @@ def render_page(c, payload, stint, page_number):
     draw_legend(c, 35, 19)
     c.setFillColor(MUTED)
     c.setFont('Helvetica', 6.5)
-    c.drawRightString(PAGE_W - 28, 18, f'Generated from stored Spa race data | page {page_number}')
+    c.drawRightString(PAGE_W - 28, 18, f'Generated from stored race data | page {page_number}')
 
 
 def render_pdf(filename, payload, stints, include_summary=False):

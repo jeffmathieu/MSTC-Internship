@@ -54,7 +54,16 @@ const renderFolder = fs.mkdtempSync(path.join(os.tmpdir(), 'mstc-reportlab-smoke
 try {
   const payloadPath = path.join(renderFolder, 'payload.json');
   const pdfPath = path.join(renderFolder, 'stint.pdf');
-  fs.writeFileSync(payloadPath, JSON.stringify({ ...payload, stints: [payload.stints[0]] }));
+  const stintWithGaps = {
+    ...payload.stints[0],
+    gapHistory: [
+      { rivalCarNumber: '2', relation: 'ahead', gapMs: 8200, estimated: false, confirmedAt: '2026-07-05T10:00:00.000Z' },
+      { rivalCarNumber: '9', relation: 'behind', gapMs: 12600, estimated: false, confirmedAt: '2026-07-05T10:00:05.000Z' },
+      { rivalCarNumber: '2', relation: 'ahead', gapMs: 6900, estimated: false, confirmedAt: '2026-07-05T10:03:00.000Z' },
+      { rivalCarNumber: '9', relation: 'behind', gapMs: 10800, estimated: true, confirmedAt: '2026-07-05T10:03:05.000Z' }
+    ]
+  };
+  fs.writeFileSync(payloadPath, JSON.stringify({ ...payload, stints: [stintWithGaps] }));
   const rendered = renderReportLabPdf(payloadPath, pdfPath);
   assert.strictEqual(rendered.rendered, true, rendered.error || rendered.reason);
   assert.strictEqual(fs.readFileSync(pdfPath).subarray(0, 5).toString(), '%PDF-');

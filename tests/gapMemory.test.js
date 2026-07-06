@@ -189,6 +189,17 @@ unknownLapPit = updateGapMemory(unknownLapPit, {
   collectedAt: '2026-07-05T11:52:00.000Z'
 });
 assert.strictEqual(unknownLapPit.pitByPair['13|2'].sinceFollowedLap, 5);
+unknownLapPit = updateGapMemory(unknownLapPit, {
+  rows: [
+    { position: 1, carNumber: 13, className: 'CC', classPosition: 1, lapNumber: 6, lastLap: '2:05.000' },
+    { position: 2, carNumber: 2, className: 'CC', classPosition: 2, lapNumber: 6, state: 'IN', interval: '2.000' }
+  ],
+  followedCars: ['13'],
+  pitSuppressionLaps: 1,
+  collectedAt: '2026-07-05T11:54:00.000Z'
+});
+assert.strictEqual(unknownLapPit.viewsByCar['13'].behind.suppressed, true);
+assert.strictEqual(unknownLapPit.newSamples.length, 0, 'long-pit rivals are excluded from report gap history');
 
 // Persisted duplicate samples are compacted and the in-memory safety cap is
 // enforced for very long races.
