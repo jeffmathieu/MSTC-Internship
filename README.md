@@ -195,8 +195,44 @@ Generated files can include:
 - `session_metadata.json`
 - `parser_debug.json`
 - `analytics_summary.json`
+- `gap_state.json`
+- `gap_history.jsonl`
+- `stint_state.json`
 - `lap_prediction_car-<number>.json`
 - `pitstop_plan_car-<number>.json`
+- `stints/car-<number>/STINT_<driver-stint-number>_<driver>/STINT_<driver-stint-number>_<driver>.json`
+- `stints/car-<number>/STINT_<driver-stint-number>_<driver>/STINT_<driver-stint-number>_<driver>.pdf`
+
+### Driver stints and automatic reports
+
+A new stint starts only when the stored driver name changes. A pitstop without
+a driver change remains part of the same driver stint. `stint_state.json`
+contains the current stint time, every closed stint, and cumulative driving time
+per driver for each followed car.
+
+When the first completed lap for a new driver confirms a change, the previous
+stint is closed. The app then creates a `STINT_<driver-stint-number>_<driver>`
+folder with a JSON data file and an A4 PDF report. The persisted state and PDF
+also show the overall car-stint number. Electron generates the PDF directly, so a
+normal installed build does not require Python or ReportLab. Existing reports
+are not regenerated on every timing poll. Reopening the same session folder
+reconstructs the same stint boundaries from `lap_history.jsonl` and creates only
+missing reports. If the provider exposes a `STINT` duration such as `42:07`, it
+calibrates the live driver timer. Between provider updates the timer advances
+using poll timestamps; without that column it runs entirely from timestamps and
+completed laps. Driver changes always determine the driver/car stint numbers.
+
+The top information bar shows the current driver-stint number, overall car-
+stint number, current stint time and cumulative time for that driver. When the
+timing provider explicitly reports that the session has finished, the final
+open stint is closed and the app also creates rolling race and per-driver JSON/
+PDF summaries. Pressing Stop or closing the app does not finalize a stint, so an
+interrupted session can safely continue from the same folder.
+
+The dashboard lap strip shows all completed laps for the active car, newest
+first. Pit in-laps and out-laps are red, only an in-lap carries the `P` marker,
+and FCY/SC/red-flag laps are yellow. The complete history remains available via
+the vertical scrollbar.
 
 ### Parser debug output
 
@@ -333,12 +369,21 @@ lap_history.jsonl	Stored completed laps in append-friendly JSONL format
 session_metadata.json	Timing URL, provider, followed car, session info and update time
 parser_debug.json	Parser diagnostics for troubleshooting
 analytics_summary.json	Derived pace, lap, sector and comparison statistics
+gap_state.json	Latest start/finish-confirmed per-car gaps and pit-suppression state
+gap_history.jsonl	Append-only confirmed gap samples for battles and future graphs
 lap_prediction_car-<number>.json	Current-lap prediction for a followed car
 pitstop_plan_car-<number>.json	Pitstop strategy output for a followed car
 
 lap_history.csv and lap_history.jsonl are the long-term source of truth.
 
-analytics_summary.json, lap predictions, and pitstop plans are derived files that can be recalculated from the saved lap history.
+`gap_state.json` is restored when the same race folder is reopened, so volatile
+live timing polls cannot replace the last confirmed start/finish gaps after a
+restart. `gap_history.jsonl` grows only when a relevant car crosses the line,
+not every five-second poll. The default catch estimate uses the latest five
+valid laps; a rival that remains in the pits for five of our completed laps is
+temporarily removed from catch output until it resumes.
+
+analytics_summary.json, lap predictions, and pitstop plans are derived files that can be recalculated from the saved lap history and confirmed gap state.
 
 Development
 Requirements

@@ -19,6 +19,7 @@ const pitstopPlanner = window.pitstopPlanner;
 const pitstopCircuits = window.pitstopCircuits;
 const normReference = window.normReference;
 const dashboardView = window.dashboardView;
+const timingHighlights = window.timingHighlights;
 const previousMetricValues = new Map();
 
 // Applies one of the two supported visual themes. Theme colors themselves are
@@ -109,7 +110,7 @@ function setMetric(id, value, { flash = false } = {}) {
   const previous = previousMetricValues.get(id);
   el.textContent = next;
   if (flash && previous && previous !== '—' && next !== '—' && previous !== next) {
-    const card = el.closest('.metric-box');
+    const card = el.closest('.metric-box, .timing-row');
     if (card) {
       card.classList.remove('flash-good');
       void card.offsetWidth;
@@ -130,6 +131,16 @@ function formatMs(ms) {
   const milli = remaining % 1000;
   if (hours > 0) return `${sign}${hours}:${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}.${String(milli).padStart(3,'0')}`;
   return `${sign}${minutes}:${String(seconds).padStart(2,'0')}.${String(milli).padStart(3,'0')}`;
+}
+
+// Stint clocks prioritize readability over lap-timing precision. Internal
+// calculations keep milliseconds; the compact header displays whole minutes.
+function formatStintClock(ms) {
+  if (!Number.isFinite(Number(ms))) return '—';
+  const totalMinutes = Math.max(0, Math.floor(Number(ms) / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}u${String(minutes).padStart(2, '0')}` : `${minutes}m`;
 }
 
 function numericMs(value) {
@@ -298,9 +309,8 @@ function syncSessionMode(mode = currentSettings?.sessionMode || 'race') {
   document.body?.classList.add(`mode-${normalized}`);
 }
 
-// Updates a delta card and applies semantic border color. In this UI positive
-// means good for the displayed comparison because backend deltas are inverted
-// before they arrive here when needed.
+// Updates a delta card using the global current-minus-reference contract:
+// positive means the current value is slower (red), negative is faster (green).
 function setDelta(cardId, textId, deltaMs) {
   const card = $(cardId);
   const numeric = Number.isFinite(deltaMs) ? deltaMs : null;
@@ -308,14 +318,7 @@ function setDelta(cardId, textId, deltaMs) {
   if (!card) return;
   card.classList.remove('good', 'bad', 'neutral');
   if (numeric === null || numeric === 0) card.classList.add('neutral');
-  else card.classList.add(numeric > 0 ? 'good' : 'bad');
-}
-
-// Backend driver deltas are stored as current minus reference. The UI wants
-// green when we are faster/better, so driver deltas are inverted before display.
-function invertedDelta(value) {
-  const n = numericMs(value);
-  return n === null ? null : -n;
+  else card.classList.add(numeric > 0 ? 'bad' : 'good');
 }
 
 // Numeric helper used by driver/stint tables.
@@ -375,13 +378,86 @@ function lapsForCar(history, carNumber) {
     });
 }
 
-// Updates the session summary card in the left column.
-function updateSession(session = {}) {
+// Shows every completed lap for the active dashboard car, newest first. The
+// list remains vertically scrollable for a complete 24-hour history. Status,
+// initials and best-lap highlights are precomputed by timingHighlights.js.
+function renderLapStrip(state, precomputedHighlights = null) {
+  const list = $('lap-strip-list');
+  if (!list) return;
+  const previousScrollTop = Number(list.scrollTop || 0);
+  const wasAtTop = previousScrollTop <= 2;
+  const carNumber = activeCarNumber();
+  const storedLapCount = lapsForCar(state?.lapHistory || [], carNumber).length;
+  // lapHistory is the source of truth. Normally the collector supplies an
+  // equally fresh precomputed highlight list; after a partial write/error or
+  // while resuming an older folder, rebuild through the shared module whenever
+  // that list trails the stored history. The renderer still performs no timing
+  // comparison itself.
+  const currentHighlights = precomputedHighlights?.lapStrip?.length === storedLapCount
+    ? precomputedHighlights
+    : timingHighlights?.buildTimingHighlights(state?.lapHistory || [], carNumber) || precomputedHighlights;
+  const laps = [...(currentHighlights?.lapStrip || [])].reverse();
+  const currentStint = state?.stintState?.cars?.[carNumber]?.currentStint || null;
+  setText('info-stint', currentStint
+    ? `Driver stint ${currentStint.driverStintNumber} · ${formatStintClock(currentStint.stintTimeMs)} / total ${formatStintClock(currentStint.totalDriverTimeMs)}`
+    : 'Waiting for stint data');
+  setText('info-car-stint', currentStint ? `Car stint ${currentStint.stintNumber}` : '—');
+  list.innerHTML = '';
+  if (!laps.length) {
+    const empty = document.createElement('p');
+    empty.className = 'lap-strip-empty';
+    empty.textContent = 'No stored laps yet';
+    list.appendChild(empty);
+    return;
+  }
+  laps.forEach((lap, index) => {
+    const row = document.createElement('div');
+    row.className = `lap-strip-row ${lap.status || 'normal'} ${lap.highlight || 'none'}`;
+    row.setAttribute('title', lap.tooltip || lap.driverName || 'Unknown driver');
+    const number = document.createElement('span');
+    number.className = 'lap-number';
+    number.textContent = lapDisplayLabel(lap, laps.length - index - 1);
+    const time = document.createElement('strong');
+    time.className = 'lap-time';
+    time.textContent = formatMs(lap.lapTimeMs);
+    const driver = document.createElement('span');
+    driver.className = 'lap-driver';
+    driver.textContent = lap.driverInitials || '';
+    driver.setAttribute('title', lap.driverName || 'Unknown driver');
+    const marker = document.createElement('span');
+    marker.className = 'lap-marker';
+    marker.textContent = lap.marker || '';
+    row.appendChild(number);
+    row.appendChild(time);
+    row.appendChild(driver);
+    row.appendChild(marker);
+    list.appendChild(row);
+  });
+  // Polls rebuild the list. Keep the user's position while they inspect older
+  // laps; only dashboards already at the top continue following newest-first.
+  list.scrollTop = wasAtTop ? 0 : previousScrollTop;
+}
+
+// Converts verbose provider race-control text to labels that fit the compact
+// header. Populated timing rows are stronger live evidence when RIS briefly
+// reports "NO ACTIVE HEAT" despite an active session.
+function compactSessionStatus(session = {}, hasTimingRows = false) {
+  const raw = String(session.statusText || session.flag || '').trim();
+  const normalized = `${session.flag || ''} ${session.statusText || ''}`.trim().toLowerCase();
+  if (/full\s*course\s*yellow|\bfcy\b|code\s*60/.test(normalized)) return 'FCY';
+  if (/safety\s*car|\bsc\b/.test(normalized)) return 'SC';
+  if (/red\s*flag|^red$/.test(normalized)) return 'RED';
+  if (/green/.test(normalized)) return 'GREEN';
+  if (hasTimingRows && /no\s+active\s+heat|no\s+active\s+session/.test(normalized)) return 'GREEN';
+  return raw ? raw.toUpperCase() : '—';
+}
+
+// Updates the session summary card in the top information strip.
+function updateSession(session = {}, hasTimingRows = false) {
   setText('session-name', session.sessionName || session.pageTitle || '—');
   setText('session-time', session.timeToGo || session.pageUpdated || '—');
   const statusBlock = $('session-status-block');
-  const raceControlText = String(session.statusText || session.flag || '').trim();
-  setText('status-text', raceControlText ? raceControlText.toUpperCase() : '—');
+  setText('status-text', compactSessionStatus(session, hasTimingRows));
   if (statusBlock) {
     const raceControl = String(session.flag || session.statusText || '').toLowerCase();
     statusBlock.classList.remove('flag-caution', 'flag-red');
@@ -391,7 +467,12 @@ function updateSession(session = {}) {
 }
 
 // Updates the followed-car values shown in the compact session panel.
-function renderFollowed(rows) {
+function setClassBestValue(id, isClassBest) {
+  const element = $(id);
+  if (element) element.classList.toggle('class-best-value', Boolean(isClassBest));
+}
+
+function renderFollowed(rows, timingHighlights = null) {
   const wanted = String($('followed-car').value || '').trim();
   const match = rows.find((row) => String(row.carNumber) === wanted);
   const row = match || {};
@@ -402,7 +483,9 @@ function renderFollowed(rows) {
   setText('info-driver', row.driver);
   setText('info-class-pic', classPic);
   setMetric('last-time', row.lastLap, { flash: true });
-  setMetric('best-time', row.bestLap, { flash: true });
+  const storedBestLapMs = numericMs(timingHighlights?.bestLap?.valueMs);
+  setMetric('best-time', storedBestLapMs !== null ? formatMs(storedBestLapMs) : row.bestLap, { flash: true });
+  setClassBestValue('best-time', timingHighlights?.bestLap?.isClassBest);
   setMetric('sector-1', row.sector1);
   setMetric('sector-2', row.sector2);
   setMetric('sector-3', row.sector3);
@@ -470,6 +553,9 @@ function renderSectorAnalytics(summary, rows = [], prediction = null) {
   setMetric('best-sector-1', formatMs(bestS1), { flash: true });
   setMetric('best-sector-2', formatMs(bestS2), { flash: true });
   setMetric('best-sector-3', formatMs(bestS3), { flash: true });
+  setClassBestValue('best-sector-1', summary?.timingHighlights?.bestSectors?.sector1?.isClassBest);
+  setClassBestValue('best-sector-2', summary?.timingHighlights?.bestSectors?.sector2?.isClassBest);
+  setClassBestValue('best-sector-3', summary?.timingHighlights?.bestSectors?.sector3?.isClassBest);
   const ideal = [bestS1, bestS2, bestS3].every(Number.isFinite) ? bestS1 + bestS2 + bestS3 : null;
   const idealStatus = normReference.idealReferenceStatus(bestS1, bestS2, bestS3, refs.lapMs);
   setMetric('ideal-time', formatMs(ideal), { flash: true });
@@ -501,10 +587,90 @@ function driverStatsForLiveCar(summary, rows, carNumber) {
   return { row, driverName, stats };
 }
 
+function comparisonDeltaState(value) {
+  const ms = numericMs(value);
+  return ms === null || ms === 0 ? 'neutral' : ms < 0 ? 'good' : 'bad';
+}
+
+function fillComparisonList(id, items, rowClass, labelKey = 'label', valueKey = 'deltaMs') {
+  const container = $(id);
+  if (!container) return;
+  container.innerHTML = '';
+  (items || []).forEach((item) => {
+    const row = document.createElement('div');
+    row.className = `${rowClass} ${comparisonDeltaState(item[valueKey])}`;
+    const label = document.createElement('span');
+    label.textContent = item[labelKey] || '—';
+    const value = document.createElement('output');
+    if (valueKey === 'deltaMs') value.className = 'comparison-delta';
+    value.textContent = valueKey === 'deltaMs' ? displayDelta(numericMs(item[valueKey])) : formatMs(numericMs(item[valueKey]));
+    row.appendChild(label);
+    if (rowClass === 'comparison-line') {
+      const absolute = document.createElement('output');
+      absolute.className = 'comparison-absolute';
+      absolute.textContent = formatMs(numericMs(item.valueMs));
+      row.appendChild(absolute);
+    }
+    if (rowClass === 'comparison-sector') {
+      const average = document.createElement('output');
+      average.className = 'comparison-sector-average';
+      average.textContent = formatMs(numericMs(item.averageMs));
+      row.appendChild(average);
+    }
+    if (rowClass !== 'comparison-sector' || item.showDelta) row.appendChild(value);
+    container.appendChild(row);
+  });
+}
+
+function renderComparisonMatrix(matrix) {
+  if (!matrix) return false;
+  const ourNumber = matrix.ourCarNumber || activeCarNumber() || '?';
+  setText('comparison-team-title', matrix.teammate?.title || 'D2 vs. D1');
+  $('comparison-team-title')?.setAttribute('title', matrix.teammate?.title || 'D2 vs. D1');
+  setText('comparison-bic-title', `#${ourNumber} vs. BIC${matrix.bic?.targetCarNumber ? ` #${matrix.bic.targetCarNumber}` : ''}`);
+  setText('comparison-xic-title', `#${ourNumber} vs.`);
+  if ($('comparison-xic-car') && document.activeElement !== $('comparison-xic-car')) {
+    $('comparison-xic-car').value = matrix.xic?.targetCarNumber || currentSettings?.comparisonCar || '';
+  }
+  [
+    ['team', matrix.teammate],
+    ['bic', matrix.bic],
+    ['xic', matrix.xic]
+  ].forEach(([id, column]) => {
+    fillComparisonList(`comparison-${id}-metrics`, column?.metrics, 'comparison-line');
+    const averages = [
+      { label: 'Total average', valueMs: column?.totalAverageMs, deltaMs: column?.totalAverageDeltaMs, total: true },
+      ...(column?.averages || [])
+    ];
+    const averagesContainer = $(`comparison-${id}-averages`);
+    if (averagesContainer) {
+      averagesContainer.innerHTML = '';
+      averages.forEach((item) => {
+        const row = document.createElement('div');
+        row.className = `comparison-average${item.total ? ' total' : ''}`;
+        const label = document.createElement('span');
+        label.textContent = item.label;
+        const value = document.createElement('output');
+        value.textContent = formatMs(numericMs(item.valueMs));
+        const delta = document.createElement('output');
+        delta.className = `comparison-average-delta ${comparisonDeltaState(item.deltaMs)}`;
+        delta.textContent = displayDelta(numericMs(item.deltaMs));
+        row.appendChild(label);
+        row.appendChild(value);
+        row.appendChild(delta);
+        averagesContainer.appendChild(row);
+      });
+    }
+    fillComparisonList(`comparison-${id}-sectors`, column?.sectors, 'comparison-sector');
+  });
+  return true;
+}
+
 // Fills the D1/D2, BIC, and XIC comparison boxes from precomputed analytics.
 // Renderer only formats values; lap/sector math stays in shared modules/main.
 function renderDriverAndClassComparisons(summary, rows) {
   const view = summary?.comparisonView;
+  if (renderComparisonMatrix(view?.matrix)) return;
   if (view?.columns?.length === 5) {
     const ids = [
       ['best-d1-a', 'last-d2', 'delta-best-last-card', 'delta-best-last'],
@@ -534,41 +700,46 @@ function renderDriverAndClassComparisons(summary, rows) {
 
   setMetric('best-d1-a', formatMs(numericMs(bestDriver?.bestLapMs)));
   setMetric('last-d2', formatMs(numericMs(currentDriver?.lastLapMs)));
-  setDelta('delta-best-last-card', 'delta-best-last', invertedDelta(driverComparison?.deltas?.bestDriverBestLapToCurrentLastLapMs));
+  setDelta('delta-best-last-card', 'delta-best-last', numericMs(driverComparison?.deltas?.bestDriverBestLapToCurrentLastLapMs));
 
   setMetric('best-d1-b', formatMs(numericMs(bestDriver?.bestLapMs)));
   setMetric('best-d2', formatMs(numericMs(currentDriver?.bestLapMs)));
-  setDelta('delta-best-best-card', 'delta-best-best', invertedDelta(driverComparison?.deltas?.bestDriverBestLapToCurrentBestLapMs));
+  setDelta('delta-best-best-card', 'delta-best-best', numericMs(driverComparison?.deltas?.bestDriverBestLapToCurrentBestLapMs));
 
   setMetric('average-d1', formatMs(numericMs(bestDriver?.averageLapMs)));
   setMetric('average-d2', formatMs(numericMs(currentDriver?.averageLapMs)));
-  setDelta('delta-average-drivers-card', 'delta-average-drivers', invertedDelta(driverComparison?.deltas?.bestDriverAverageToCurrentAverageMs));
+  setDelta('delta-average-drivers-card', 'delta-average-drivers', numericMs(driverComparison?.deltas?.bestDriverAverageToCurrentAverageMs));
 
   setMetric('average-bic', formatMs(numericMs(bestClassCar?.averageLapMs)));
   setMetric('average-bic-driver', formatMs(numericMs(bicDriver?.averageLapMs)));
   const bicDelta = numericMs(bestClassCar?.averageLapMs) !== null && numericMs(bicDriver?.averageLapMs) !== null
-    ? numericMs(bestClassCar?.averageLapMs) - numericMs(bicDriver?.averageLapMs)
+    ? numericMs(bicDriver?.averageLapMs) - numericMs(bestClassCar?.averageLapMs)
     : null;
   setDelta('delta-bic-card', 'delta-bic', bicDelta);
 
   setMetric('average-xic', formatMs(numericMs(selectedCar?.averageLapMs)));
   setMetric('average-xic-driver', formatMs(numericMs(xicDriver?.averageLapMs)));
   const xicDelta = numericMs(selectedCar?.averageLapMs) !== null && numericMs(xicDriver?.averageLapMs) !== null
-    ? numericMs(selectedCar?.averageLapMs) - numericMs(xicDriver?.averageLapMs)
+    ? numericMs(xicDriver?.averageLapMs) - numericMs(selectedCar?.averageLapMs)
     : null;
   setDelta('delta-xic-card', 'delta-xic', xicDelta);
 }
 
 // Renders the nearest same-class rivals from the precomputed class battle
 // summary. No gap or pace arithmetic lives here; classBattle.js supplies last-
-// lap deltas, the overall DIFF chain, and ten-lap catch estimates.
+// lap deltas, the confirmed gap chain, and configurable recent-pace estimates.
 function renderAdjacentClassBattles(summary) {
   const battles = summary?.adjacentClassBattles;
+  const setDetailLines = (side, delta = '', trend = '', prediction = '') => {
+    setText(`battle-${side}-delta`, delta);
+    setText(`battle-${side}-trend`, trend);
+    setText(`battle-${side}-prediction`, prediction);
+  };
   const renderSide = (side, item) => {
     const card = $(`battle-${side}-card`);
     if (!item) {
       setText(`battle-${side}-main`, side === 'ahead' && battles?.available ? 'Class leader' : side === 'behind' && battles?.available ? 'No class car behind' : '—');
-      setText(`battle-${side}-detail`, battles?.available ? 'No adjacent rival' : 'Waiting for class gap and pace');
+      setDetailLines(side, battles?.available ? 'No adjacent rival' : 'Waiting for class gap and pace');
       if (card) {
         card.classList.remove('good', 'bad');
         card.classList.add('neutral');
@@ -577,15 +748,38 @@ function renderAdjacentClassBattles(summary) {
     }
     if (battles?.mode === 'qualifying') {
       setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · Best Δ ${displayDelta(numericMs(item.bestLapDeltaMs))}`);
-      setText(`battle-${side}-detail`, `Their best ${formatMs(numericMs(item.rivalBestLapMs))} · our best ${formatMs(numericMs(item.ourBestLapMs))}`);
+      setDetailLines(
+        side,
+        `Their best ${formatMs(numericMs(item.rivalBestLapMs))}`,
+        `Our best ${formatMs(numericMs(item.ourBestLapMs))}`,
+        'Qualifying comparison'
+      );
       if (card) {
         card.classList.remove('good', 'bad', 'neutral');
         card.classList.add(item.trendState || 'neutral');
       }
       return;
     }
-    setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · Last Δ ${item.lastLapDeltaLabel}`);
-    setText(`battle-${side}-detail`, `Gap ${item.gapLabel} · ${item.catchInfo}`);
+    if (item.suppressed) {
+      setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · In pit`);
+      setDetailLines(
+        side,
+        `Last lap Δ ${item.lastLapDeltaLabel || '—'}`,
+        item.trendLabel || `#${item.row?.carNumber || '?'} remains in pit`,
+        item.predictionLabel || `Prediction paused after ${item.rivalPitLaps} of our laps`
+      );
+    } else {
+      setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · Gap ${item.gapLabel}`);
+      // New summaries provide explicit labels. catchInfo remains a fallback for
+      // race folders saved before the three-line battle-card layout existed.
+      const fallbackParts = String(item.catchInfo || '').split(' · ');
+      setDetailLines(
+        side,
+        `Last lap Δ ${item.lastLapDeltaLabel || '—'}`,
+        item.trendLabel || fallbackParts.slice(0, 2).join(' · '),
+        item.predictionLabel || fallbackParts.slice(2).join(' · ') || 'No catch prediction available'
+      );
+    }
     if (card) {
       card.classList.remove('good', 'bad', 'neutral');
       card.classList.add(item.trendState || 'neutral');
@@ -614,7 +808,7 @@ function projectionLabel(projection) {
 // Renders pit window status, required-stop progress, next allowed pit time, and
 // after-pit class projection. All rule calculations come from pitstopPlanner.
 function renderPitstopPlan(plan) {
-  const pitWindow = document.querySelector('.pit-window');
+  const pitWindow = $('pit-window');
   if ($('open-pit-setup')) {
     $('open-pit-setup').disabled = pitSetupLocked();
     $('open-pit-setup').title = pitSetupLocked() ? 'Stop live collection before changing fixed pitstop setup' : '';
@@ -625,13 +819,15 @@ function renderPitstopPlan(plan) {
     setText('pit-projection', '—');
     setText('pit-stops-summary', `0/${$('pit-required-input')?.value || '2'}`);
     setText('pit-detail', 'Waiting for race clock and class gaps.');
-    if (pitWindow) pitWindow.classList.remove('open', 'soon', 'closed', 'urgent');
+    if (pitWindow) pitWindow.classList.remove('open', 'soon', 'closed', 'urgent', 'complete');
     return;
   }
 
   setText('pit-status', plan.label || plan.status);
   setText('pit-stops-summary', `${plan.completedPitStops}/${plan.rules?.requiredPitStops ?? $('pit-required-input')?.value ?? '2'}`);
-  setText('pit-next', plan.canPitNow ? 'Now' : (Number.isFinite(plan.waitMs) ? pitstopPlanner.formatDuration(plan.waitMs) : 'Closed'));
+  setText('pit-next', plan.requirementsComplete
+    ? (plan.canPitNow ? 'Optional' : 'Closed')
+    : plan.canPitNow ? 'Now' : (Number.isFinite(plan.waitMs) ? pitstopPlanner.formatDuration(plan.waitMs) : 'Closed'));
   setText('pit-projection', projectionLabel(plan.projection));
   const detailParts = [
     Number.isFinite(plan.clock?.elapsedMs) ? `Elapsed ${pitstopPlanner.formatDuration(plan.clock.elapsedMs)}` : '',
@@ -645,7 +841,7 @@ function renderPitstopPlan(plan) {
   setText('pit-detail', detailParts.join(' · '));
 
   if (pitWindow) {
-    pitWindow.classList.remove('open', 'soon', 'closed', 'urgent');
+    pitWindow.classList.remove('open', 'soon', 'closed', 'urgent', 'complete');
     pitWindow.classList.add(plan.status || 'closed');
   }
   const progress = $('pit-progress');
@@ -749,12 +945,13 @@ function render(state) {
   currentState = state || {};
   const rows = currentState.rows || [], history = currentState.lapHistory || [];
   setStatus(currentState.status, currentState.message);
-  updateSession(currentState.session || {});
+  updateSession(currentState.session || {}, rows.length > 0);
   $('row-count').textContent = String(rows.length);
   $('history-count').textContent = String(history.length);
   $('last-update').textContent = currentState.lastSuccessAt ? new Date(currentState.lastSuccessAt).toLocaleTimeString() : '—';
-  renderFollowed(rows);
   const activeAnalytics = analyticsForActiveCar(currentState.analyticsSummary || null);
+  renderFollowed(rows, activeAnalytics?.timingHighlights || null);
+  renderLapStrip(currentState, activeAnalytics?.timingHighlights || null);
   syncSessionMode(activeAnalytics?.sessionMode || currentSettings?.sessionMode || 'race');
   renderSectorAnalytics(activeAnalytics, rows, predictionForActiveCar(currentState));
   renderDriverAndClassComparisons(activeAnalytics, rows);
@@ -865,7 +1062,7 @@ async function editReferenceTime(button) {
     sector3Ms: 'reference-sector3-ms'
   };
   if (!key || !inputByKey[key]) return;
-  const card = button.closest('.metric-box');
+  const card = button.closest('.metric-box, .timing-row');
   if (!card || card.querySelector('.ref-edit-input')) return;
   const currentMs = msFromHiddenInput(inputByKey[key]);
   const editor = document.createElement('input');
@@ -947,6 +1144,7 @@ async function init() {
   if (fixedDashboardCar) document.title = `Race Engineer Dashboard - Car #${fixedDashboardCar}`;
   $('storage-folder').value = currentSettings.storageFolder || '';
   if ($('comparison-car')) $('comparison-car').value = currentSettings.comparisonCar || '';
+  if ($('comparison-xic-car')) $('comparison-xic-car').value = currentSettings.comparisonCar || '';
   syncReferenceInputs(currentSettings);
   syncSessionMode(currentSettings.sessionMode || 'race');
   populatePitstopCircuits();
@@ -987,6 +1185,12 @@ async function init() {
     render(currentState);
   });
   $('open-setup')?.addEventListener('click', () => showSetup(true));
+  $('comparison-xic-car')?.addEventListener('change', async () => {
+    const comparisonCar = String($('comparison-xic-car').value || '').trim();
+    if ($('comparison-car')) $('comparison-car').value = comparisonCar;
+    currentSettings = await window.liveTiming.setSettings({ comparisonCar });
+    render(currentState);
+  });
   $('export')?.addEventListener('click', async () => { const result = await window.liveTiming.exportCurrent(); alert(`Exported:\n${result.csvPath}\n${result.jsonPath}\n${result.historyPath || ''}`); });
 
   // Persist settings immediately when hidden inputs change. If new settings are

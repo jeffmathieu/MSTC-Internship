@@ -8,6 +8,7 @@ const {
   estimateAverageLapMs,
   raceClockFromSession,
   buildPitstopPlan,
+  projectFromConfirmedGaps,
   projectClassAfterPit,
   timeUntilNextAllowedPit,
   latestSafePitElapsedMsForRemainingStops,
@@ -32,6 +33,41 @@ const classRows = [
   { position: 2, classPosition: 2, carNumber: 33, className: 'CC', team: 'Us', lapNumber: 20, interval: '10.000' },
   { position: 3, classPosition: 3, carNumber: 56, className: 'CC', team: 'Chaser', lapNumber: 20, interval: '20.000' }
 ];
+
+const confirmedProjection = projectFromConfirmedGaps(classRows, '33', 75000, {
+  classCoordinates: [
+    { carNumber: '10', relation: 'ahead', gapToUsMs: -10000, lapGap: 0, estimated: false },
+    { carNumber: '33', gapToUsMs: 0, estimated: false },
+    { carNumber: '56', relation: 'behind', gapToUsMs: 90000, lapGap: 0, estimated: false }
+  ]
+});
+assert.strictEqual(confirmedProjection.gapSource, 'confirmed-gap');
+assert.strictEqual(confirmedProjection.projectedClassPosition, 2);
+assert.strictEqual(confirmedProjection.carAhead.carNumber, '10');
+assert.strictEqual(confirmedProjection.carAhead.projectedGapToUsMs, -85000);
+assert.strictEqual(confirmedProjection.carBehind.carNumber, '56');
+assert.strictEqual(confirmedProjection.carBehind.projectedGapToUsMs, 15000);
+assert.strictEqual(projectFromConfirmedGaps(classRows, '33', 75000, null), null);
+assert.strictEqual(projectFromConfirmedGaps(classRows, '33', Number.NaN, { classCoordinates: [] }), null);
+assert.strictEqual(projectFromConfirmedGaps(classRows, '33', 75000, {
+  classCoordinates: [
+    { carNumber: '33', gapToUsMs: 0 },
+    { carNumber: '56', gapToUsMs: null }
+  ]
+}), null, 'incomplete confirmed coordinates fall back instead of hiding a rival');
+assert.strictEqual(projectFromConfirmedGaps(classRows, '999', 75000, {
+  classCoordinates: [{ carNumber: '33', gapToUsMs: 0 }]
+}), null, 'projection requires our car in the coordinate set');
+const estimatedConfirmedProjection = projectFromConfirmedGaps(classRows, '33', 75000, {
+  classCoordinates: [
+    { carNumber: '10', relation: 'ahead', gapToUsMs: -250000, lapGap: 2, estimated: true },
+    { carNumber: '33', gapToUsMs: 0, estimated: false },
+    { carNumber: '56', relation: 'behind', gapToUsMs: 250000, lapGap: 2, estimated: true }
+  ]
+});
+assert.strictEqual(estimatedConfirmedProjection.gapSource, 'confirmed-gap-estimated');
+assert.strictEqual(estimatedConfirmedProjection.carAhead.lapDeltaToUs, 2);
+assert.strictEqual(estimatedConfirmedProjection.carBehind.lapDeltaToUs, -2);
 
 // Parsing and formatting helpers: these protect the input/output contract used
 // by both the UI and the planner.
@@ -311,8 +347,23 @@ const finishClosed = buildPitstopPlan({
   pitState: { completedPitStops: 2 },
   rules
 });
-assert.strictEqual(finishClosed.status, 'closed');
+assert.strictEqual(finishClosed.status, 'complete');
+assert.strictEqual(finishClosed.label, 'Mandatory pitstops complete');
+assert.strictEqual(finishClosed.requirementsComplete, true);
 assert.strictEqual(finishClosed.canPitNow, false);
+assert.strictEqual(finishClosed.latestSafePitElapsedMs, null);
+assert.strictEqual(finishClosed.mustPitSoonMs, null);
+assert.strictEqual(finishClosed.projection.available, true, 'pit-loss projection remains active after mandatory stops');
+
+const requirementsCompleteOpen = buildPitstopPlan({
+  rows: classRows,
+  session: { timeToGo: '1:20:00' },
+  followedCarNumber: '33',
+  pitState: { completedPitStops: 2 },
+  rules
+});
+assert.strictEqual(requirementsCompleteOpen.status, 'complete');
+assert.strictEqual(requirementsCompleteOpen.canPitNow, true, 'optional stop remains possible in an open pit window');
 
 // Strategy can become urgent before the final red zone if there is no longer
 // enough time to complete all required stops with cooldown spacing.

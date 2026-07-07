@@ -50,21 +50,25 @@ function setupAutoUpdates({ app, dialog, autoUpdater, getParentWindow = () => nu
   });
   autoUpdater.on('update-downloaded', async (info) => {
     logger.info(`[auto-update] Update downloaded: ${info?.version || 'unknown version'}.`);
-    const options = {
-      type: 'info',
-      buttons: ['Restart now', 'Later'],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true,
-      title: 'Update ready',
-      message: `MSTC Race Engineer Dashboard ${info?.version || ''} is ready to install.`,
-      detail: 'Restart now to install the update, or choose Later to keep working. It will install when the app closes.'
-    };
-    const parent = getParentWindow();
-    const result = parent
-      ? await dialog.showMessageBox(parent, options)
-      : await dialog.showMessageBox(options);
-    if (result.response === 0) autoUpdater.quitAndInstall();
+    try {
+      const options = {
+        type: 'info',
+        buttons: ['Restart now', 'Later'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+        title: 'Update ready',
+        message: `MSTC Race Engineer Dashboard ${info?.version || ''} is ready to install.`,
+        detail: 'Restart now to install the update, or choose Later to keep working. It will install when the app closes.'
+      };
+      const parent = getParentWindow();
+      const result = parent
+        ? await dialog.showMessageBox(parent, options)
+        : await dialog.showMessageBox(options);
+      if (result.response === 0) autoUpdater.quitAndInstall();
+    } catch (error) {
+      logger.error('[auto-update] Update install prompt failed:', error);
+    }
   });
 
   autoUpdater.checkForUpdates().catch((error) => logger.error('[auto-update] Update check failed:', error));

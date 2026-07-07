@@ -83,7 +83,7 @@ const unsafeItem = unsafeSummary.items.find((item) => String(item.row.carNumber)
 assert.strictEqual(unsafeItem.classGap.label, 'class gap unknown');
 assert.strictEqual(unsafeItem.battle.relativeGap, null);
 assert.ok(unsafeItem.battle.catchInfo.includes('#2 gaining'));
-assert.ok(unsafeItem.battle.catchInfo.includes('1.000s/lap'));
+assert.ok(unsafeItem.battle.catchInfo.includes('they gain 1.000s/l'));
 assert.ok(!unsafeItem.battle.catchInfo.includes('laps ·'));
 
 const numericOtherClassChain = [
@@ -98,6 +98,36 @@ assert.strictEqual(numericChainBattle.behind.lastLapDeltaMs, -1000);
 assert.strictEqual(numericChainBattle.behind.trendState, 'bad');
 assert.strictEqual(numericChainBattle.lapWindow, 10);
 assert.strictEqual(overallRelativeGap(numericOtherClassChain, numericOtherClassChain[0], { ...numericOtherClassChain[2], lapNumber: 19 }), null);
+
+const confirmedChainBattle = buildAdjacentClassBattles(numericOtherClassChain, history, 13, {
+  lapWindow: 5,
+  confirmedGapView: {
+    behind: {
+      rivalCarNumber: '2',
+      gapMs: 8500,
+      lapGap: 0,
+      estimated: false,
+      source: 'confirmed-interval-chain',
+      confirmedAt: '2026-07-05T10:00:00.000Z'
+    }
+  }
+});
+assert.strictEqual(confirmedChainBattle.behind.relativeGap, 8500);
+assert.strictEqual(confirmedChainBattle.behind.gapSource, 'confirmed-interval-chain');
+assert.strictEqual(confirmedChainBattle.behind.gapConfirmedAt, '2026-07-05T10:00:00.000Z');
+const suppressedChainBattle = buildAdjacentClassBattles(numericOtherClassChain, history, 13, {
+  confirmedGapView: {
+    behind: { rivalCarNumber: '2', gapMs: 8500, lapGap: 0, suppressed: true, rivalInPit: true, rivalPitLaps: 5 }
+  }
+});
+assert.strictEqual(suppressedChainBattle.behind.suppressed, true);
+assert.strictEqual(suppressedChainBattle.behind.lapsToCatch, null);
+assert.strictEqual(suppressedChainBattle.behind.catchInfo, '#2 remains in pit');
+const unavailableConfirmedBattle = buildAdjacentClassBattles(numericOtherClassChain, history, 13, {
+  confirmedGapView: { behind: { rivalCarNumber: '2', gapMs: null, lapGap: null, source: 'unavailable' } }
+});
+assert.strictEqual(unavailableConfirmedBattle.behind.relativeGap, null, 'volatile live gap is not reused while confirmed memory is incomplete');
+assert.strictEqual(unavailableConfirmedBattle.behind.gapLabel, 'gap unknown');
 
 const classRows = classSortedRows(sameClassRows, 'LMP3');
 assert.deepStrictEqual(classSortedRows(null, 'LMP3'), []);
@@ -128,13 +158,17 @@ assert.strictEqual(chaserItem.classGap.label, '12.000s');
 assert.strictEqual(chaserItem.battle.relativeGap, 12000);
 assert.strictEqual(chaserItem.battle.lapsToCatch, 12);
 assert.ok(chaserItem.battle.catchInfo.includes('#2 catches us'));
+assert.ok(chaserItem.battle.catchInfo.includes('they gain 1.000s/l'));
 assert.ok(chaserItem.battle.catchInfo.includes('12.0 laps'));
+assert.strictEqual(chaserItem.battle.trendLabel, '#2 catches us · they gain 1.000s/l');
+assert.strictEqual(chaserItem.battle.predictionLabel, 'Expected in 12.0 laps · 25.2 min');
 
 const followedBehindSummary = buildClassBattleSummary(sameClassRows, history, 2);
 const leaderItem = followedBehindSummary.items.find((item) => String(item.row.carNumber) === '13');
 assert.strictEqual(leaderItem.battle.relation, 'ahead');
 assert.strictEqual(leaderItem.battle.lapsToCatch, 12);
 assert.ok(leaderItem.battle.catchInfo.includes('we catch #13'));
+assert.ok(leaderItem.battle.catchInfo.includes('we gain 1.000s/l'));
 
 const slowerBehindSummary = buildClassBattleSummary(sameClassRows, [
   { carNumber: 13, lapNumber: 1, lastLapMs: 125000 },
@@ -142,6 +176,15 @@ const slowerBehindSummary = buildClassBattleSummary(sameClassRows, [
 ], 2);
 const slowerLeaderItem = slowerBehindSummary.items.find((item) => String(item.row.carNumber) === '13');
 assert.strictEqual(slowerLeaderItem.battle.estimate, 'we are not catching');
+assert.ok(slowerLeaderItem.battle.catchInfo.includes('we lose 1.000s/l'));
+assert.strictEqual(slowerLeaderItem.battle.predictionLabel, 'No catch predicted at current pace');
+
+const slowerTrailingCar = buildAdjacentClassBattles(sameClassRows, [
+  { carNumber: 13, lapNumber: 1, lastLapMs: 125000 },
+  { carNumber: 2, lapNumber: 1, lastLapMs: 126000 }
+], 13).behind;
+assert.strictEqual(slowerTrailingCar.estimate, 'they are not catching');
+assert.ok(slowerTrailingCar.catchInfo.includes('they lose 1.000s/l'));
 
 const missingSummary = buildClassBattleSummary(sameClassRows, history, 999);
 assert.strictEqual(missingSummary.followed, null);

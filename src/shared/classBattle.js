@@ -255,26 +255,34 @@ function recentAverageForCar(history, carNumber, lapWindow = 10) {
 
 // Builds one catch/being-caught estimate versus a class rival. The output keeps
 // raw numbers and a display string so future UI can choose either.
-function buildBattleItem({ rows, classRows, followed, row, history, lapWindow }) {
+function buildBattleItem({ rows, classRows, followed, row, history, lapWindow, confirmedGap = null }) {
   const ourAvg = recentAverageForCar(history, followed.carNumber, lapWindow) ?? parseTimeToMs(followed.lastLap);
   const theirAvg = recentAverageForCar(history, row.carNumber, lapWindow) ?? parseTimeToMs(row.lastLap);
   const relation = rowSortNumber(row.classPosition) < rowSortNumber(followed.classPosition) ? 'ahead' : 'behind';
   const representativeLapMs = Number.isFinite(ourAvg) && Number.isFinite(theirAvg)
     ? (ourAvg + theirAvg) / 2
     : ourAvg ?? theirAvg;
-  const relativeGap = overallRelativeGap(rows, followed, row, representativeLapMs);
-  const lapGap = lapGapBetween(rows, followed, row);
+  const hasConfirmedGap = confirmedGap !== null;
+  const relativeGap = hasConfirmedGap
+    ? (Number.isFinite(confirmedGap.gapMs) ? confirmedGap.gapMs : null)
+    : overallRelativeGap(rows, followed, row, representativeLapMs);
+  const lapGap = hasConfirmedGap
+    ? (Number.isFinite(confirmedGap.lapGap) ? confirmedGap.lapGap : null)
+    : lapGapBetween(rows, followed, row);
   const ourLastLapMs = parseTimeToMs(followed.lastLap) ?? numberOrNull(followed.lastLapMs);
   const theirLastLapMs = parseTimeToMs(row.lastLap) ?? numberOrNull(row.lastLapMs);
   const lastLapDeltaMs = Number.isFinite(ourLastLapMs) && Number.isFinite(theirLastLapMs) ? theirLastLapMs - ourLastLapMs : null;
   let deltaPerLap = null;
   let lapsToCatch = null;
   let minutesToCatch = null;
-  let estimate = 'class gap unknown';
+  const suppressed = Boolean(confirmedGap?.suppressed);
+  let estimate = suppressed ? `#${row.carNumber} remains in pit` : 'class gap unknown';
   let estimatedGapMs = null;
-  let gapIsEstimate = usesCumulativeGap(rows) && (parseLapGap(followed.gap) !== null || parseLapGap(row.gap) !== null || (numberOrNull(followed.lapNumber) !== numberOrNull(row.lapNumber)));
+  let gapIsEstimate = confirmedGap
+    ? Boolean(confirmedGap.estimated)
+    : usesCumulativeGap(rows) && (parseLapGap(followed.gap) !== null || parseLapGap(row.gap) !== null || (numberOrNull(followed.lapNumber) !== numberOrNull(row.lapNumber)));
 
-  if (Number.isFinite(ourAvg) && Number.isFinite(theirAvg)) {
+  if (!suppressed && Number.isFinite(ourAvg) && Number.isFinite(theirAvg)) {
     // For an ahead rival, its pace estimates the time represented by its lead.
     // For a behind rival, our pace estimates the distance represented by our
     // lead. This is intentionally approximate because lap counters contain no
@@ -303,13 +311,27 @@ function buildBattleItem({ rows, classRows, followed, row, history, lapWindow })
     }
   }
 
-  const deltaLabel = Number.isFinite(deltaPerLap) ? `${formatSeconds(Math.abs(deltaPerLap))}/lap` : '';
+  // Name the car whose movement matters in each card: "we" relative to the
+  // car ahead, and "they" for the car behind. In both formulas a positive
+  // delta means that named subject closes the gap; a negative delta opens it.
+  const trendActor = relation === 'ahead' ? 'we' : 'they';
+  const deltaLabel = Number.isFinite(deltaPerLap) && deltaPerLap !== 0
+    ? `${trendActor} ${deltaPerLap > 0 ? 'gain' : 'lose'} ${formatSeconds(Math.abs(deltaPerLap))}/l`
+    : '';
   const catchInfo = [
     estimate,
     deltaLabel,
     Number.isFinite(lapsToCatch) ? `${gapIsEstimate ? 'est. ' : ''}${lapsToCatch.toFixed(1)} laps` : '',
     Number.isFinite(minutesToCatch) ? `${gapIsEstimate ? 'est. ' : ''}${minutesToCatch.toFixed(1)} min` : ''
   ].filter(Boolean).join(' · ');
+  // Keep the dashboard copy structured. Views can place the pace statement
+  // and catch estimate on separate lines without parsing catchInfo.
+  const trendLabel = [estimate, deltaLabel].filter(Boolean).join(' · ');
+  const predictionLabel = Number.isFinite(lapsToCatch)
+    ? `${gapIsEstimate ? 'Estimated' : 'Expected'} in ${lapsToCatch.toFixed(1)} laps${Number.isFinite(minutesToCatch) ? ` · ${minutesToCatch.toFixed(1)} min` : ''}`
+    : suppressed
+      ? `Prediction paused after ${confirmedGap?.rivalPitLaps || 0} of our laps`
+      : 'No catch predicted at current pace';
   const trendState = !Number.isFinite(deltaPerLap) || deltaPerLap === 0
     ? 'neutral'
     : relation === 'ahead'
@@ -336,7 +358,14 @@ function buildBattleItem({ rows, classRows, followed, row, history, lapWindow })
     minutesToCatch,
     estimate,
     catchInfo,
-    trendState
+    trendLabel,
+    predictionLabel,
+    trendState,
+    suppressed,
+    gapSource: confirmedGap?.source || (Number.isFinite(relativeGap) ? 'live-poll' : 'unavailable'),
+    gapConfirmedAt: confirmedGap?.confirmedAt || null,
+    rivalInPit: Boolean(confirmedGap?.rivalInPit),
+    rivalPitLaps: confirmedGap?.rivalPitLaps || 0
   };
 }
 
@@ -349,13 +378,18 @@ function buildClassBattleSummary(rows, history, followedCarNumber, options = {})
     return { followed: null, className: '', classRows: [], items: [] };
   }
 
-  const lapWindow = options.lapWindow || 10;
+  const lapWindow = options.lapWindow || 5;
+  const confirmedView = options.confirmedGapView || null;
   const classRows = classSortedRows(rows, followed.className);
   const items = classRows.map((row) => {
     const classGap = classGapToPrevious(rows, classRows, row);
+    const relation = rowSortNumber(row.classPosition) < rowSortNumber(followed.classPosition) ? 'ahead' : 'behind';
+    const confirmedGap = confirmedView?.[relation]?.rivalCarNumber === String(row.carNumber)
+      ? confirmedView[relation]
+      : null;
     const battle = String(row.carNumber) === String(followed.carNumber)
       ? null
-      : buildBattleItem({ rows, classRows, followed, row, history, lapWindow });
+      : buildBattleItem({ rows, classRows, followed, row, history, lapWindow, confirmedGap });
     return { row, classGap, battle };
   });
 
@@ -367,14 +401,14 @@ function buildClassBattleSummary(rows, history, followedCarNumber, options = {})
 // without repeating gap or catch calculations.
 function buildAdjacentClassBattles(rows, history, followedCarNumber, options = {}) {
   const summary = buildClassBattleSummary(rows, history, followedCarNumber, options);
-  if (!summary.followed) return { available: false, ahead: null, behind: null, lapWindow: options.lapWindow || 10 };
+  if (!summary.followed) return { available: false, ahead: null, behind: null, lapWindow: options.lapWindow || 5 };
   const ourIndex = summary.classRows.findIndex((row) => String(row.carNumber) === String(followedCarNumber));
   const itemFor = (row) => summary.items.find((item) => String(item.row.carNumber) === String(row?.carNumber))?.battle || null;
   return {
     available: true,
     className: summary.className,
     followedCarNumber: String(followedCarNumber),
-    lapWindow: options.lapWindow || 10,
+    lapWindow: options.lapWindow || 5,
     ahead: itemFor(ourIndex > 0 ? summary.classRows[ourIndex - 1] : null),
     behind: itemFor(ourIndex >= 0 && ourIndex < summary.classRows.length - 1 ? summary.classRows[ourIndex + 1] : null)
   };

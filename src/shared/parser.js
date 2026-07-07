@@ -341,8 +341,8 @@ function parseSessionInfo(snapshot = {}) {
     if (!session.timeToGo) session.timeToGo = cleanText(toGo[1]);
     session.sessionName = cleanText(toGo[2]);
   } else if (!session.timeToGo) {
-    const simpleToGo = text.match(/To go:\s*([^\n\r]+)/i);
-    if (simpleToGo) session.timeToGo = cleanText(simpleToGo[1]).split(/\s{2,}/)[0];
+    const simpleToGo = text.match(/To go:\s*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)/i);
+    if (simpleToGo) session.timeToGo = cleanText(simpleToGo[1]);
   }
 
   const flagMatch = text.match(/(Green flag|Red flag|Yellow flag|Safety car|Full course yellow|Code 60|Finished flag)/i);

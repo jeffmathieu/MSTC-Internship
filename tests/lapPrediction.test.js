@@ -226,4 +226,11 @@ prediction = buildLapPrediction({
 });
 assert.strictEqual(prediction.reason, 'Waiting for sector 1');
 
+prediction = buildLapPrediction({
+  history: [driverLap('Red Flag Driver', 1, [30000, 40000, 30000])],
+  rows: [liveRow({ driver: 'Red Flag Driver', sector1: '29.000', sector1Flag: 'Red flag' })],
+  carNumber: 33
+});
+assert.strictEqual(prediction.reason, 'Waiting for sector 1');
+
 console.log('Lap prediction tests passed.');

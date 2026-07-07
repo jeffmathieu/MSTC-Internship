@@ -32,6 +32,11 @@ function formatTime(ms) {
   return `${minutes}:${String(seconds).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
 }
 
+function formatDelta(ms) {
+  if (!Number.isFinite(ms)) return '';
+  return `${ms >= 0 ? '+' : '-'}${(Math.abs(ms) / 1000).toFixed(3)}s`;
+}
+
 function finiteValues(values) {
   return values.filter(Number.isFinite);
 }
@@ -129,7 +134,10 @@ function drawLineChart(context, width, height, chart, viewport = { start: 0, end
       context.beginPath();
       context.arc(x, y, series.highlight ? 4 : 3, 0, Math.PI * 2);
       context.fill();
-      hitPoints.push({ x, y, text: `${series.name} · ${point.label || `Lap ${point.x}`} · ${formatTime(point.y)}${neutralized ? ' · FCY/SC' : ''}` });
+      const delta = Number.isFinite(point.deltaToOurCarMs)
+        ? ` · Δ to our car ${formatDelta(point.deltaToOurCarMs)}`
+        : '';
+      hitPoints.push({ x, y, text: `${formatTime(point.y)}${delta}${neutralized ? ' · FCY/SC' : ''}` });
     });
   });
 
@@ -248,10 +256,6 @@ function renderPanel(panel) {
 function renderGraphs(state) {
   currentState = state || {};
   sessionMode = currentState.analyticsSummary?.sessionMode || sessionMode;
-  document.getElementById('graphs-session').textContent = currentState.session?.sessionName || currentState.session?.pageTitle || 'Waiting for session data';
-  document.getElementById('graphs-car').textContent = followedCarNumber || '—';
-  document.getElementById('graphs-lap-count').textContent = String((currentState.lapHistory || []).length);
-  document.getElementById('graphs-updated').textContent = currentState.lastSuccessAt ? new Date(currentState.lastSuccessAt).toLocaleTimeString() : '—';
   document.querySelectorAll('.chart-panel').forEach(renderPanel);
 }
 
@@ -261,6 +265,7 @@ async function initGraphs() {
   sessionMode = settings.sessionMode || 'race';
   const queryCar = new URLSearchParams(window.location.search).get('car');
   followedCarNumber = String(queryCar || settings.followedCar || '');
+  document.title = `Race Analysis Graphs - Car #${followedCarNumber || '—'}`;
   document.querySelectorAll('.chart-panel').forEach((panel, index) => {
     panel._viewport = { start: 0, end: 1 };
     const select = panel.querySelector('select');

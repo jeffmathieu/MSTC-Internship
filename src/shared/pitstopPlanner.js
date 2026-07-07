@@ -473,6 +473,46 @@ function overallGapsBehindFollowed(rows, followedCarNumber, averageLapMs = null)
   return gaps;
 }
 
+// Projects pit rejoin from start/finish-confirmed class coordinates. Coordinates
+// are signed relative to us now (negative ahead, positive behind); losing pit
+// time shifts every rival by -pitLoss relative to our projected position.
+function projectFromConfirmedGaps(rows, followedCarNumber, pitLossMs, confirmedGapView) {
+  const coordinates = confirmedGapView?.classCoordinates;
+  if (!Array.isArray(coordinates) || !coordinates.length || !Number.isFinite(pitLossMs)) return null;
+  const rowByCar = new Map((rows || []).map((row) => [String(row.carNumber), row]));
+  const items = coordinates.map((coordinate) => {
+    const carNumber = String(coordinate.carNumber || '');
+    const row = rowByCar.get(carNumber) || {};
+    const isOurCar = carNumber === String(followedCarNumber);
+    if (!isOurCar && !Number.isFinite(coordinate.gapToUsMs)) return null;
+    return {
+      carNumber,
+      team: row.team || '',
+      driver: row.driver || '',
+      currentClassPosition: row.classPosition || null,
+      lapDeltaToUs: Number.isFinite(coordinate.lapGap)
+        ? (coordinate.relation === 'ahead' ? coordinate.lapGap : -coordinate.lapGap)
+        : null,
+      projectedGapToUsMs: isOurCar ? 0 : coordinate.gapToUsMs - pitLossMs,
+      estimatedFromLapGap: Boolean(coordinate.estimated),
+      isOurCar
+    };
+  }).filter(Boolean).sort((a, b) => a.projectedGapToUsMs - b.projectedGapToUsMs);
+  // A partial coordinate set can silently promote us past an unknown rival.
+  // Reject it and let projectClassAfterPit use its labelled fallback instead.
+  if (items.length !== coordinates.length) return null;
+  const ourIndex = items.findIndex((item) => item.isOurCar);
+  if (ourIndex < 0) return null;
+  return {
+    available: true,
+    projectedClassPosition: ourIndex + 1,
+    gapSource: items.some((item) => item.estimatedFromLapGap) ? 'confirmed-gap-estimated' : 'confirmed-gap',
+    carAhead: ourIndex > 0 ? items[ourIndex - 1] : null,
+    carBehind: ourIndex < items.length - 1 ? items[ourIndex + 1] : null,
+    items
+  };
+}
+
 // Predicts where our car would rejoin the class after losing pitLossMs.
 //
 // The first path uses the provider's overall DIFF/INT chain, which is the best
@@ -482,6 +522,8 @@ function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) 
   const { followed, rows: rowsInClass } = classRows(rows, followedCarNumber);
   if (!followed || !rowsInClass.length) return { available: false, reason: 'No class data yet', items: [] };
   const averageLapMs = estimateAverageLapMs(rowsInClass, options.averageLapMs);
+  const confirmedProjection = projectFromConfirmedGaps(rows, followedCarNumber, pitLossMs, options.confirmedGapView);
+  if (confirmedProjection) return { ...confirmedProjection, averageLapMs };
   if (usesCumulativeGap(rows)) {
     const cumulativeProjection = projectFromCumulativeGap(rows, rowsInClass, followed, pitLossMs, averageLapMs);
     if (cumulativeProjection) return cumulativeProjection;
@@ -636,31 +678,37 @@ function latestSafePitElapsedMsForRemainingStops({ clock, rules, pitState = {} }
 // Produces the full dashboard-facing pitstop object. Callers pass live rows,
 // session clock, current pit state, and rules; the returned object contains all
 // status labels, required-stop counts, timing windows, and after-pit projection.
-function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pitState = {}, rules = {}, fcyGapState = {} } = {}) {
+function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pitState = {}, rules = {}, fcyGapState = {}, confirmedGapView = null } = {}) {
   const normalizedRules = normalizeRules(rules);
   const clock = raceClockFromSession(session, normalizedRules);
   const windowState = timeUntilNextAllowedPit({ clock, rules: normalizedRules, pitState });
   const totalPitStops = Math.max(0, Number(pitState.completedPitStops) || 0);
   const completedPitStops = Math.max(0, Number(pitState.validCompletedPitStops ?? pitState.completedPitStops) || 0);
   const remainingRequiredStops = Math.max(0, normalizedRules.requiredPitStops - completedPitStops);
+  const requirementsComplete = remainingRequiredStops === 0;
   const averageLapMs = normalizedRules.averageLapMs || numberOrNull(pitState.averageLapMs);
   const nearWindowMs = averageLapMs ? averageLapMs * normalizedRules.nearWindowLaps : null;
-  const isNearlyOpen = !windowState.allowed && Number.isFinite(windowState.waitMs) && Number.isFinite(nearWindowMs) && windowState.waitMs <= nearWindowMs;
-  const latestSafePitElapsedMs = latestSafePitElapsedMsForRemainingStops({ clock, rules: normalizedRules, pitState });
+  const isNearlyOpen = !requirementsComplete && !windowState.allowed && Number.isFinite(windowState.waitMs) && Number.isFinite(nearWindowMs) && windowState.waitMs <= nearWindowMs;
+  const latestSafePitElapsedMs = requirementsComplete
+    ? null
+    : latestSafePitElapsedMsForRemainingStops({ clock, rules: normalizedRules, pitState });
   const mustPitSoonMs = latestSafePitElapsedMs !== null && clock.elapsedMs !== null ? latestSafePitElapsedMs - clock.elapsedMs : null;
   const isStrategyUrgent = remainingRequiredStops > 0 && Number.isFinite(mustPitSoonMs) && mustPitSoonMs <= 0;
   const pitLoss = pitLossForSession({ session, rules: normalizedRules, fcyGapState });
   const projection = Number.isFinite(pitLoss.pitLossMs)
-    ? { ...projectClassAfterPit(rows, followedCarNumber, pitLoss.pitLossMs, { averageLapMs }), provisional: pitLoss.provisional, fcyStatus: pitLoss.status }
+    ? { ...projectClassAfterPit(rows, followedCarNumber, pitLoss.pitLossMs, { averageLapMs, confirmedGapView }), provisional: pitLoss.provisional, fcyStatus: pitLoss.status }
     : { available: false, reason: pitLoss.reason, items: [], fcyStatus: pitLoss.status };
 
   let status = 'unknown';
-  if (isStrategyUrgent) status = 'urgent';
+  if (requirementsComplete) status = 'complete';
+  else if (isStrategyUrgent) status = 'urgent';
   else if (windowState.allowed) status = 'open';
   else if (isNearlyOpen) status = 'soon';
   else status = 'closed';
 
-  const label = status === 'open'
+  const label = status === 'complete'
+    ? 'Mandatory pitstops complete'
+    : status === 'open'
     ? 'Pit window open'
     : status === 'soon'
       ? `Pit window soon (${formatDuration(windowState.waitMs)})`
@@ -681,6 +729,7 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
     lastPitElapsedMs: numberOrNull(pitState.lastPitElapsedMs),
     validPitElapsedHistoryMs: (pitState.validPitElapsedHistoryMs || []).map(numberOrNull).filter(Number.isFinite),
     remainingRequiredStops,
+    requirementsComplete,
     latestSafePitElapsedMs,
     mustPitSoonMs,
     projection,
@@ -706,6 +755,7 @@ return {
   fcyRowSignatures,
   nextFcyGapState,
   pitLossForSession,
+  projectFromConfirmedGaps,
   projectClassAfterPit,
   timeUntilNextAllowedPit,
   latestSafePitElapsedMsForRemainingStops,

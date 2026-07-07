@@ -49,6 +49,16 @@ jobs:
           node-version: "24.x"
           cache: npm
 
+      - name: Setup Python for PDF reports
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: "src/main/reports/requirements.txt"
+
+      - name: Install PDF report dependencies
+        run: python -m pip install -r src/main/reports/requirements.txt
+
       - name: Install dependencies
         run: npm ci
 

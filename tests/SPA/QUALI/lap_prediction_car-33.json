@@ -1,0 +1,64 @@
+{
+  "available": true,
+  "carNumber": "33",
+  "driverName": "JANSSENS Robbe",
+  "predictedLapMs": 171723,
+  "actualLapMs": null,
+  "predictionDeltaMs": null,
+  "completedSectorCount": 2,
+  "label": "After S2",
+  "sampleSize": 10,
+  "sectors": [
+    {
+      "sectorNumber": 1,
+      "source": "live",
+      "valueMs": 50049,
+      "sampleCount": 1
+    },
+    {
+      "sectorNumber": 2,
+      "source": "live",
+      "valueMs": 76425,
+      "sampleCount": 2
+    },
+    {
+      "sectorNumber": 3,
+      "source": "average",
+      "valueMs": 45249,
+      "sampleCount": 1
+    }
+  ],
+  "averages": {
+    "driverName": "JANSSENS Robbe",
+    "carNumber": "33",
+    "sampleSize": 10,
+    "sectors": [
+      {
+        "sectorNumber": 1,
+        "sampleCount": 1,
+        "averageMs": 50629,
+        "values": [
+          50629
+        ]
+      },
+      {
+        "sectorNumber": 2,
+        "sampleCount": 2,
+        "averageMs": 81217,
+        "values": [
+          85254,
+          77180
+        ]
+      },
+      {
+        "sectorNumber": 3,
+        "sampleCount": 1,
+        "averageMs": 45249,
+        "values": [
+          45249
+        ]
+      }
+    ]
+  },
+  "updatedAt": "2026-07-03T13:12:02.094Z"
+}

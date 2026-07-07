@@ -66,17 +66,33 @@ function isGreenFlag(value) {
 // live row. Unchanged values keep their original flag until the completed lap
 // is stored, even if race control changes later in the same lap.
 function captureSectorFlags(row, previous = null, currentFlag = '') {
-  const sameLapObservation = previous && previous.lastLap === row.lastLap;
   const annotated = { ...row };
+  const sectorValues = [1, 2, 3].map((sectorNumber) => row[`sector${sectorNumber}`]);
+  const activeSectorNumber = sectorValues.findIndex((value) => !value) + 1;
   [1, 2, 3].forEach((sectorNumber) => {
     const valueKey = `sector${sectorNumber}`;
     const flagKey = `sector${sectorNumber}Flag`;
     const eligibleKey = `sector${sectorNumber}Eligible`;
-    if (!row[valueKey]) return;
-    const unchangedSector = sameLapObservation && previous[valueKey] === row[valueKey];
-    const observedFlag = row[flagKey] || (unchangedSector ? previous[flagKey] : currentFlag);
+    const previousValue = previous?.[valueKey] || '';
+    const previousFlag = previous?.[flagKey] || '';
+    const sameObservedValue = Boolean(row[valueKey]) && row[valueKey] === previousValue;
+    const completedPendingSector = Boolean(row[valueKey]) && !previousValue && Boolean(previousFlag);
+    const isActiveSector = activeSectorNumber === sectorNumber;
+
+    // A neutralization can begin before the active sector has a visible time.
+    // Persist that pending flag now, then keep it when the sector time appears.
+    // Once any part of a sector was neutralized, a later green flag must not
+    // make that sector eligible again.
+    const pendingNeutralization = isActiveSector && isNeutralizedFlag(previousFlag);
+    let observedFlag = row[flagKey] || '';
+    if (!observedFlag && isNeutralizedFlag(previousFlag) && (sameObservedValue || completedPendingSector || pendingNeutralization)) observedFlag = previousFlag;
+    if (!observedFlag && sameObservedValue) observedFlag = previousFlag;
+    if (!observedFlag && isNeutralizedFlag(currentFlag) && (isActiveSector || row[valueKey])) observedFlag = currentFlag;
+    if (!observedFlag && completedPendingSector) observedFlag = previousFlag;
+    if (!observedFlag && (isActiveSector || row[valueKey])) observedFlag = currentFlag;
+    if (!row[valueKey] && !isActiveSector) return;
     annotated[flagKey] = observedFlag || '';
-    if (row[eligibleKey] === '' || row[eligibleKey] === null || row[eligibleKey] === undefined) {
+    if (row[eligibleKey] === '' || row[eligibleKey] === null || row[eligibleKey] === undefined || isNeutralizedFlag(observedFlag)) {
       annotated[eligibleKey] = observedFlag ? String(!isNeutralizedFlag(observedFlag)) : '';
     }
   });
@@ -138,31 +154,78 @@ function pitAffectedLap(lap) {
   return lap?.isPitLap === true || /^(inlap|outlap)$/i.test(String(lap?.lapPhase || ''));
 }
 
+function rowShowsInPit(lap) {
+  return /^(in|in pit|pit)$/i.test(String(lap?.state || '').trim());
+}
+
 // Annotates old and new history without requiring a storage migration. A PIT
 // counter increase marks the just-completed lap as the pit/inlap and the next
 // completed lap as the outlap. Both remain stored but are excluded from pace.
 function annotatePitPhases(laps) {
   const stateByCar = new Map();
-  return laps.map((lap) => {
-    const state = stateByCar.get(lap.carNumber) || { previousPitCount: null, nextIsOutlap: false };
+  const annotated = [];
+  laps.forEach((lap) => {
+    const state = stateByCar.get(lap.carNumber) || { previousPitCount: null, nextIsOutlap: false, previousIndex: null, previousDriver: '', previousWasInPit: false };
     const pitCount = pitCountFromLap(lap);
     let lapPhase = lap.lapPhase;
     let isPitLap = lap.isPitLap;
+    const driverName = String(lap.driverName || '').trim();
+    const driverChanged = Boolean(driverName && state.previousDriver && driverName !== state.previousDriver);
 
-    if (!lapPhase && state.nextIsOutlap) {
+    const explicitlyInPit = rowShowsInPit(lap);
+    const pitCountIncreased = pitCount !== null && state.previousPitCount !== null && pitCount > state.previousPitCount;
+    const driverChangedAtPit = driverChanged && (pitCountIncreased || state.previousWasInPit);
+    if (driverChangedAtPit && state.previousIndex !== null) {
+      // A completed lap attributed to a new driver can only follow a stop. The
+      // previous driver's final lap is the inlap and this first new-driver lap
+      // is the outlap. This is stronger evidence than provider PIT counters,
+      // which often increment only after the car has already left the pits.
+      annotated[state.previousIndex] = {
+        ...annotated[state.previousIndex],
+        lapPhase: 'inlap',
+        isPitLap: true
+      };
+      lapPhase = 'outlap';
+      isPitLap = true;
+      state.nextIsOutlap = false;
+    } else if (!lapPhase && state.nextIsOutlap && !explicitlyInPit) {
       lapPhase = 'outlap';
       isPitLap = true;
       state.nextIsOutlap = false;
     }
-    if (pitCount !== null && state.previousPitCount !== null && pitCount > state.previousPitCount) {
-      lapPhase = lapPhase || 'inlap';
+    if (!driverChangedAtPit && explicitlyInPit) {
+      lapPhase = 'inlap';
+      isPitLap = true;
+      state.nextIsOutlap = true;
+    }
+    if (!driverChangedAtPit && pitCountIncreased && !isPitLap) {
+      // Providers differ on when PIT increments. Without an explicit IN state,
+      // conservatively exclude this lap and the next one.
+      lapPhase = 'inlap';
       isPitLap = true;
       state.nextIsOutlap = true;
     }
     if (pitCount !== null) state.previousPitCount = pitCount;
+    state.previousIndex = annotated.length;
+    if (driverName) state.previousDriver = driverName;
+    state.previousWasInPit = explicitlyInPit;
     stateByCar.set(lap.carNumber, state);
-    return { ...lap, lapPhase, isPitLap: isPitLap === true };
+    annotated.push({ ...lap, lapPhase, isPitLap: isPitLap === true });
   });
+  return annotated;
+}
+
+// Returns stable reason codes used by analytics JSON, tests and future reports.
+// Keeping reasons here prevents each consumer inventing a different pace filter.
+function baseLapExclusionReasons(lap) {
+  const reasons = [];
+  if (lap?.lapPhase === 'inlap' || rowShowsInPit(lap)) reasons.push('pit-in');
+  else if (lap?.lapPhase === 'outlap') reasons.push('pit-out');
+  else if (pitAffectedLap(lap)) reasons.push('pit-affected');
+  if ([lap?.lapFlag, lap?.sessionFlag, lap?.sector1Flag, lap?.sector2Flag, lap?.sector3Flag].some(isNeutralizedFlag)) reasons.push('neutralized');
+  if (boolOrNull(lap?.paceEligible) === false) reasons.push('explicitly-ineligible');
+  if (!Number.isFinite(numberOrNull(lap?.lapTimeMs))) reasons.push('missing-lap-time');
+  return [...new Set(reasons)];
 }
 
 // Decides whether a full lap should count for lap-time pace statistics. Explicit
@@ -260,10 +323,28 @@ function statsForLaps(laps) {
   });
   const rawPaceLaps = sorted.filter(lapPaceEligible);
   const paceLaps = representativePaceLaps(sorted);
+  const paceLapSet = new Set(paceLaps);
+  const rawPaceLapSet = new Set(rawPaceLaps);
   const lapTimes = paceLaps.map((lap) => lap.lapTimeMs);
   const sectorValues = (sectorNumber) => sorted
     .filter((lap) => sectorPaceEligible(lap, sectorNumber))
     .map((lap) => lap[`sector${sectorNumber}Ms`]);
+  const excludedLaps = sorted.filter((lap) => !paceLapSet.has(lap)).map((lap) => ({
+    lapNumber: lap.lapNumber,
+    lapTimeMs: lap.lapTimeMs,
+    reasons: rawPaceLapSet.has(lap) ? ['timing-outlier'] : baseLapExclusionReasons(lap)
+  }));
+  const excludedByReason = excludedLaps.reduce((counts, lap) => {
+    lap.reasons.forEach((reason) => { counts[reason] = (counts[reason] || 0) + 1; });
+    return counts;
+  }, {});
+  const sectorSelection = (sectorNumber) => {
+    const included = sorted.filter((lap) => sectorPaceEligible(lap, sectorNumber) && numberOrNull(lap[`sector${sectorNumber}Ms`]) !== null);
+    return {
+      includedCount: included.length,
+      excludedCount: sorted.length - included.length
+    };
+  };
   return {
     lapCount: sorted.length,
     paceLapCount: paceLaps.length,
@@ -277,6 +358,19 @@ function statsForLaps(laps) {
     bestSector1Ms: min(sectorValues(1)),
     bestSector2Ms: min(sectorValues(2)),
     bestSector3Ms: min(sectorValues(3)),
+    selection: {
+      lap: {
+        includedCount: paceLaps.length,
+        excludedCount: excludedLaps.length,
+        excludedByReason,
+        excludedLaps
+      },
+      sectors: {
+        sector1: sectorSelection(1),
+        sector2: sectorSelection(2),
+        sector3: sectorSelection(3)
+      }
+    },
     laps: sorted
   };
 }
@@ -359,23 +453,31 @@ function bestCarInClassByAverage(history, className) {
     .sort((a, b) => a.averageLapMs - b.averageLapMs)[0] || null;
 }
 
-// Current stint is currently approximated as all laps for the active driver in
-// the car. If stint IDs become reliable later, narrow the filter here.
+// Returns only the final contiguous block for the active driver. A driver can
+// return later in the race, so filtering every lap by name would incorrectly
+// merge two separate stints into the current-stint comparison.
 function currentStintStats(history, carNumber, currentDriver = '') {
   const driver = currentDriverName(history, carNumber, currentDriver);
+  const carLaps = lapsForCar(history, carNumber);
+  const driverKey = String(driver || '').trim().toLocaleLowerCase();
+  const latestDriverKey = String(carLaps.at(-1)?.driverName || '').trim().toLocaleLowerCase();
+  const currentLaps = driverKey && driverKey === latestDriverKey
+    ? carLaps.slice(carLaps.findLastIndex((lap, index) => index === 0
+      || String(carLaps[index - 1]?.driverName || '').trim().toLocaleLowerCase() !== driverKey))
+    : [];
   return {
     driverName: driver,
     carNumber: String(carNumber),
-    ...statsForLaps(lapsForDriver(history, carNumber, driver))
+    ...statsForLaps(currentLaps)
   };
 }
 
 // Compares our current stint/driver average with the best car in class and an
 // optional selected class car. Deltas are our current stint average minus target
 // car average: positive means our current stint is slower.
-function compareCarToClassTargets(history, ourCarNumber, selectedCarNumber = '') {
+function compareCarToClassTargets(history, ourCarNumber, selectedCarNumber = '', currentDriver = '') {
   const ourCar = carStats(history, ourCarNumber);
-  const ourCurrentStint = currentStintStats(history, ourCarNumber);
+  const ourCurrentStint = currentStintStats(history, ourCarNumber, currentDriver);
   const bestClassCar = ourCar.className ? bestCarInClassByAverage(history, ourCar.className) : null;
   const selectedCar = selectedCarNumber ? carStats(history, selectedCarNumber) : null;
 
@@ -407,7 +509,7 @@ function buildDashboardAnalysis(history, options = {}) {
     selectedCarNumber: options.selectedCarNumber ? String(options.selectedCarNumber) : '',
     currentDriverName: currentDriver,
     driverComparison: compareBestDriverToCurrentDriver(history, ourCarNumber, currentDriver),
-    classComparison: compareCarToClassTargets(history, ourCarNumber, options.selectedCarNumber || '')
+    classComparison: compareCarToClassTargets(history, ourCarNumber, options.selectedCarNumber || '', currentDriver)
   };
 }
 
@@ -423,7 +525,9 @@ return {
   normalizeLap,
   pitCountFromLap,
   pitAffectedLap,
+  rowShowsInPit,
   annotatePitPhases,
+  baseLapExclusionReasons,
   completedLaps,
   lapsForCar,
   lapsForDriver,

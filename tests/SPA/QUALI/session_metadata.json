@@ -1,0 +1,14 @@
+{
+  "timingUrl": "https://live.ris-timing.be/",
+  "sourceProvider": "ris-timing",
+  "sessionName": "Ligier Js Cup - Qualifying",
+  "startedAt": "2026-07-03T12:32:51.243Z",
+  "lastUpdatedAt": "2026-07-03T13:12:02.094Z",
+  "followedCar": "33",
+  "followedCars": [
+    "33"
+  ],
+  "baseStorageFolder": "/Users/jeffmathieu/Documents/KULeuven/MAS3/stage/MSTC/project/test timing/SPA TEST/QUALI",
+  "storageFolder": "/Users/jeffmathieu/Documents/KULeuven/MAS3/stage/MSTC/project/test timing/SPA TEST/QUALI",
+  "storageSchemaVersion": 1
+}

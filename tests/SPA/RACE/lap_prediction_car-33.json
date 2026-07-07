@@ -1,0 +1,90 @@
+{
+  "available": true,
+  "carNumber": "33",
+  "driverName": "DE JONG Alain",
+  "predictedLapMs": 230625,
+  "actualLapMs": null,
+  "predictionDeltaMs": null,
+  "completedSectorCount": 1,
+  "label": "After S1",
+  "sampleSize": 10,
+  "sectors": [
+    {
+      "sectorNumber": 1,
+      "source": "live",
+      "valueMs": 84616,
+      "sampleCount": 10
+    },
+    {
+      "sectorNumber": 2,
+      "source": "average",
+      "valueMs": 97085.9,
+      "sampleCount": 10
+    },
+    {
+      "sectorNumber": 3,
+      "source": "average",
+      "valueMs": 48923.1,
+      "sampleCount": 10
+    }
+  ],
+  "averages": {
+    "driverName": "DE JONG Alain",
+    "carNumber": "33",
+    "sampleSize": 10,
+    "sectors": [
+      {
+        "sectorNumber": 1,
+        "sampleCount": 10,
+        "averageMs": 74052.2,
+        "values": [
+          60272,
+          59767,
+          59613,
+          125175,
+          59532,
+          59030,
+          139951,
+          58807,
+          59535,
+          58840
+        ]
+      },
+      {
+        "sectorNumber": 2,
+        "sampleCount": 10,
+        "averageMs": 97085.9,
+        "values": [
+          90213,
+          87191,
+          88309,
+          93365,
+          88152,
+          88440,
+          172521,
+          87770,
+          87251,
+          87647
+        ]
+      },
+      {
+        "sectorNumber": 3,
+        "sampleCount": 10,
+        "averageMs": 48923.1,
+        "values": [
+          48891,
+          48776,
+          49043,
+          49618,
+          48757,
+          48636,
+          49791,
+          48931,
+          48269,
+          48519
+        ]
+      }
+    ]
+  },
+  "updatedAt": "2026-07-04T11:25:00.143Z"
+}

@@ -3,6 +3,19 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
+const rendererCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'styles.css'), 'utf8');
+assert.strictEqual(
+  /\.pit-window\.complete\s+\.pit-bar/.test(rendererCss),
+  false,
+  'completed mandatory stops keep red pit-history and closed-window segments visible'
+);
+[
+  '--lap-strip-pit-color',
+  '--lap-strip-neutralized-color',
+  '--lap-strip-personal-best-color',
+  '--lap-strip-class-best-color'
+].forEach((variable) => assert.ok(rendererCss.includes(variable), `${variable} remains independently editable`));
+
 // Minimal classList implementation for running app.js without a browser. The
 // renderer only needs add/remove/contains/toggle for these tests.
 class FakeClassList {
@@ -85,10 +98,10 @@ class FakeElement {
   focus() {}
   select() {}
   closest(selector) {
-    if (selector !== '.metric-box') return null;
+    if (!selector.includes('.metric-box') && !selector.includes('.timing-row')) return null;
     let node = this;
     while (node) {
-      if (node.classList.contains('metric-box')) return node;
+      if (node.classList.contains('metric-box') || node.classList.contains('timing-row')) return node;
       node = node.parentElement;
     }
     return null;
@@ -109,22 +122,16 @@ function createFakeDocument() {
     return elements.get(id);
   }
 
-  ['last-time-card', 'best-time-card', 'best-sector1-card', 'best-sector2-card', 'best-sector3-card',
-    'delta-best-last-card', 'delta-best-best-card', 'delta-average-drivers-card', 'delta-bic-card', 'delta-xic-card',
-    'predicted-lap-card', 'reference-lap-card', 'ref-sector1-card', 'ref-sector2-card', 'ref-sector3-card'
+  ['best-sector1-card', 'best-sector2-card', 'best-sector3-card',
+    'ref-sector1-card', 'ref-sector2-card', 'ref-sector3-card'
   ].forEach((id) => byId(id).classList.add('metric-box'));
+  ['best-time-card', 'predicted-lap-card', 'reference-lap-card'].forEach((id) => byId(id).classList.add('timing-row'));
 
   const metricChildren = {
-    'last-time': 'last-time-card',
     'best-time': 'best-time-card',
     'best-sector-1': 'best-sector1-card',
     'best-sector-2': 'best-sector2-card',
-    'best-sector-3': 'best-sector3-card',
-    'delta-best-last': 'delta-best-last-card',
-    'delta-best-best': 'delta-best-best-card',
-    'delta-average-drivers': 'delta-average-drivers-card',
-    'delta-bic': 'delta-bic-card',
-    'delta-xic': 'delta-xic-card'
+    'best-sector-3': 'best-sector3-card'
   };
   Object.entries(metricChildren).forEach(([childId, parentId]) => {
     byId(childId).parentElement = byId(parentId);
@@ -146,7 +153,7 @@ function createFakeDocument() {
     elements,
     documentElement: new FakeElement('html', 'html'),
     body: new FakeElement('body', 'body'),
-    getElementById: byId,
+    getElementById: (id) => elements.get(id) || null,
     createElement: (tagName) => new FakeElement('', tagName),
     querySelector: (selector) => tableBodies.has(selector) ? tableBodies.get(selector) : null,
     querySelectorAll: (selector) => selector === '.edit-ref' ? [editReferenceLap] : []
@@ -197,6 +204,17 @@ const initialState = {
 
 const updatedState = {
   ...initialState,
+  lapHistory: [
+    { carNumber: '13', driverName: 'Nigel Moore', lapNumber: 1, lapTimeMs: 125000, pitInfo: '0', sessionFlag: 'Green flag', collectedAt: '2026-06-25T10:02:05.000Z' },
+    { carNumber: '13', driverName: 'Nigel Moore', lapNumber: 2, lapTimeMs: 180000, pitInfo: '0', sessionFlag: 'FCY', collectedAt: '2026-06-25T10:05:05.000Z' },
+    { carNumber: '13', driverName: 'Nigel Moore', lapNumber: 3, lapTimeMs: 140000, pitInfo: '1', state: 'IN', sessionFlag: 'Green flag', collectedAt: '2026-06-25T10:07:25.000Z' },
+    { carNumber: '13', driverName: 'Nigel Moore', lapNumber: 4, lapTimeMs: 135000, pitInfo: '1', state: 'RUN', sessionFlag: 'Green flag', collectedAt: '2026-06-25T10:09:40.000Z' }
+  ],
+  stintState: {
+    cars: {
+      13: { currentStint: { stintNumber: 3, driverStintNumber: 2, driverName: 'Nigel Moore', stintTimeMs: 3900000, totalDriverTimeMs: 8080000 } }
+    }
+  },
   lapPrediction: {
     available: true,
     predictedLapMs: 124321,
@@ -226,6 +244,22 @@ const updatedState = {
   analyticsSummary: {
     followedCar: '13',
     cars: [{ carNumber: '13', bestSector1Ms: 41000, bestSector2Ms: 46000, bestSector3Ms: 36000 }],
+    timingHighlightsByCar: {
+      13: {
+        bestLap: { valueMs: 123500, classBestMs: 123500, isClassBest: true },
+        bestSectors: {
+          sector1: { valueMs: 41000, classBestMs: 41000, isClassBest: true },
+          sector2: { valueMs: 46000, classBestMs: 45500, isClassBest: false },
+          sector3: { valueMs: 36000, classBestMs: 36000, isClassBest: true }
+        },
+        lapStrip: [
+          { lapNumber: 1, lapTimeMs: 123500, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'normal', highlight: 'class-best', marker: '', tooltip: 'Nigel Moore · Green flag' },
+          { lapNumber: 2, lapTimeMs: 180000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'neutralized', highlight: 'none', marker: '', tooltip: 'Nigel Moore · FCY' },
+          { lapNumber: 3, lapTimeMs: 140000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'pit-in', highlight: 'none', marker: 'P', tooltip: 'Nigel Moore · pit-in' },
+          { lapNumber: 4, lapTimeMs: 135000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'pit-out', highlight: 'none', marker: '', tooltip: 'Nigel Moore · pit-out' }
+        ]
+      }
+    },
     driversByCar: {
       2: [{ driverName: 'Fast Driver', averageLapMs: 123500 }],
       56: [{ driverName: 'X Driver', averageLapMs: 129000 }]
@@ -293,7 +327,7 @@ const liveTiming = {
 };
 
 const context = {
-  window: { location: { search: '' }, liveTiming, classBattle: {}, lapAnalytics: {}, pitstopCircuits: require('../src/shared/pitstopCircuits'), pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
+  window: { location: { search: '' }, liveTiming, classBattle: {}, lapAnalytics: require('../src/shared/lapAnalytics'), timingHighlights: require('../src/shared/timingHighlights'), pitstopCircuits: require('../src/shared/pitstopCircuits'), pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
   document,
   URLSearchParams,
   console,
@@ -322,7 +356,7 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('info-car').textContent, '13');
   assert.strictEqual(document.getElementById('info-driver').textContent, 'Nigel Moore');
   assert.strictEqual(document.getElementById('info-class-pic').textContent, 'LMP3 / 1');
-  assert.strictEqual(document.getElementById('last-time').textContent, '2:05.000');
+  assert.strictEqual(document.getElementById('last-time'), null, 'last time is represented by the lap strip instead of a duplicate card');
   assert.strictEqual(document.getElementById('best-time').textContent, '2:03.500');
   assert.strictEqual(document.getElementById('sector-1').textContent, '41.000');
   assert.strictEqual(document.getElementById('reference-lap-time').textContent, '2:04.500');
@@ -348,16 +382,54 @@ module.exports = (async () => {
   collectorUpdate(updatedState);
   await flushAsync();
 
+  assert.strictEqual(document.getElementById('info-stint').textContent, 'Driver stint 2 · 1u05 / total 2u14');
+  assert.strictEqual(document.getElementById('info-car-stint').textContent, 'Car stint 3');
+  const lapRows = document.getElementById('lap-strip-list').children;
+  assert.strictEqual(lapRows.length, 4, 'all stored laps are rendered in the vertical strip');
+  assert.strictEqual(lapRows[0].children[0].textContent, '4', 'newest lap appears first');
+  assert.strictEqual(lapRows[0].classList.contains('pit-out'), true);
+  assert.strictEqual(lapRows[0].children[2].textContent, 'NM', 'driver initials sit between time and pit marker');
+  assert.strictEqual(lapRows[0].children[3].textContent, '', 'outlap is red without a P marker');
+  assert.strictEqual(lapRows[1].classList.contains('pit-in'), true);
+  assert.strictEqual(lapRows[1].children[3].textContent, 'P');
+  assert.strictEqual(lapRows[2].classList.contains('neutralized'), true);
+  assert.strictEqual(lapRows[3].classList.contains('class-best'), true);
+  document.getElementById('lap-strip-list').scrollTop = 84;
+  collectorUpdate(updatedState);
+  await flushAsync();
+  assert.strictEqual(document.getElementById('lap-strip-list').scrollTop, 84, 'polling preserves manual lap-history scroll position');
+  const stateWithFreshLapAndStaleHighlights = {
+    ...updatedState,
+    lapHistory: [
+      ...updatedState.lapHistory,
+      { carNumber: '13', driverName: 'Nigel Moore', lapNumber: 5, lapTimeMs: 124000, pitInfo: '0', sessionFlag: 'Green flag', collectedAt: '2026-06-25T10:11:44.000Z' }
+    ]
+  };
+  collectorUpdate(stateWithFreshLapAndStaleHighlights);
+  await flushAsync();
+  const refreshedLapRows = document.getElementById('lap-strip-list').children;
+  assert.strictEqual(refreshedLapRows.length, 5, 'lap strip follows fresh history even when the analytics summary is one poll behind');
+  assert.strictEqual(refreshedLapRows[0].children[0].textContent, '5', 'the newly completed lap is immediately visible at the top');
+  collectorUpdate(updatedState);
+  await flushAsync();
+  assert.strictEqual(document.getElementById('best-time').classList.contains('class-best-value'), true);
+
   assert.strictEqual(document.getElementById('best-sector-1').textContent, '0:41.000');
   assert.strictEqual(document.getElementById('best-sector-2').textContent, '0:46.000');
+  assert.strictEqual(document.getElementById('best-sector-1').classList.contains('class-best-value'), true);
+  assert.strictEqual(document.getElementById('best-sector-2').classList.contains('class-best-value'), false);
   collectorUpdate({ ...updatedState, session: { ...updatedState.session, flag: 'Full course yellow' } });
   assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-caution'), true);
   assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-red'), false);
-  assert.strictEqual(document.getElementById('status-text').textContent, 'FULL COURSE YELLOW');
+  assert.strictEqual(document.getElementById('status-text').textContent, 'FCY');
+  collectorUpdate({ ...updatedState, session: { ...updatedState.session, flag: 'Safety car' } });
+  assert.strictEqual(document.getElementById('status-text').textContent, 'SC');
+  collectorUpdate({ ...updatedState, session: { ...updatedState.session, flag: 'NO ACTIVE HEAT' } });
+  assert.strictEqual(document.getElementById('status-text').textContent, 'GREEN', 'active timing rows override stale RIS no-heat text');
   collectorUpdate({ ...updatedState, session: { ...updatedState.session, flag: 'Red flag' } });
   assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-red'), true);
   assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-caution'), false);
-  assert.strictEqual(document.getElementById('status-text').textContent, 'RED FLAG');
+  assert.strictEqual(document.getElementById('status-text').textContent, 'RED');
   collectorUpdate({ ...updatedState, status: 'error', message: 'Timing page unavailable' });
   assert.strictEqual(document.getElementById('collector-health').classList.contains('is-error'), true);
   assert.strictEqual(document.getElementById('collector-health').attributes.title, 'Timing page unavailable');
@@ -379,30 +451,46 @@ module.exports = (async () => {
   await flushAsync();
   assert.strictEqual(lastSettingsPatch.referenceTimes.lapMs, 126000);
 
-  assert.strictEqual(document.getElementById('best-d1-a').textContent, '2:03.000');
-  assert.strictEqual(document.getElementById('last-d2').textContent, '2:06.500');
-  assert.strictEqual(document.getElementById('delta-best-last').textContent, '-3.500s');
-  assert.ok(document.getElementById('delta-best-last-card').classList.contains('bad'));
-  assert.strictEqual(document.getElementById('delta-bic').textContent, '+0.500s');
-  assert.ok(document.getElementById('delta-bic-card').classList.contains('good'));
-  assert.strictEqual(document.getElementById('delta-xic').textContent, '+1.000s');
-  assert.ok(document.getElementById('delta-xic-card').classList.contains('good'));
+  assert.ok(document.getElementById('comparison-placeholder'), 'the redesigned comparison area remains intentionally empty');
   assert.strictEqual(document.getElementById('pit-status').textContent, 'Pit window open');
   assert.strictEqual(document.getElementById('pit-stops-summary').textContent, '1/2');
   assert.strictEqual(document.getElementById('pit-next').textContent, 'Now');
   assert.ok(document.getElementById('pit-projection').textContent.includes('PIC 2'));
   assert.ok(document.getElementById('pit-projection').textContent.includes('0:05.000 behind #2'));
   assert.ok(document.getElementById('pit-projection').textContent.includes('0:10.000 ahead #56'));
+  collectorUpdate({
+    ...updatedState,
+    pitstopPlan: {
+      ...updatedState.pitstopPlan,
+      label: 'Mandatory pitstops complete',
+      status: 'complete',
+      requirementsComplete: true,
+      completedPitStops: 2,
+      remainingRequiredStops: 0,
+      mustPitSoonMs: null,
+      latestSafePitElapsedMs: null
+    }
+  });
+  await flushAsync();
+  assert.strictEqual(document.getElementById('pit-status').textContent, 'Mandatory pitstops complete');
+  assert.strictEqual(document.getElementById('pit-next').textContent, 'Optional');
+  assert.ok(document.getElementById('pit-window').classList.contains('complete'));
+  assert.ok(!document.getElementById('pit-detail').textContent.includes('latest safe stop'));
+  assert.ok(document.getElementById('pit-projection').textContent.includes('PIC 2'), 'rejoin projection stays visible after required stops');
+  collectorUpdate(updatedState);
+  await flushAsync();
   assert.strictEqual(document.getElementById('pit-bar').style.gridTemplateColumns, '1500000fr 11400000fr 1500000fr');
   const cooldownPeriods = document.getElementById('pit-cooldown-overlays').children;
   assert.strictEqual(cooldownPeriods.length, 2);
   assert.strictEqual(cooldownPeriods[0].style.left, '25%');
   assert.ok(cooldownPeriods[0].style.width.startsWith('10.416'));
   assert.strictEqual(cooldownPeriods[1].style.left, '50%');
-  assert.strictEqual(document.getElementById('battle-ahead-main').textContent, '#2 · Last Δ +0.500s');
-  assert.ok(document.getElementById('battle-ahead-detail').textContent.includes('10.0 laps'));
+  assert.strictEqual(document.getElementById('battle-ahead-main').textContent, '#2 · Gap 5.000s');
+  assert.strictEqual(document.getElementById('battle-ahead-delta').textContent, 'Last lap Δ +0.500s');
+  assert.ok(document.getElementById('battle-ahead-trend').textContent.includes('we catch #2'));
+  assert.ok(document.getElementById('battle-ahead-prediction').textContent.includes('10.0 laps'));
   assert.ok(document.getElementById('battle-ahead-card').classList.contains('good'));
-  assert.strictEqual(document.getElementById('battle-behind-main').textContent, '#56 · Last Δ -1.000s');
+  assert.strictEqual(document.getElementById('battle-behind-main').textContent, '#56 · Gap 10.000s');
   assert.ok(document.getElementById('battle-behind-card').classList.contains('bad'));
 
   await document.getElementById('open-graphs').trigger('click');
@@ -460,9 +548,9 @@ module.exports = (async () => {
       comparisonView: {
         mode: 'qualifying',
         columns: [
-          { topLabel: 'Best team driver', topMs: 123000, bottomLabel: 'Last current', bottomMs: 124000, deltaLabel: 'Delta best - last', deltaMs: -1000 },
-          { topLabel: 'Best team driver', topMs: 123000, bottomLabel: 'Best current', bottomMs: 123500, deltaLabel: 'Delta best - best', deltaMs: -500 },
-          { topLabel: 'Last team driver', topMs: 124500, bottomLabel: 'Last current', bottomMs: 124000, deltaLabel: 'Delta last - last', deltaMs: 500 },
+          { topLabel: 'Best team driver', topMs: 123000, bottomLabel: 'Last current', bottomMs: 124000, deltaLabel: 'Delta current vs best', deltaMs: 1000 },
+          { topLabel: 'Best team driver', topMs: 123000, bottomLabel: 'Best current', bottomMs: 123500, deltaLabel: 'Delta current vs best', deltaMs: 500 },
+          { topLabel: 'Last team driver', topMs: 124500, bottomLabel: 'Last current', bottomMs: 124000, deltaLabel: 'Delta current vs team', deltaMs: -500 },
           { topLabel: 'Best BIC', topMs: 122000, bottomLabel: 'Last BIC', bottomMs: 123000, deltaLabel: 'Delta best - last', deltaMs: 1000 },
           { topLabel: 'Best XIC', topMs: 125000, bottomLabel: 'Last XIC', bottomMs: 126500, deltaLabel: 'Delta best - last', deltaMs: 1500 }
         ]
@@ -470,19 +558,24 @@ module.exports = (async () => {
       adjacentClassBattles: {
         available: true,
         mode: 'qualifying',
-        ahead: { row: { carNumber: '2' }, ourBestLapMs: 123500, rivalBestLapMs: 122000, bestLapDeltaMs: -1500, trendState: 'bad' },
-        behind: { row: { carNumber: '56' }, ourBestLapMs: 123500, rivalBestLapMs: 125000, bestLapDeltaMs: 1500, trendState: 'good' }
+        ahead: { row: { carNumber: '2' }, ourBestLapMs: 123500, rivalBestLapMs: 122000, bestLapDeltaMs: 1500, trendState: 'bad' },
+        behind: { row: { carNumber: '56' }, ourBestLapMs: 123500, rivalBestLapMs: 125000, bestLapDeltaMs: -1500, trendState: 'good' }
       }
     }
   };
   collectorUpdate(qualifyingState);
   await flushAsync();
-  assert.strictEqual(document.getElementById('comparison-3-top-label').textContent, 'Last team driver');
-  assert.strictEqual(document.getElementById('average-d1').textContent, '2:04.500');
-  assert.strictEqual(document.getElementById('comparison-4-top-label').textContent, 'Best BIC');
-  assert.strictEqual(document.getElementById('delta-bic').textContent, '+1.000s');
-  assert.strictEqual(document.getElementById('battle-ahead-main').textContent, '#2 · Best Δ -1.500s');
-  assert.ok(document.getElementById('battle-ahead-detail').textContent.includes('Their best 2:02.000'));
+  assert.ok(document.getElementById('comparison-placeholder'), 'mode changes do not repopulate the reserved comparison area');
+  assert.strictEqual(document.getElementById('battle-ahead-main').textContent, '#2 · Best Δ +1.500s');
+  assert.strictEqual(document.getElementById('battle-ahead-delta').textContent, 'Their best 2:02.000');
+  assert.strictEqual(document.getElementById('battle-ahead-trend').textContent, 'Our best 2:03.500');
+  assert.strictEqual(document.getElementById('battle-ahead-prediction').textContent, 'Qualifying comparison');
+
+  document.getElementById('comparison-xic-car').value = '9';
+  await document.getElementById('comparison-xic-car').trigger('change');
+  await flushAsync();
+  assert.strictEqual(lastSettingsPatch.comparisonCar, '9', 'inline XIC selector persists the shared comparison-car setting');
+  assert.strictEqual(document.getElementById('comparison-car').value, '9', 'inline and setup XIC inputs stay synchronized');
 
   document.getElementById('mode-race').checked = false;
   document.getElementById('mode-qualifying').checked = true;
