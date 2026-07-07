@@ -8,6 +8,9 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const analytics = require('../src/shared/lapAnalytics');
+const { buildStintInsights, classComparisonsForStint, classRankingForStint } = require('../src/shared/stintInsights');
+
+const SPA_REFERENCE_TIMES = { lapMs: 180000, sector1Ms: 0, sector2Ms: 0, sector3Ms: 0 };
 
 function argument(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -196,6 +199,7 @@ function buildPayload(history, carNumber, rawHistory = history) {
   return {
     generatedAt: new Date().toISOString(),
     race: { sessionName, carNumber: String(carNumber), teamName, className, circuit: 'Spa-Francorchamps' },
+    referenceTimes: SPA_REFERENCE_TIMES,
     raceSummary: {
       stats: raceStats,
       recordedRaceTimeMs: elapsedMs(ourLaps),
@@ -225,6 +229,9 @@ function buildPayload(history, carNumber, rawHistory = history) {
           averageDeltaMs: Number.isFinite(stats.averageLapMs) && Number.isFinite(driver.averageLapMs) ? stats.averageLapMs - driver.averageLapMs : null,
           bestDeltaMs: Number.isFinite(stats.bestLapMs) && Number.isFinite(driver.bestLapMs) ? stats.bestLapMs - driver.bestLapMs : null
         }));
+      const classComparisons = classComparisonsForStint(history, stint.laps, carNumber, className);
+      const insights = buildStintInsights(stint.laps, SPA_REFERENCE_TIMES);
+      insights.classRanking = classRankingForStint(stint.laps, classComparisons);
       return {
         stintNumber: stint.stintNumber,
         driverName: stint.driverName,
@@ -235,6 +242,8 @@ function buildPayload(history, carNumber, rawHistory = history) {
         stats: compactStats(stats),
         driverRaceStats: driverTotal,
         teammates,
+        classComparisons,
+        insights,
         laps: stint.laps.map((lap) => ({
           lapNumber: lap.lapNumber,
           lapTimeMs: lap.lapTimeMs,

@@ -807,7 +807,8 @@ async function writeStintStateAndReports(settings, context, rows = []) {
           stint,
           session: context?.session || collectorState.session || {},
           gapSamples: gapMemoryState?.samples || [],
-          history: collectorState.lapHistory || []
+          history: collectorState.lapHistory || [],
+          referenceTimes: settings.referenceTimes || {}
         });
       } finally {
         pendingStintReports.delete(reportKey);
@@ -821,7 +822,8 @@ async function writeStintStateAndReports(settings, context, rows = []) {
         stints: closedStints,
         session: context?.session || collectorState.session || {},
         gapSamples: gapMemoryState?.samples || [],
-        history: collectorState.lapHistory || []
+        history: collectorState.lapHistory || [],
+        referenceTimes: settings.referenceTimes || {}
       });
     }
   }

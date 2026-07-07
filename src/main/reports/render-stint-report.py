@@ -200,106 +200,105 @@ def draw_summary(c, x, y, w, h, stint):
         draw_metric(c, x + 12 + col * (w - 24) / 3, y + h - 43 - row * 34, label, value)
 
 
-def draw_teammates(c, x, y, w, h, stint):
-    panel(c, x, y, w, h, 'Comparison with team drivers')
+def draw_comparisons(c, x, y, w, h, stint):
+    panel(c, x, y, w, h, 'Team and class comparison')
     c.setFont('Helvetica-Bold', 7)
     c.setFillColor(MUTED)
-    headers = [('Driver', x + 10), ('Avg', x + w * .48), ('Delta', x + w * .68), ('Best delta', x + w * .84)]
+    headers = [('Target', x + 10), ('Avg', x + w * .49), ('Delta', x + w * .69), ('Best D', x + w * .85)]
     for text, hx in headers:
         c.drawString(hx, y + h - 31, text)
-    yy = y + h - 48
-    for teammate in stint.get('teammates', [])[:3]:
+    yy = y + h - 44
+
+    def draw_row(label, item, row_y):
         c.setFillColor(INK)
-        c.setFont('Helvetica', 7.5)
-        c.drawString(x + 10, yy, teammate['driverName'][:24])
-        c.drawString(x + w * .48, yy, fmt_time(teammate.get('averageLapMs')))
-        c.setFillColor(RED if (teammate.get('averageDeltaMs') or 0) > 0 else GREEN)
-        c.drawString(x + w * .68, yy, fmt_delta(teammate.get('averageDeltaMs')))
-        c.setFillColor(RED if (teammate.get('bestDeltaMs') or 0) > 0 else GREEN)
-        c.drawString(x + w * .84, yy, fmt_delta(teammate.get('bestDeltaMs')))
-        yy -= 18
-    if not stint.get('teammates'):
-        c.setFillColor(MUTED)
-        c.setFont('Helvetica', 8)
-        c.drawString(x + 10, yy, 'No teammate comparison available')
-
-
-def draw_gap_panel(c, x, y, w, h, stint):
-    panel(c, x, y, w, h, 'Class gap history')
-    samples = [
-        sample for sample in stint.get('gapHistory', [])
-        if sample.get('relation') in ('ahead', 'behind')
-        and isinstance(sample.get('gapMs'), (int, float))
-        and math.isfinite(sample.get('gapMs'))
-        and sample.get('gapMs') >= 0
-    ]
-    if not samples:
-        c.setFillColor(MUTED)
-        c.setFont('Helvetica-Bold', 8)
-        c.drawString(x + 12, y + h - 42, 'No confirmed class-gap samples in this stint.')
-        c.setFont('Helvetica', 6.8)
-        c.drawString(x + 12, y + h - 57, 'The chart starts after both cars cross the timing line.')
-        return
-
-    latest = {}
-    for sample in samples:
-        latest[sample['relation']] = sample
-    summary_colors = {'ahead': BLUE, 'behind': RED}
-    for relation, summary_x in [('ahead', x + 12), ('behind', x + w / 2 + 3)]:
-        sample = latest.get(relation)
-        if not sample:
-            continue
-        color = summary_colors[relation]
-        c.setFillColor(color)
-        c.circle(summary_x, y + h - 34, 2.5, fill=1, stroke=0)
-        c.setFont('Helvetica-Bold', 6.8)
-        approximation = '~' if sample.get('estimated') else ''
-        label = f"{relation.upper()} #{sample.get('rivalCarNumber') or '?'}  {approximation}{fmt_gap(sample.get('gapMs'))}"
-        c.drawString(summary_x + 6, y + h - 37, label)
-
-    plot_x, plot_y = x + 34, y + 20
-    plot_w, plot_h = w - 46, h - 72
-    values = [sample['gapMs'] for sample in samples]
-    low, high = min(values), max(values)
-    padding = max(500, (high - low) * 0.15)
-    low, high = max(0, low - padding), high + padding
-    if high <= low:
-        high = low + 1000
-
-    y_for = lambda value: plot_y + (value - low) / (high - low) * plot_h
-    x_for = lambda index: plot_x + (0.5 if len(samples) == 1 else index / (len(samples) - 1)) * plot_w
-    c.setStrokeColor(GRID)
-    c.setLineWidth(0.45)
-    for index in range(3):
-        grid_value = low + (high - low) * index / 2
-        grid_y = y_for(grid_value)
-        c.line(plot_x, grid_y, plot_x + plot_w, grid_y)
-        c.setFillColor(MUTED)
-        c.setFont('Helvetica', 5.7)
-        c.drawRightString(plot_x - 4, grid_y - 2, fmt_gap(grid_value, 1))
-
-    series = {}
-    for index, sample in enumerate(samples):
-        key = (sample['relation'], str(sample.get('rivalCarNumber') or ''))
-        series.setdefault(key, []).append((index, sample))
-    for (relation, _rival), points in series.items():
-        color = summary_colors[relation]
-        c.setStrokeColor(color)
-        c.setLineWidth(1.1)
-        previous = None
-        for index, sample in points:
-            px, py = x_for(index), y_for(sample['gapMs'])
-            if previous is not None:
-                c.line(previous[0], previous[1], px, py)
-            previous = (px, py)
-            c.setStrokeColor(color)
-            c.setFillColor(PANEL if sample.get('estimated') else color)
-            c.circle(px, py, 2.4, fill=1, stroke=1)
+        c.setFont('Helvetica', 6.2)
+        c.drawString(x + 10, row_y, label[:27])
+        c.drawString(x + w * .49, row_y, fmt_time(item.get('averageLapMs')))
+        c.setFillColor(RED if (item.get('averageDeltaMs') or 0) > 0 else GREEN)
+        c.drawString(x + w * .69, row_y, fmt_delta(item.get('averageDeltaMs')))
+        c.setFillColor(RED if (item.get('bestDeltaMs') or 0) > 0 else GREEN)
+        c.drawString(x + w * .85, row_y, fmt_delta(item.get('bestDeltaMs')))
 
     c.setFillColor(MUTED)
-    c.setFont('Helvetica', 5.8)
-    c.drawString(plot_x, y + 7, 'first confirmed')
-    c.drawRightString(plot_x + plot_w, y + 7, 'latest')
+    c.setFont('Helvetica-Bold', 5.8)
+    c.drawString(x + 10, yy, 'TEAM')
+    yy -= 12
+    for teammate in stint.get('teammates', [])[:2]:
+        draw_row(teammate.get('driverName', ''), teammate, yy)
+        yy -= 13
+    if not stint.get('teammates'):
+        c.setFillColor(MUTED)
+        c.setFont('Helvetica', 6)
+        c.drawString(x + 10, yy, 'No teammate comparison')
+        yy -= 13
+
+    c.setFillColor(MUTED)
+    c.setFont('Helvetica-Bold', 5.8)
+    c.drawString(x + 10, yy, 'CLASS DURING THIS STINT')
+    yy -= 12
+    for rival in stint.get('classComparisons', [])[:4]:
+        label = f"#{rival.get('carNumber', '?')} {rival.get('teamName', '')}"
+        draw_row(label, rival, yy)
+        yy -= 13
+    if not stint.get('classComparisons'):
+        c.setFillColor(MUTED)
+        c.setFont('Helvetica', 6)
+        c.drawString(x + 10, yy, 'No same-window class laps')
+
+
+def draw_insights(c, x, y, w, h, stint):
+    panel(c, x, y, w, h, 'Stint engineering insights')
+    data = stint.get('insights') or {}
+    consistency = data.get('consistency') or {}
+    phases = data.get('stintPhases') or {}
+    class_ranking = data.get('classRanking') or {}
+    compliance = data.get('compliance') or {}
+
+    def signed_rate(value):
+        return f'{value / 1000:+.3f}s/lap' if isinstance(value, (int, float)) and math.isfinite(value) else '-'
+
+    def compliance_text(key):
+        item = compliance.get(key) or {}
+        return 'OK (not set)' if item.get('known') is False else item.get('label') or '-'
+
+    phase_text = ' / '.join(fmt_time(phases.get(key)) for key in ('firstMs', 'middleMs', 'finalMs'))
+    def rank_text(key):
+        item = class_ranking.get(key) or {}
+        if not item.get('rank') or not item.get('total'):
+            return '-'
+        leader = item.get('leaderCarNumber')
+        suffix = f" | {fmt_delta(item.get('deltaToLeaderMs'))} vs #{leader}" if leader and leader != 'our car' else ' | class benchmark'
+        return f"{item.get('rank')}/{item.get('total')}{suffix}"
+    left = [
+        ('Consistency*', f"{fmt_gap(consistency.get('standardDeviationMs'))} | {consistency.get('coefficientPercent', 0):.2f}%" if isinstance(consistency.get('coefficientPercent'), (int, float)) else '-'),
+        ('Pace trend', signed_rate(data.get('paceTrendMsPerLap'))),
+        ('Best theoretical', fmt_time(data.get('bestTheoreticalLapMs'))),
+        ('Average theoretical', fmt_time(data.get('averageTheoreticalLapMs'))),
+        ('Stint phases F/M/L', phase_text),
+        ('First 5 vs last 5', f"{fmt_time(data.get('firstFiveMs'))} / {fmt_time(data.get('lastFiveMs'))} | {fmt_delta(data.get('firstVsLastFiveDeltaMs'))}"),
+    ]
+    right = [
+        ('Class average rank', rank_text('average')),
+        ('Class best-lap rank', rank_text('best')),
+        ('Lap reference', compliance_text('lap')),
+        ('S1 reference', compliance_text('sector1')),
+        ('S2 reference', compliance_text('sector2')),
+        ('S3 reference', compliance_text('sector3')),
+    ]
+
+    def draw_column(items, xx, width):
+        yy = y + h - 31
+        for label, value in items:
+            c.setFillColor(MUTED)
+            c.setFont('Helvetica-Bold', 4.8)
+            c.drawString(xx, yy, label.upper())
+            c.setFillColor(INK)
+            c.setFont('Helvetica-Bold', 6.1)
+            c.drawString(xx, yy - 8, str(value)[:31])
+            yy -= 18
+
+    draw_column(left, x + 10, w * .49 - 14)
+    draw_column(right, x + w * .51, w * .47 - 10)
 
 
 def draw_legend(c, x, y):
@@ -308,6 +307,14 @@ def draw_legend(c, x, y):
     c.setFillColor(MUTED)
     c.setFont('Helvetica', 6.5)
     c.drawString(x + 6, y - 2, 'Charts show valid samples only; excluded laps remain counted in the summary.')
+
+
+def draw_consistency_note(c, x, y):
+    """Explain the consistency metric directly below the engineering-insights panel."""
+    c.setFillColor(MUTED)
+    c.setFont('Helvetica', 5.2)
+    c.drawString(x, y, '* Consistency = standard deviation of valid lap times;')
+    c.drawString(x, y - 7, 'a lower value means more consistent pace.')
 
 
 def summary_card(c, x, y, w, label, value):
@@ -460,9 +467,10 @@ def render_page(c, payload, stint, page_number):
 
     bottom_w = (PAGE_W - 72) / 3
     draw_summary(c, 28, 34, bottom_w, 138, stint)
-    draw_teammates(c, 36 + bottom_w, 34, bottom_w, 138, stint)
-    draw_gap_panel(c, 44 + bottom_w * 2, 34, bottom_w, 138, stint)
+    draw_comparisons(c, 36 + bottom_w, 34, bottom_w, 138, stint)
+    draw_insights(c, 44 + bottom_w * 2, 34, bottom_w, 138, stint)
     draw_legend(c, 35, 19)
+    draw_consistency_note(c, 44 + bottom_w * 2 + 8, 23)
     c.setFillColor(MUTED)
     c.setFont('Helvetica', 6.5)
     c.drawRightString(PAGE_W - 28, 18, f'Generated from stored race data | page {page_number}')

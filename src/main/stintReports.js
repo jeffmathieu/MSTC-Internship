@@ -3,8 +3,9 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const lapAnalytics = require('../shared/lapAnalytics');
+const { buildStintInsights, classComparisonsForStint, classRankingForStint } = require('../shared/stintInsights');
 
-const REPORT_LAYOUT_VERSION = 'canonical-reportlab-landscape-v2';
+const REPORT_LAYOUT_VERSION = 'canonical-reportlab-landscape-v3';
 
 function safeFilePart(value, fallback = 'Unknown') {
   const safe = String(value || '')
@@ -179,7 +180,7 @@ function pitStopsFromHistory(history = [], carNumber = '') {
   return stops;
 }
 
-function canonicalStint(stint, session, gapSamples, driverStats) {
+function canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes) {
   const legacy = buildStintReportPayload(stint, session, gapSamples);
   const stats = legacy.stint.stats || {};
   const firstLap = legacy.stint.laps[0];
@@ -197,6 +198,9 @@ function canonicalStint(stint, session, gapSamples, driverStats) {
         ? stats.bestLapMs - driver.bestLapMs
         : null
     }));
+  const classComparisons = classComparisonsForStint(history, stint.laps || [], stint.carNumber, legacy.session.className);
+  const insights = buildStintInsights(stint.laps || [], referenceTimes);
+  insights.classRanking = classRankingForStint(stint.laps || [], classComparisons);
   return {
     stintNumber: legacy.stint.stintNumber,
     driverStintNumber: legacy.stint.driverStintNumber,
@@ -208,6 +212,8 @@ function canonicalStint(stint, session, gapSamples, driverStats) {
     stats: compactStats(stats),
     driverRaceStats: driverStats.find((driver) => driver.driverName === legacy.session.driverName) || null,
     teammates,
+    classComparisons,
+    insights,
     laps: legacy.stint.laps,
     gapHistory: legacy.gapHistory
   };
@@ -216,7 +222,7 @@ function canonicalStint(stint, session, gapSamples, driverStats) {
 // Adapts live stint objects to the exact payload consumed by the polished
 // ReportLab renderer used by the post-race script. This is the single contract
 // that keeps manual and automatic PDFs visually and statistically identical.
-function buildCanonicalReportPayload({ stints = [], session = {}, gapSamples = [], history = [], carNumber = '' }) {
+function buildCanonicalReportPayload({ stints = [], session = {}, gapSamples = [], history = [], carNumber = '', referenceTimes = {} }) {
   const followedCar = String(carNumber || stints[0]?.carNumber || '');
   const carLaps = lapAnalytics.lapsForCar(history, followedCar);
   const fallbackLaps = stints.flatMap((stint) => stint.laps || []);
@@ -242,6 +248,12 @@ function buildCanonicalReportPayload({ stints = [], session = {}, gapSamples = [
       className: firstLap.className || '',
       circuit: session.circuit || session.trackName || ''
     },
+    referenceTimes: {
+      lapMs: Number(referenceTimes.lapMs) || 0,
+      sector1Ms: Number(referenceTimes.sector1Ms) || 0,
+      sector2Ms: Number(referenceTimes.sector2Ms) || 0,
+      sector3Ms: Number(referenceTimes.sector3Ms) || 0
+    },
     raceSummary: {
       stats: compactStats(lapAnalytics.statsForLaps(raceLaps)),
       recordedRaceTimeMs: sumLapTimes(raceLaps),
@@ -255,7 +267,7 @@ function buildCanonicalReportPayload({ stints = [], session = {}, gapSamples = [
       raceControl: raceControlSummary(history)
     },
     caveats: [],
-    stints: stints.map((stint) => canonicalStint(stint, session, gapSamples, driverStats)),
+    stints: stints.map((stint) => canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes)),
     // Keep the first automatic-report schema available to existing readers.
     session: legacy?.session || null,
     stint: legacy?.stint || null,
@@ -469,6 +481,7 @@ async function writeClosedStintArtifacts({
   session = {},
   gapSamples = [],
   history = [],
+  referenceTimes = {},
   renderPdf = renderReportLabPdf
 }) {
   if (!stint?.closed) return { written: false, reason: 'stint-open' };
@@ -485,6 +498,7 @@ async function writeClosedStintArtifacts({
     session,
     gapSamples,
     history,
+    referenceTimes,
     carNumber: stint.carNumber
   });
   fs.writeFileSync(paths.jsonPath, JSON.stringify(payload, null, 2));
@@ -542,6 +556,7 @@ async function writeEventSummaryArtifacts({
   session = {},
   gapSamples = [],
   history = [],
+  referenceTimes = {},
   renderPdf = renderReportLabPdf
 }) {
   const closed = stints.filter((stint) => stint.closed);
@@ -571,6 +586,7 @@ async function writeEventSummaryArtifacts({
       session,
       gapSamples,
       history,
+      referenceTimes,
       carNumber
     });
     payload.title = group.title;
