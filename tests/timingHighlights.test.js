@@ -43,4 +43,13 @@ assert.strictEqual(empty.bestLap.valueMs, null);
 assert.strictEqual(empty.bestLap.isClassBest, false);
 assert.deepStrictEqual(empty.lapStrip, []);
 
+const driverChange = buildTimingHighlights([
+  lap({ carNumber: 12, className: 'LMP3', driverName: 'Alessandro Bressan', lapNumber: 56, lapTimeMs: 126398, pitInfo: '2' }),
+  lap({ carNumber: 12, className: 'LMP3', driverName: 'Gabriele Lancieri', lapNumber: 57, lapTimeMs: 242163, pitInfo: '3' })
+], '12');
+assert.strictEqual(driverChange.lapStrip[0].status, 'pit-in');
+assert.strictEqual(driverChange.lapStrip[0].marker, 'P');
+assert.strictEqual(driverChange.lapStrip[1].status, 'pit-out');
+assert.strictEqual(driverChange.lapStrip[1].marker, '');
+
 console.log('Timing highlight tests passed.');

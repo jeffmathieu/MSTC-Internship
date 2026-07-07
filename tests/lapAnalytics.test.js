@@ -269,6 +269,18 @@ assert.strictEqual(spaPitSequence[2].lapPhase, 'outlap');
 assert.strictEqual(spaPitSequence[3].lapPhase, '');
 assert.deepStrictEqual(baseLapExclusionReasons(spaPitSequence[1]), ['pit-in']);
 
+const driverChangePitSequence = annotatePitPhases([
+  normalizeLap({ carNumber: 12, driverName: 'Alessandro Bressan', lapNumber: 55, lapTimeMs: 126375, pitInfo: '2', state: 'RUN' }),
+  normalizeLap({ carNumber: 12, driverName: 'Alessandro Bressan', lapNumber: 56, lapTimeMs: 126398, pitInfo: '2', state: 'RUN' }),
+  normalizeLap({ carNumber: 12, driverName: 'Gabriele Lancieri', lapNumber: 57, lapTimeMs: 242163, pitInfo: '3', state: 'RUN' }),
+  normalizeLap({ carNumber: 12, driverName: 'Gabriele Lancieri', lapNumber: 58, lapTimeMs: 127000, pitInfo: '3', state: 'RUN' })
+]);
+assert.strictEqual(driverChangePitSequence[1].lapPhase, 'inlap', 'previous driver final lap becomes the inlap');
+assert.strictEqual(driverChangePitSequence[2].lapPhase, 'outlap', 'new driver first completed lap becomes the outlap');
+assert.strictEqual(driverChangePitSequence[3].lapPhase, '', 'the lap after the outlap returns to normal');
+assert.deepStrictEqual(baseLapExclusionReasons(driverChangePitSequence[1]), ['pit-in']);
+assert.deepStrictEqual(baseLapExclusionReasons(driverChangePitSequence[2]), ['pit-out']);
+
 const auditableStats = statsForLaps(spaPitSequence);
 assert.strictEqual(auditableStats.selection.lap.includedCount, 2);
 assert.strictEqual(auditableStats.selection.lap.excludedCount, 2);

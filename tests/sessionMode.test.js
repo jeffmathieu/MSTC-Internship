@@ -62,6 +62,29 @@ assert.strictEqual(raceView.columns[1].deltaMs, -1000, 'faster current best is n
 assert.strictEqual(raceView.columns[2].deltaMs, 9500);
 assert.strictEqual(raceView.columns[2].topLabel, 'Average D1');
 assert.strictEqual(raceView.columns[3].topMs, 99500);
+assert.strictEqual(raceView.matrix.ourCarNumber, '13');
+assert.strictEqual(raceView.matrix.teammate.title, 'B vs. A', 'compact title prefers uppercase surname/name parts');
+assert.strictEqual(raceView.matrix.teammate.metrics[0].deltaMs, -1000, 'team best delta is current minus D1');
+assert.strictEqual(raceView.matrix.teammate.metrics[0].valueMs, 99000, 'comparison matrix carries the displayed current absolute time');
+assert.strictEqual(raceView.matrix.bic.metrics[0].referenceMs, 98000, 'reference time remains available for future detail views');
+assert.strictEqual(raceView.matrix.teammate.metrics[1].deltaMs, 20000, 'team last delta is current minus D1');
+assert.deepStrictEqual(raceView.matrix.teammate.averages.map((entry) => entry.label), ['DA', 'DB']);
+assert.strictEqual(raceView.matrix.teammate.averages[0].deltaMs, 0);
+assert.strictEqual(raceView.matrix.teammate.averages[1].deltaMs, 9500, 'slower team driver average is positive versus D1');
+assert.strictEqual(raceView.matrix.bic.targetCarNumber, '2');
+assert.strictEqual(raceView.matrix.xic.targetCarNumber, '9');
+assert.strictEqual(raceView.matrix.bic.metrics[0].deltaMs, 1000, 'our BIC delta is positive when our best is slower');
+assert.strictEqual(raceView.matrix.bic.metrics[0].valueMs, 98000, 'BIC column displays the BIC car best time');
+assert.strictEqual(raceView.matrix.bic.totalAverageDeltaMs, 10250, 'total BIC delta is our car average minus BIC average');
+assert.strictEqual(raceView.matrix.bic.averages[0].deltaMs, 10250, 'external driver averages compare with our total car average');
+assert.strictEqual(raceView.matrix.xic.metrics[0].deltaMs, -3000, 'our XIC delta is negative when our best is faster');
+assert.strictEqual(raceView.matrix.xic.metrics[0].valueMs, 102000, 'XIC column displays the selected car best time');
+assert.strictEqual(raceView.matrix.teammate.sectors.length, 3);
+assert.strictEqual(raceView.matrix.teammate.sectors[0].averageMs, 30000, 'team sector average uses all valid sectors from our car');
+assert.strictEqual(raceView.matrix.teammate.sectors[0].showDelta, false, 'team sector averages do not show deltas');
+assert.strictEqual(raceView.matrix.bic.sectors[2].averageMs, 29500, 'BIC sector average comes from valid BIC sectors');
+assert.strictEqual(raceView.matrix.bic.sectors[2].deltaMs, 10250, 'BIC sector delta compares our average sector with their average sector');
+assert.strictEqual(raceView.matrix.bic.sectors[2].showDelta, true);
 
 // BIC/XIC use the same current-minus-reference sign contract even when the
 // target car's current driver differs from its full-car average.

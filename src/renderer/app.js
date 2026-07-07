@@ -134,13 +134,13 @@ function formatMs(ms) {
 }
 
 // Stint clocks prioritize readability over lap-timing precision. Internal
-// calculations keep milliseconds; the header displays total minutes/seconds.
+// calculations keep milliseconds; the compact header displays whole minutes.
 function formatStintClock(ms) {
   if (!Number.isFinite(Number(ms))) return '—';
-  const totalSeconds = Math.max(0, Math.floor(Number(ms) / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  const totalMinutes = Math.max(0, Math.floor(Number(ms) / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}u${String(minutes).padStart(2, '0')}` : `${minutes}m`;
 }
 
 function numericMs(value) {
@@ -384,6 +384,8 @@ function lapsForCar(history, carNumber) {
 function renderLapStrip(state, precomputedHighlights = null) {
   const list = $('lap-strip-list');
   if (!list) return;
+  const previousScrollTop = Number(list.scrollTop || 0);
+  const wasAtTop = previousScrollTop <= 2;
   const carNumber = activeCarNumber();
   const storedLapCount = lapsForCar(state?.lapHistory || [], carNumber).length;
   // lapHistory is the source of truth. Normally the collector supplies an
@@ -431,9 +433,9 @@ function renderLapStrip(state, precomputedHighlights = null) {
     row.appendChild(marker);
     list.appendChild(row);
   });
-  // New laps are inserted at the top. Ensure a user who previously scrolled
-  // through older laps immediately sees the newly completed lap after a poll.
-  list.scrollTop = 0;
+  // Polls rebuild the list. Keep the user's position while they inspect older
+  // laps; only dashboards already at the top continue following newest-first.
+  list.scrollTop = wasAtTop ? 0 : previousScrollTop;
 }
 
 // Converts verbose provider race-control text to labels that fit the compact
@@ -585,10 +587,90 @@ function driverStatsForLiveCar(summary, rows, carNumber) {
   return { row, driverName, stats };
 }
 
+function comparisonDeltaState(value) {
+  const ms = numericMs(value);
+  return ms === null || ms === 0 ? 'neutral' : ms < 0 ? 'good' : 'bad';
+}
+
+function fillComparisonList(id, items, rowClass, labelKey = 'label', valueKey = 'deltaMs') {
+  const container = $(id);
+  if (!container) return;
+  container.innerHTML = '';
+  (items || []).forEach((item) => {
+    const row = document.createElement('div');
+    row.className = `${rowClass} ${comparisonDeltaState(item[valueKey])}`;
+    const label = document.createElement('span');
+    label.textContent = item[labelKey] || '—';
+    const value = document.createElement('output');
+    if (valueKey === 'deltaMs') value.className = 'comparison-delta';
+    value.textContent = valueKey === 'deltaMs' ? displayDelta(numericMs(item[valueKey])) : formatMs(numericMs(item[valueKey]));
+    row.appendChild(label);
+    if (rowClass === 'comparison-line') {
+      const absolute = document.createElement('output');
+      absolute.className = 'comparison-absolute';
+      absolute.textContent = formatMs(numericMs(item.valueMs));
+      row.appendChild(absolute);
+    }
+    if (rowClass === 'comparison-sector') {
+      const average = document.createElement('output');
+      average.className = 'comparison-sector-average';
+      average.textContent = formatMs(numericMs(item.averageMs));
+      row.appendChild(average);
+    }
+    if (rowClass !== 'comparison-sector' || item.showDelta) row.appendChild(value);
+    container.appendChild(row);
+  });
+}
+
+function renderComparisonMatrix(matrix) {
+  if (!matrix) return false;
+  const ourNumber = matrix.ourCarNumber || activeCarNumber() || '?';
+  setText('comparison-team-title', matrix.teammate?.title || 'D2 vs. D1');
+  $('comparison-team-title')?.setAttribute('title', matrix.teammate?.title || 'D2 vs. D1');
+  setText('comparison-bic-title', `#${ourNumber} vs. BIC${matrix.bic?.targetCarNumber ? ` #${matrix.bic.targetCarNumber}` : ''}`);
+  setText('comparison-xic-title', `#${ourNumber} vs.`);
+  if ($('comparison-xic-car') && document.activeElement !== $('comparison-xic-car')) {
+    $('comparison-xic-car').value = matrix.xic?.targetCarNumber || currentSettings?.comparisonCar || '';
+  }
+  [
+    ['team', matrix.teammate],
+    ['bic', matrix.bic],
+    ['xic', matrix.xic]
+  ].forEach(([id, column]) => {
+    fillComparisonList(`comparison-${id}-metrics`, column?.metrics, 'comparison-line');
+    const averages = [
+      { label: 'Total average', valueMs: column?.totalAverageMs, deltaMs: column?.totalAverageDeltaMs, total: true },
+      ...(column?.averages || [])
+    ];
+    const averagesContainer = $(`comparison-${id}-averages`);
+    if (averagesContainer) {
+      averagesContainer.innerHTML = '';
+      averages.forEach((item) => {
+        const row = document.createElement('div');
+        row.className = `comparison-average${item.total ? ' total' : ''}`;
+        const label = document.createElement('span');
+        label.textContent = item.label;
+        const value = document.createElement('output');
+        value.textContent = formatMs(numericMs(item.valueMs));
+        const delta = document.createElement('output');
+        delta.className = `comparison-average-delta ${comparisonDeltaState(item.deltaMs)}`;
+        delta.textContent = displayDelta(numericMs(item.deltaMs));
+        row.appendChild(label);
+        row.appendChild(value);
+        row.appendChild(delta);
+        averagesContainer.appendChild(row);
+      });
+    }
+    fillComparisonList(`comparison-${id}-sectors`, column?.sectors, 'comparison-sector');
+  });
+  return true;
+}
+
 // Fills the D1/D2, BIC, and XIC comparison boxes from precomputed analytics.
 // Renderer only formats values; lap/sector math stays in shared modules/main.
 function renderDriverAndClassComparisons(summary, rows) {
   const view = summary?.comparisonView;
+  if (renderComparisonMatrix(view?.matrix)) return;
   if (view?.columns?.length === 5) {
     const ids = [
       ['best-d1-a', 'last-d2', 'delta-best-last-card', 'delta-best-last'],
@@ -1062,6 +1144,7 @@ async function init() {
   if (fixedDashboardCar) document.title = `Race Engineer Dashboard - Car #${fixedDashboardCar}`;
   $('storage-folder').value = currentSettings.storageFolder || '';
   if ($('comparison-car')) $('comparison-car').value = currentSettings.comparisonCar || '';
+  if ($('comparison-xic-car')) $('comparison-xic-car').value = currentSettings.comparisonCar || '';
   syncReferenceInputs(currentSettings);
   syncSessionMode(currentSettings.sessionMode || 'race');
   populatePitstopCircuits();
@@ -1102,6 +1185,12 @@ async function init() {
     render(currentState);
   });
   $('open-setup')?.addEventListener('click', () => showSetup(true));
+  $('comparison-xic-car')?.addEventListener('change', async () => {
+    const comparisonCar = String($('comparison-xic-car').value || '').trim();
+    if ($('comparison-car')) $('comparison-car').value = comparisonCar;
+    currentSettings = await window.liveTiming.setSettings({ comparisonCar });
+    render(currentState);
+  });
   $('export')?.addEventListener('click', async () => { const result = await window.liveTiming.exportCurrent(); alert(`Exported:\n${result.csvPath}\n${result.jsonPath}\n${result.historyPath || ''}`); });
 
   // Persist settings immediately when hidden inputs change. If new settings are

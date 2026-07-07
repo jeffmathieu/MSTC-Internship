@@ -163,24 +163,42 @@ function rowShowsInPit(lap) {
 // completed lap as the outlap. Both remain stored but are excluded from pace.
 function annotatePitPhases(laps) {
   const stateByCar = new Map();
-  return laps.map((lap) => {
-    const state = stateByCar.get(lap.carNumber) || { previousPitCount: null, nextIsOutlap: false };
+  const annotated = [];
+  laps.forEach((lap) => {
+    const state = stateByCar.get(lap.carNumber) || { previousPitCount: null, nextIsOutlap: false, previousIndex: null, previousDriver: '', previousWasInPit: false };
     const pitCount = pitCountFromLap(lap);
     let lapPhase = lap.lapPhase;
     let isPitLap = lap.isPitLap;
+    const driverName = String(lap.driverName || '').trim();
+    const driverChanged = Boolean(driverName && state.previousDriver && driverName !== state.previousDriver);
 
     const explicitlyInPit = rowShowsInPit(lap);
-    if (!lapPhase && state.nextIsOutlap && !explicitlyInPit) {
+    const pitCountIncreased = pitCount !== null && state.previousPitCount !== null && pitCount > state.previousPitCount;
+    const driverChangedAtPit = driverChanged && (pitCountIncreased || state.previousWasInPit);
+    if (driverChangedAtPit && state.previousIndex !== null) {
+      // A completed lap attributed to a new driver can only follow a stop. The
+      // previous driver's final lap is the inlap and this first new-driver lap
+      // is the outlap. This is stronger evidence than provider PIT counters,
+      // which often increment only after the car has already left the pits.
+      annotated[state.previousIndex] = {
+        ...annotated[state.previousIndex],
+        lapPhase: 'inlap',
+        isPitLap: true
+      };
+      lapPhase = 'outlap';
+      isPitLap = true;
+      state.nextIsOutlap = false;
+    } else if (!lapPhase && state.nextIsOutlap && !explicitlyInPit) {
       lapPhase = 'outlap';
       isPitLap = true;
       state.nextIsOutlap = false;
     }
-    if (explicitlyInPit) {
+    if (!driverChangedAtPit && explicitlyInPit) {
       lapPhase = 'inlap';
       isPitLap = true;
       state.nextIsOutlap = true;
     }
-    if (pitCount !== null && state.previousPitCount !== null && pitCount > state.previousPitCount && !isPitLap) {
+    if (!driverChangedAtPit && pitCountIncreased && !isPitLap) {
       // Providers differ on when PIT increments. Without an explicit IN state,
       // conservatively exclude this lap and the next one.
       lapPhase = 'inlap';
@@ -188,9 +206,13 @@ function annotatePitPhases(laps) {
       state.nextIsOutlap = true;
     }
     if (pitCount !== null) state.previousPitCount = pitCount;
+    state.previousIndex = annotated.length;
+    if (driverName) state.previousDriver = driverName;
+    state.previousWasInPit = explicitlyInPit;
     stateByCar.set(lap.carNumber, state);
-    return { ...lap, lapPhase, isPitLap: isPitLap === true };
+    annotated.push({ ...lap, lapPhase, isPitLap: isPitLap === true });
   });
+  return annotated;
 }
 
 // Returns stable reason codes used by analytics JSON, tests and future reports.

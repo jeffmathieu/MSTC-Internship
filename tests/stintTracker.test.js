@@ -108,6 +108,21 @@ const repeatedProviderState = buildStintState(providerTimed, ['33'], '2026-06-23
 });
 assert.strictEqual(repeatedProviderState.cars['33'].currentStint.stintTimeMs, 2532000, 'unchanged provider timer advances by poll time');
 
+const returningProviderDriver = [
+  stintLap('Driver A', 1, { lapTimeMs: 180000, stint: '1:30:00' }),
+  stintLap('Driver A', 2, { lapTimeMs: 181000, stint: '1:45:00' }),
+  stintLap('Driver B', 3, { lapTimeMs: 182000, stint: '05:00' }),
+  stintLap('Driver A', 4, { lapTimeMs: 183000, stint: '08:00' })
+];
+const returningProviderState = buildStintState(returningProviderDriver, ['33'], '2026-06-23T12:08:00.000Z', {
+  liveRows: [{ carNumber: '33', driver: 'Driver A', stint: '10:00' }]
+});
+assert.strictEqual(
+  returningProviderState.cars['33'].currentStint.totalDriverTimeMs,
+  961000,
+  'driver total uses stored lap durations for old stints plus the active live stint timer'
+);
+
 const noColumnStart = buildStintState([], ['33'], '2026-06-23T12:00:00.000Z', {
   liveRows: [{ carNumber: '33', driver: 'New Driver', stint: '' }]
 });

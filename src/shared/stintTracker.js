@@ -199,7 +199,11 @@
     const totalTimeByDriver = new Map();
     normalizedStints.forEach((stint) => {
       const key = driverKey(stint.driverName);
-      totalTimeByDriver.set(key, (totalTimeByDriver.get(key) || 0) + stint.stintTimeMs);
+      // Closed stint totals must be reconstructable from immutable history.
+      // Provider STINT timers differ between feeds and may include unrelated
+      // elapsed time, so only the active stint uses its live/provider timer.
+      const contributionMs = stint.closed ? sumLapTimes(stint.laps) : stint.stintTimeMs;
+      totalTimeByDriver.set(key, (totalTimeByDriver.get(key) || 0) + contributionMs);
     });
     return normalizedStints.map((stint) => ({
       ...stint,

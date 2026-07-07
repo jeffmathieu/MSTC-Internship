@@ -212,7 +212,7 @@ const updatedState = {
   ],
   stintState: {
     cars: {
-      13: { currentStint: { stintNumber: 3, driverStintNumber: 2, driverName: 'Nigel Moore', stintTimeMs: 580000, totalDriverTimeMs: 1180000 } }
+      13: { currentStint: { stintNumber: 3, driverStintNumber: 2, driverName: 'Nigel Moore', stintTimeMs: 3900000, totalDriverTimeMs: 8080000 } }
     }
   },
   lapPrediction: {
@@ -382,7 +382,7 @@ module.exports = (async () => {
   collectorUpdate(updatedState);
   await flushAsync();
 
-  assert.strictEqual(document.getElementById('info-stint').textContent, 'Driver stint 2 · 9:40 / total 19:40');
+  assert.strictEqual(document.getElementById('info-stint').textContent, 'Driver stint 2 · 1u05 / total 2u14');
   assert.strictEqual(document.getElementById('info-car-stint').textContent, 'Car stint 3');
   const lapRows = document.getElementById('lap-strip-list').children;
   assert.strictEqual(lapRows.length, 4, 'all stored laps are rendered in the vertical strip');
@@ -394,6 +394,10 @@ module.exports = (async () => {
   assert.strictEqual(lapRows[1].children[3].textContent, 'P');
   assert.strictEqual(lapRows[2].classList.contains('neutralized'), true);
   assert.strictEqual(lapRows[3].classList.contains('class-best'), true);
+  document.getElementById('lap-strip-list').scrollTop = 84;
+  collectorUpdate(updatedState);
+  await flushAsync();
+  assert.strictEqual(document.getElementById('lap-strip-list').scrollTop, 84, 'polling preserves manual lap-history scroll position');
   const stateWithFreshLapAndStaleHighlights = {
     ...updatedState,
     lapHistory: [
@@ -566,6 +570,12 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('battle-ahead-delta').textContent, 'Their best 2:02.000');
   assert.strictEqual(document.getElementById('battle-ahead-trend').textContent, 'Our best 2:03.500');
   assert.strictEqual(document.getElementById('battle-ahead-prediction').textContent, 'Qualifying comparison');
+
+  document.getElementById('comparison-xic-car').value = '9';
+  await document.getElementById('comparison-xic-car').trigger('change');
+  await flushAsync();
+  assert.strictEqual(lastSettingsPatch.comparisonCar, '9', 'inline XIC selector persists the shared comparison-car setting');
+  assert.strictEqual(document.getElementById('comparison-car').value, '9', 'inline and setup XIC inputs stay synchronized');
 
   document.getElementById('mode-race').checked = false;
   document.getElementById('mode-qualifying').checked = true;
