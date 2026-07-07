@@ -135,9 +135,10 @@ function drawLineChart(context, width, height, chart, viewport = { start: 0, end
       context.arc(x, y, series.highlight ? 4 : 3, 0, Math.PI * 2);
       context.fill();
       const delta = Number.isFinite(point.deltaToOurCarMs)
-        ? ` · Δ to our car ${formatDelta(point.deltaToOurCarMs)}`
+        ? ` · Δ ${formatDelta(point.deltaToOurCarMs)}`
         : '';
-      hitPoints.push({ x, y, text: `${formatTime(point.y)}${delta}${neutralized ? ' · FCY/SC' : ''}` });
+      const lapLabel = delta && point.label ? `${point.label} · ` : '';
+      hitPoints.push({ x, y, text: `${lapLabel}${formatTime(point.y)}${delta}${neutralized ? ' · FCY/SC' : ''}` });
     });
   });
 
