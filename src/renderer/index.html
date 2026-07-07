@@ -41,9 +41,9 @@
 
     <div id="pit-setup-modal" class="setup-modal hidden">
       <div class="setup-card pit-setup-card">
-        <p class="eyebrow">Fixed race information</p>
+        <p class="eyebrow">Pitstop strategy</p>
         <h1>Pitstop setup</h1>
-        <p class="subtitle">Configure these values before starting collection. Pit time remains adjustable on the dashboard.</p>
+        <p class="subtitle">These strategy values can also be adjusted while live collection is running. Pit time remains available on the dashboard.</p>
         <div class="pit-setup-grid">
           <label>
             Total race time (hours)
@@ -52,6 +52,18 @@
           <label>
             Mandatory pitstops
             <input id="pit-required-input" type="number" min="0" step="1" value="2" />
+          </label>
+          <label>
+            Closed after race start (minutes)
+            <input id="pit-closed-start-minutes" type="number" min="0" step="1" value="25" />
+          </label>
+          <label>
+            Closed before race finish (minutes)
+            <input id="pit-closed-end-minutes" type="number" min="0" step="1" value="25" />
+          </label>
+          <label>
+            Minimum between stops (minutes)
+            <input id="pit-cooldown-minutes" type="number" min="0" step="1" value="25" />
           </label>
           <label class="pit-circuit-field">
             Circuit and pit formation
@@ -64,6 +76,37 @@
           <label>
             FCY speed (km/h)
             <input id="pit-fcy-speed" type="number" min="1" step="1" />
+          </label>
+          <label>
+            Safety buffer (laps)
+            <input id="pit-safety-laps" type="number" min="0" step="0.5" value="2" />
+          </label>
+          <label>
+            Extra safety buffer (seconds)
+            <input id="pit-safety-seconds" type="number" min="0" step="5" value="30" />
+          </label>
+          <label>
+            Decision lead time (seconds)
+            <input id="pit-decision-seconds" type="number" min="0" step="5" value="15" />
+          </label>
+          <label>
+            Timing uncertainty (seconds)
+            <input id="pit-uncertainty-seconds" type="number" min="0" step="5" value="10" />
+          </label>
+          <label>
+            Rule timing point
+            <select id="pit-rule-reference">
+              <option value="pit-entry">Pit entry</option>
+              <option value="pit-exit">Pit exit</option>
+            </select>
+          </label>
+          <label>
+            FCY consider saving (seconds)
+            <input id="pit-fcy-consider-seconds" type="number" min="0" step="1" value="5" />
+          </label>
+          <label>
+            FCY pit-now saving (seconds)
+            <input id="pit-fcy-strong-seconds" type="number" min="0" step="1" value="15" />
           </label>
         </div>
         <p id="pit-distance-note" class="subtitle"></p>

@@ -127,11 +127,11 @@ Examples:
 
 ### Neutralized-lap handling
 
-The **Pitstop setup** button contains fixed pre-race information: total race
-duration, mandatory pitstop count, and the circuit/pit formation. These values
-are locked while live collection is active. The pit-in to pit-out duration stays
-on the dashboard because service type and driver changes can alter it during a
-race.
+The **Pitstop setup** button contains race duration, mandatory pitstop count,
+circuit/pit formation, rule timing point, and safety-margin settings. The setup
+remains editable while live collection is active; saved changes are included in
+the next live poll. The pit-in to pit-out duration stays on the dashboard because
+service type and driver changes can alter it during a race.
 
 FCY pit loss uses the selected layout's regular-track distance between pit-in
 and pit-out. Circuit distances and FCY speeds are maintained centrally in
@@ -141,6 +141,28 @@ rules without modifying the central profile. If a future layout has no distance 
 shows that configuration is missing instead of calculating a false rejoin
 position. After FCY starts, predictions remain marked as provisional until a
 fresh timing passage and stable gaps have been observed.
+
+The planner distinguishes the hard legal deadline from the operationally safe
+deadline. For the next required stop:
+
+```text
+latest possible = race end - final closed period
+                  - cooldowns needed between remaining stops
+                  - pit duration when rules are measured at pit exit
+
+latest safe = latest possible - safety buffer
+
+safety buffer = configured laps * current representative lap time
+                + fixed margin + decision lead + timing uncertainty
+```
+
+The generated schedule contains earliest legal, latest possible, and latest
+safe pit-entry times for every remaining mandatory stop. It also exposes a
+stable recommendation contract (`PIT NOW`, `CONSIDER PIT`, `PLAN PIT`,
+`PREPARE PIT`, `MUST PIT SOON`, `PIT WHEN OPEN`, or `STAY OUT`). Fuel, tyre,
+and driver limits
+can later move the operational deadline earlier through the existing
+`strategyInputs` extension without changing the legal scheduling functions.
 
 ## Light and dark themes
 
@@ -181,6 +203,12 @@ For example:
 For race sessions, the app can generate pitstop-related analysis for followed cars.
 
 The generated pitstop plan is stored separately per car, so each followed-car dashboard can update independently while still using the same shared lap-history source.
+
+During FCY, the planner subtracts the regular-track travel time from the entered
+pit-in to pit-out duration. It compares this net loss with the green estimate and
+uses configurable thresholds for `CONSIDER PIT` and `PIT NOW`. An FCY recommendation
+never overrides a closed pit window. Until fresh timing movement and stable gaps
+have been observed, the recommendation stays explicitly provisional.
 
 ### Data export
 

@@ -226,14 +226,22 @@ function pitRulesFromInputs() {
   const selectedCircuit = pitstopCircuits?.pitstopCircuitById($('pit-circuit')?.value);
   const configuredDistance = Number($('pit-distance-meters')?.value);
   const configuredFcySpeed = Number($('pit-fcy-speed')?.value);
+  const configuredSafetyLaps = Number($('pit-safety-laps')?.value);
   return {
     raceDurationMs: hoursFromInput('pit-race-hours', 24) * 60 * 60 * 1000,
-    pitClosedStartMs: 25 * 60 * 1000,
-    pitClosedEndMs: 25 * 60 * 1000,
-    pitCooldownMs: 25 * 60 * 1000,
+    pitClosedStartMs: secondsFromInput('pit-closed-start-minutes', 25) * 60 * 1000,
+    pitClosedEndMs: secondsFromInput('pit-closed-end-minutes', 25) * 60 * 1000,
+    pitCooldownMs: secondsFromInput('pit-cooldown-minutes', 25) * 60 * 1000,
     pitStopDurationMs: secondsFromInput('pit-duration', 75) * 1000,
     requiredPitStops: Math.max(0, Math.floor(secondsFromInput('pit-required-input', 2))),
     nearWindowLaps: 2,
+    safetyBufferLaps: Number.isFinite(configuredSafetyLaps) && configuredSafetyLaps >= 0 ? configuredSafetyLaps : 2,
+    fixedSafetyBufferMs: secondsFromInput('pit-safety-seconds', 30) * 1000,
+    decisionLeadMs: secondsFromInput('pit-decision-seconds', 15) * 1000,
+    timingUncertaintyMs: secondsFromInput('pit-uncertainty-seconds', 10) * 1000,
+    ruleTimingReference: $('pit-rule-reference')?.value === 'pit-exit' ? 'pit-exit' : 'pit-entry',
+    fcyConsiderSavingsMs: secondsFromInput('pit-fcy-consider-seconds', 5) * 1000,
+    fcyStrongSavingsMs: secondsFromInput('pit-fcy-strong-seconds', 15) * 1000,
     circuitId: selectedCircuit?.id || currentSettings?.pitCircuitId || 'zolder',
     regularTrackDistanceMeters: Number.isFinite(configuredDistance) && configuredDistance > 0
       ? configuredDistance
@@ -276,19 +284,24 @@ function applyPitCircuitDefaults() {
   updatePitDistanceNote();
 }
 
-function pitSetupLocked() {
-  return currentState?.mode === 'live' && currentState?.status !== 'idle' && currentState?.status !== 'error';
-}
-
 function showPitSetup(show = true) {
-  if (show && pitSetupLocked()) return;
   if (show) {
     $('pit-race-hours').value = String((currentSettings?.pitRules?.raceDurationMs || 86400000) / 3600000);
     $('pit-required-input').value = String(currentSettings?.pitRules?.requiredPitStops ?? 2);
+    $('pit-closed-start-minutes').value = String((currentSettings?.pitRules?.pitClosedStartMs ?? 1500000) / 60000);
+    $('pit-closed-end-minutes').value = String((currentSettings?.pitRules?.pitClosedEndMs ?? 1500000) / 60000);
+    $('pit-cooldown-minutes').value = String((currentSettings?.pitRules?.pitCooldownMs ?? 1500000) / 60000);
     $('pit-circuit').value = currentSettings?.pitCircuitId || currentSettings?.pitRules?.circuitId || 'zolder';
     const selectedCircuit = pitstopCircuits?.pitstopCircuitById($('pit-circuit').value);
     $('pit-distance-meters').value = String(currentSettings?.pitRules?.regularTrackDistanceMeters ?? selectedCircuit?.regularTrackDistanceMeters ?? '');
     $('pit-fcy-speed').value = String(currentSettings?.pitRules?.fcySpeedKph ?? selectedCircuit?.fcySpeedKph ?? 60);
+    $('pit-safety-laps').value = String(currentSettings?.pitRules?.safetyBufferLaps ?? 2);
+    $('pit-safety-seconds').value = String((currentSettings?.pitRules?.fixedSafetyBufferMs ?? 30000) / 1000);
+    $('pit-decision-seconds').value = String((currentSettings?.pitRules?.decisionLeadMs ?? 15000) / 1000);
+    $('pit-uncertainty-seconds').value = String((currentSettings?.pitRules?.timingUncertaintyMs ?? 10000) / 1000);
+    $('pit-rule-reference').value = currentSettings?.pitRules?.ruleTimingReference === 'pit-exit' ? 'pit-exit' : 'pit-entry';
+    $('pit-fcy-consider-seconds').value = String((currentSettings?.pitRules?.fcyConsiderSavingsMs ?? 5000) / 1000);
+    $('pit-fcy-strong-seconds').value = String((currentSettings?.pitRules?.fcyStrongSavingsMs ?? 15000) / 1000);
     updatePitDistanceNote();
   }
   $('pit-setup-modal')?.classList.toggle('hidden', !show);
@@ -810,8 +823,8 @@ function projectionLabel(projection) {
 function renderPitstopPlan(plan) {
   const pitWindow = $('pit-window');
   if ($('open-pit-setup')) {
-    $('open-pit-setup').disabled = pitSetupLocked();
-    $('open-pit-setup').title = pitSetupLocked() ? 'Stop live collection before changing fixed pitstop setup' : '';
+    $('open-pit-setup').disabled = false;
+    $('open-pit-setup').title = 'Adjust pitstop strategy settings';
   }
   if (!plan) {
     setText('pit-status', 'Waiting');
@@ -827,18 +840,35 @@ function renderPitstopPlan(plan) {
   setText('pit-stops-summary', `${plan.completedPitStops}/${plan.rules?.requiredPitStops ?? $('pit-required-input')?.value ?? '2'}`);
   setText('pit-next', plan.requirementsComplete
     ? (plan.canPitNow ? 'Optional' : 'Closed')
-    : plan.canPitNow ? 'Now' : (Number.isFinite(plan.waitMs) ? pitstopPlanner.formatDuration(plan.waitMs) : 'Closed'));
+    : plan.recommendation?.action || (plan.canPitNow ? 'Now' : (Number.isFinite(plan.waitMs) ? pitstopPlanner.formatDuration(plan.waitMs) : 'Closed')));
   setText('pit-projection', projectionLabel(plan.projection));
+  const safeDeadline = plan.schedule?.next?.latestSafeEntryElapsedMs ?? plan.latestSafePitElapsedMs;
+  const possibleDeadline = plan.schedule?.next?.latestPossibleEntryElapsedMs ?? plan.latestPossiblePitElapsedMs;
+  const bufferMs = plan.schedule?.buffer?.totalMs;
   const detailParts = [
     Number.isFinite(plan.clock?.elapsedMs) ? `Elapsed ${pitstopPlanner.formatDuration(plan.clock.elapsedMs)}` : '',
     Number.isFinite(plan.clock?.remainingMs) ? `remaining ${pitstopPlanner.formatDuration(plan.clock.remainingMs)}` : '',
     Number.isFinite(plan.totalPitStops) && plan.totalPitStops !== plan.completedPitStops ? `total pits ${plan.totalPitStops}, valid ${plan.completedPitStops}` : '',
-    Number.isFinite(plan.mustPitSoonMs) ? `latest safe stop in ${pitstopPlanner.formatDuration(plan.mustPitSoonMs)}` : '',
+    Number.isFinite(safeDeadline) ? `safe by ${pitstopPlanner.formatDuration(safeDeadline)} (${pitstopPlanner.formatDuration(safeDeadline - plan.clock.elapsedMs)} left)` : '',
+    Number.isFinite(possibleDeadline) ? `legal limit ${pitstopPlanner.formatDuration(possibleDeadline)}` : '',
+    Number.isFinite(bufferMs) ? `buffer ${pitstopPlanner.formatDuration(bufferMs)}` : '',
+    Number.isFinite(plan.recommendation?.fcySavingsMs) ? `FCY saves ${pitstopPlanner.formatDuration(plan.recommendation.fcySavingsMs)}` : '',
     Number.isFinite(plan.pitLoss?.pitLossMs)
       ? `${plan.pitLoss?.active ? 'FCY net pit loss' : 'pit loss'} ${pitstopPlanner.formatDuration(plan.pitLoss.pitLossMs)}`
-      : plan.pitLoss?.reason || ''
+      : plan.pitLoss?.reason || '',
+    plan.recommendation?.reason || ''
   ].filter(Boolean);
   setText('pit-detail', detailParts.join(' · '));
+  if ($('pit-detail')) {
+    const buffer = plan.schedule?.buffer || {};
+    $('pit-detail').title = [
+      `Rule timing point: ${plan.schedule?.ruleTimingReference || plan.rules?.ruleTimingReference || 'pit-entry'}`,
+      `Lap buffer: ${pitstopPlanner.formatDuration(buffer.lapBufferMs)}`,
+      `Fixed buffer: ${pitstopPlanner.formatDuration(buffer.fixedSafetyBufferMs)}`,
+      `Decision lead: ${pitstopPlanner.formatDuration(buffer.decisionLeadMs)}`,
+      `Timing uncertainty: ${pitstopPlanner.formatDuration(buffer.timingUncertaintyMs)}`
+    ].join('\n');
+  }
 
   if (pitWindow) {
     pitWindow.classList.remove('open', 'soon', 'closed', 'urgent', 'complete');
@@ -1152,6 +1182,19 @@ async function init() {
   if ($('pit-duration')) $('pit-duration').value = String(Math.round((currentSettings.pitRules?.pitStopDurationMs || 75000) / 1000));
   if ($('pit-required-input')) $('pit-required-input').value = String(currentSettings.pitRules?.requiredPitStops ?? 2);
   if ($('pit-race-hours')) $('pit-race-hours').value = String((currentSettings.pitRules?.raceDurationMs || 86400000) / 3600000);
+  if ($('pit-closed-start-minutes')) $('pit-closed-start-minutes').value = String((currentSettings.pitRules?.pitClosedStartMs ?? 1500000) / 60000);
+  if ($('pit-closed-end-minutes')) $('pit-closed-end-minutes').value = String((currentSettings.pitRules?.pitClosedEndMs ?? 1500000) / 60000);
+  if ($('pit-cooldown-minutes')) $('pit-cooldown-minutes').value = String((currentSettings.pitRules?.pitCooldownMs ?? 1500000) / 60000);
+  const initialPitCircuit = pitstopCircuits?.pitstopCircuitById($('pit-circuit')?.value);
+  if ($('pit-distance-meters')) $('pit-distance-meters').value = String(currentSettings.pitRules?.regularTrackDistanceMeters ?? initialPitCircuit?.regularTrackDistanceMeters ?? '');
+  if ($('pit-fcy-speed')) $('pit-fcy-speed').value = String(currentSettings.pitRules?.fcySpeedKph ?? initialPitCircuit?.fcySpeedKph ?? 60);
+  if ($('pit-safety-laps')) $('pit-safety-laps').value = String(currentSettings.pitRules?.safetyBufferLaps ?? 2);
+  if ($('pit-safety-seconds')) $('pit-safety-seconds').value = String((currentSettings.pitRules?.fixedSafetyBufferMs ?? 30000) / 1000);
+  if ($('pit-decision-seconds')) $('pit-decision-seconds').value = String((currentSettings.pitRules?.decisionLeadMs ?? 15000) / 1000);
+  if ($('pit-uncertainty-seconds')) $('pit-uncertainty-seconds').value = String((currentSettings.pitRules?.timingUncertaintyMs ?? 10000) / 1000);
+  if ($('pit-rule-reference')) $('pit-rule-reference').value = currentSettings.pitRules?.ruleTimingReference === 'pit-exit' ? 'pit-exit' : 'pit-entry';
+  if ($('pit-fcy-consider-seconds')) $('pit-fcy-consider-seconds').value = String((currentSettings.pitRules?.fcyConsiderSavingsMs ?? 5000) / 1000);
+  if ($('pit-fcy-strong-seconds')) $('pit-fcy-strong-seconds').value = String((currentSettings.pitRules?.fcyStrongSavingsMs ?? 15000) / 1000);
   $('poll-interval').value = String(currentSettings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS);
   syncSetupFromMain();
   setupDetailTabs();
@@ -1179,7 +1222,6 @@ async function init() {
   $('pit-circuit')?.addEventListener('change', applyPitCircuitDefaults);
   ['pit-distance-meters', 'pit-fcy-speed'].forEach((id) => $(id)?.addEventListener('input', updatePitDistanceNote));
   $('pit-setup-save')?.addEventListener('click', async () => {
-    if (pitSetupLocked()) return;
     await saveSettingsFromInputs();
     showPitSetup(false);
     render(currentState);

@@ -629,7 +629,7 @@ input {
   font-size: 14px;
 }
 .pit-setup-button {
-  align-self: center;
+  align-self: end;
   width: 42px;
   height: 32px;
   padding: 0;
@@ -825,7 +825,11 @@ pre {
   justify-content: flex-end;
   margin-top: 18px;
 }
-.pit-setup-card { width: min(680px, 95vw); }
+.pit-setup-card {
+  width: min(760px, 95vw);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
 .pit-setup-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
