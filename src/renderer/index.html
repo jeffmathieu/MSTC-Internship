@@ -126,23 +126,7 @@
         </div>
       </aside>
 
-      <section class="main-times">
-        <article class="metric-box hero-metric" id="last-time-card">
-          <span>Last Time</span>
-          <strong id="last-time">—</strong>
-        </article>
-        <article class="metric-box hero-metric" id="best-time-card">
-          <span>Best Time</span>
-          <strong id="best-time">—</strong>
-        </article>
-        <article class="metric-box reference-card norm-card" id="reference-lap-card">
-          <button class="edit-ref" data-ref-key="lapMs" data-ref-label="reference lap time" title="Edit reference lap time" aria-label="Edit reference lap time">✎</button>
-          <span>Reference Lap Time</span>
-          <strong id="reference-lap-time">—</strong>
-        </article>
-      </section>
-
-      <section class="performance-grid">
+      <section class="sector-panel" aria-label="Sector timing">
         <div class="sector-grid">
           <article class="metric-box" id="sector1-card"><span>Sector 1</span><strong id="sector-1">—</strong></article>
           <article class="metric-box" id="sector2-card"><span>Sector 2</span><strong id="sector-2">—</strong></article>
@@ -169,63 +153,50 @@
           <article class="metric-box" id="best-sector2-card"><span>BEST Sect 2</span><strong id="best-sector-2">—</strong></article>
           <article class="metric-box" id="best-sector3-card"><span>BEST Sect 3</span><strong id="best-sector-3">—</strong></article>
         </div>
-
-        <div class="prediction-column">
-          <article class="metric-box prediction norm-card" id="predicted-lap-card">
-            <span>Predicted Lap Time</span>
-            <strong id="predicted-lap-time">—</strong>
-            <small id="predicted-lap-delta">Waiting for S1</small>
-          </article>
-          <article class="metric-box ideal">
-            <span>Ideal Time</span>
-            <strong id="ideal-time">—</strong>
-            <small id="ideal-time-delta">Best S1 + best S2 + best S3</small>
-          </article>
-          <label class="xic-input metric-box">
-            <span>Input # XIC</span>
-            <input id="comparison-car" type="text" placeholder="Car #" />
-          </label>
-        </div>
       </section>
 
-      <section class="comparison-grid">
-        <article class="compare-stack">
-          <div class="metric-box"><span id="comparison-1-top-label">Best D1</span><strong id="best-d1-a">—</strong></div>
-          <div class="metric-box"><span id="comparison-1-bottom-label">Last D2</span><strong id="last-d2">—</strong></div>
-          <div class="metric-box delta" id="delta-best-last-card"><span id="comparison-1-delta-label">Delta D2 vs D1</span><strong id="delta-best-last">—</strong></div>
+      <section class="timing-stack board-box" aria-label="Lap timing summary">
+        <article class="timing-row" id="best-time-card">
+          <span>Best Time</span>
+          <strong id="best-time">—</strong>
         </article>
-        <article class="compare-stack">
-          <div class="metric-box"><span id="comparison-2-top-label">Best D1</span><strong id="best-d1-b">—</strong></div>
-          <div class="metric-box"><span id="comparison-2-bottom-label">Best D2</span><strong id="best-d2">—</strong></div>
-          <div class="metric-box delta" id="delta-best-best-card"><span id="comparison-2-delta-label">Delta D2 vs D1</span><strong id="delta-best-best">—</strong></div>
+        <article class="timing-row ideal">
+          <span>Ideal Time</span>
+          <strong id="ideal-time">—</strong>
+          <small id="ideal-time-delta">Best S1 + best S2 + best S3</small>
         </article>
-        <article class="compare-stack">
-          <div class="metric-box"><span id="comparison-3-top-label">Average D1</span><strong id="average-d1">—</strong></div>
-          <div class="metric-box"><span id="comparison-3-bottom-label">Average D2</span><strong id="average-d2">—</strong></div>
-          <div class="metric-box delta" id="delta-average-drivers-card"><span id="comparison-3-delta-label">Delta D2 vs D1</span><strong id="delta-average-drivers">—</strong></div>
+        <article class="timing-row reference-card norm-card" id="reference-lap-card">
+          <button class="edit-ref" data-ref-key="lapMs" data-ref-label="reference lap time" title="Edit reference lap time" aria-label="Edit reference lap time">✎</button>
+          <span>Reference Time</span>
+          <strong id="reference-lap-time">—</strong>
         </article>
-        <article class="compare-stack">
-          <div class="metric-box"><span id="comparison-4-top-label">Average BIC</span><strong id="average-bic">—</strong></div>
-          <div class="metric-box"><span id="comparison-4-bottom-label">Average Dact</span><strong id="average-bic-driver">—</strong></div>
-          <div class="metric-box delta" id="delta-bic-card"><span id="comparison-4-delta-label">Delta Dact vs BIC</span><strong id="delta-bic">—</strong></div>
-        </article>
-        <article class="compare-stack">
-          <div class="metric-box"><span id="comparison-5-top-label">Average XIC</span><strong id="average-xic">—</strong></div>
-          <div class="metric-box"><span id="comparison-5-bottom-label">Average Dact</span><strong id="average-xic-driver">—</strong></div>
-          <div class="metric-box delta" id="delta-xic-card"><span id="comparison-5-delta-label">Delta Dact vs XIC</span><strong id="delta-xic">—</strong></div>
+        <article class="timing-row prediction norm-card" id="predicted-lap-card">
+          <span>Prediction</span>
+          <strong id="predicted-lap-time">—</strong>
+          <small id="predicted-lap-delta">Waiting for S1</small>
         </article>
       </section>
+
+      <section id="comparison-placeholder" class="comparison-placeholder board-box" aria-label="Comparison area"></section>
 
       <section class="battle-strip">
         <article class="metric-box battle-card" id="battle-ahead-card">
           <span>Car ahead in class</span>
           <strong id="battle-ahead-main">—</strong>
-          <small id="battle-ahead-detail">Waiting for class gap and pace</small>
+          <div class="battle-detail" id="battle-ahead-detail">
+            <small id="battle-ahead-delta">Waiting for class gap and pace</small>
+            <small id="battle-ahead-trend"></small>
+            <small id="battle-ahead-prediction"></small>
+          </div>
         </article>
         <article class="metric-box battle-card" id="battle-behind-card">
           <span>Car behind in class</span>
           <strong id="battle-behind-main">—</strong>
-          <small id="battle-behind-detail">Waiting for class gap and pace</small>
+          <div class="battle-detail" id="battle-behind-detail">
+            <small id="battle-behind-delta">Waiting for class gap and pace</small>
+            <small id="battle-behind-trend"></small>
+            <small id="battle-behind-prediction"></small>
+          </div>
         </article>
       </section>
 
@@ -291,6 +262,7 @@
         <input id="timing-url" type="text" value="https://livetiming.getraceresults.com/demo#screen-results" />
         <input id="followed-car" type="text" value="33" />
         <input id="storage-folder" type="text" readonly />
+        <input id="comparison-car" type="hidden" />
         <input id="reference-lap-ms" type="hidden" />
         <input id="reference-sector1-ms" type="hidden" />
         <input id="reference-sector2-ms" type="hidden" />
@@ -310,6 +282,7 @@
     <script src="../shared/pitstopCircuits.js"></script>
     <script src="../shared/pitstopPlanner.js"></script>
     <script src="../shared/normReference.js"></script>
+    <script src="../shared/timingHighlights.js"></script>
     <script src="../shared/dashboardView.js"></script>
     <script src="app.js"></script>
   </body>

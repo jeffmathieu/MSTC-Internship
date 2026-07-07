@@ -256,10 +256,6 @@ function renderPanel(panel) {
 function renderGraphs(state) {
   currentState = state || {};
   sessionMode = currentState.analyticsSummary?.sessionMode || sessionMode;
-  document.getElementById('graphs-session').textContent = currentState.session?.sessionName || currentState.session?.pageTitle || 'Waiting for session data';
-  document.getElementById('graphs-car').textContent = followedCarNumber || '—';
-  document.getElementById('graphs-lap-count').textContent = String((currentState.lapHistory || []).length);
-  document.getElementById('graphs-updated').textContent = currentState.lastSuccessAt ? new Date(currentState.lastSuccessAt).toLocaleTimeString() : '—';
   document.querySelectorAll('.chart-panel').forEach(renderPanel);
 }
 
@@ -269,6 +265,7 @@ async function initGraphs() {
   sessionMode = settings.sessionMode || 'race';
   const queryCar = new URLSearchParams(window.location.search).get('car');
   followedCarNumber = String(queryCar || settings.followedCar || '');
+  document.title = `Race Analysis Graphs - Car #${followedCarNumber || '—'}`;
   document.querySelectorAll('.chart-panel').forEach((panel, index) => {
     panel._viewport = { start: 0, end: 1 };
     const select = panel.querySelector('select');

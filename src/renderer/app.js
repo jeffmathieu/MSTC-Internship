@@ -19,6 +19,7 @@ const pitstopPlanner = window.pitstopPlanner;
 const pitstopCircuits = window.pitstopCircuits;
 const normReference = window.normReference;
 const dashboardView = window.dashboardView;
+const timingHighlights = window.timingHighlights;
 const previousMetricValues = new Map();
 
 // Applies one of the two supported visual themes. Theme colors themselves are
@@ -109,7 +110,7 @@ function setMetric(id, value, { flash = false } = {}) {
   const previous = previousMetricValues.get(id);
   el.textContent = next;
   if (flash && previous && previous !== '—' && next !== '—' && previous !== next) {
-    const card = el.closest('.metric-box');
+    const card = el.closest('.metric-box, .timing-row');
     if (card) {
       card.classList.remove('flash-good');
       void card.offsetWidth;
@@ -380,11 +381,20 @@ function lapsForCar(history, carNumber) {
 // Shows every completed lap for the active dashboard car, newest first. The
 // list remains vertically scrollable for a complete 24-hour history. Status,
 // initials and best-lap highlights are precomputed by timingHighlights.js.
-function renderLapStrip(state, timingHighlights = null) {
+function renderLapStrip(state, precomputedHighlights = null) {
   const list = $('lap-strip-list');
   if (!list) return;
   const carNumber = activeCarNumber();
-  const laps = [...(timingHighlights?.lapStrip || [])].reverse();
+  const storedLapCount = lapsForCar(state?.lapHistory || [], carNumber).length;
+  // lapHistory is the source of truth. Normally the collector supplies an
+  // equally fresh precomputed highlight list; after a partial write/error or
+  // while resuming an older folder, rebuild through the shared module whenever
+  // that list trails the stored history. The renderer still performs no timing
+  // comparison itself.
+  const currentHighlights = precomputedHighlights?.lapStrip?.length === storedLapCount
+    ? precomputedHighlights
+    : timingHighlights?.buildTimingHighlights(state?.lapHistory || [], carNumber) || precomputedHighlights;
+  const laps = [...(currentHighlights?.lapStrip || [])].reverse();
   const currentStint = state?.stintState?.cars?.[carNumber]?.currentStint || null;
   setText('info-stint', currentStint
     ? `Driver stint ${currentStint.driverStintNumber} · ${formatStintClock(currentStint.stintTimeMs)} / total ${formatStintClock(currentStint.totalDriverTimeMs)}`
@@ -421,6 +431,9 @@ function renderLapStrip(state, timingHighlights = null) {
     row.appendChild(marker);
     list.appendChild(row);
   });
+  // New laps are inserted at the top. Ensure a user who previously scrolled
+  // through older laps immediately sees the newly completed lap after a poll.
+  list.scrollTop = 0;
 }
 
 // Converts verbose provider race-control text to labels that fit the compact
@@ -635,11 +648,16 @@ function renderDriverAndClassComparisons(summary, rows) {
 // lap deltas, the confirmed gap chain, and configurable recent-pace estimates.
 function renderAdjacentClassBattles(summary) {
   const battles = summary?.adjacentClassBattles;
+  const setDetailLines = (side, delta = '', trend = '', prediction = '') => {
+    setText(`battle-${side}-delta`, delta);
+    setText(`battle-${side}-trend`, trend);
+    setText(`battle-${side}-prediction`, prediction);
+  };
   const renderSide = (side, item) => {
     const card = $(`battle-${side}-card`);
     if (!item) {
       setText(`battle-${side}-main`, side === 'ahead' && battles?.available ? 'Class leader' : side === 'behind' && battles?.available ? 'No class car behind' : '—');
-      setText(`battle-${side}-detail`, battles?.available ? 'No adjacent rival' : 'Waiting for class gap and pace');
+      setDetailLines(side, battles?.available ? 'No adjacent rival' : 'Waiting for class gap and pace');
       if (card) {
         card.classList.remove('good', 'bad');
         card.classList.add('neutral');
@@ -648,7 +666,12 @@ function renderAdjacentClassBattles(summary) {
     }
     if (battles?.mode === 'qualifying') {
       setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · Best Δ ${displayDelta(numericMs(item.bestLapDeltaMs))}`);
-      setText(`battle-${side}-detail`, `Their best ${formatMs(numericMs(item.rivalBestLapMs))} · our best ${formatMs(numericMs(item.ourBestLapMs))}`);
+      setDetailLines(
+        side,
+        `Their best ${formatMs(numericMs(item.rivalBestLapMs))}`,
+        `Our best ${formatMs(numericMs(item.ourBestLapMs))}`,
+        'Qualifying comparison'
+      );
       if (card) {
         card.classList.remove('good', 'bad', 'neutral');
         card.classList.add(item.trendState || 'neutral');
@@ -657,10 +680,23 @@ function renderAdjacentClassBattles(summary) {
     }
     if (item.suppressed) {
       setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · In pit`);
-      setText(`battle-${side}-detail`, `Catch prediction paused after ${item.rivalPitLaps} of our laps`);
+      setDetailLines(
+        side,
+        `Last lap Δ ${item.lastLapDeltaLabel || '—'}`,
+        item.trendLabel || `#${item.row?.carNumber || '?'} remains in pit`,
+        item.predictionLabel || `Prediction paused after ${item.rivalPitLaps} of our laps`
+      );
     } else {
       setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · Gap ${item.gapLabel}`);
-      setText(`battle-${side}-detail`, `Last lap Δ ${item.lastLapDeltaLabel} · ${item.catchInfo}`);
+      // New summaries provide explicit labels. catchInfo remains a fallback for
+      // race folders saved before the three-line battle-card layout existed.
+      const fallbackParts = String(item.catchInfo || '').split(' · ');
+      setDetailLines(
+        side,
+        `Last lap Δ ${item.lastLapDeltaLabel || '—'}`,
+        item.trendLabel || fallbackParts.slice(0, 2).join(' · '),
+        item.predictionLabel || fallbackParts.slice(2).join(' · ') || 'No catch prediction available'
+      );
     }
     if (card) {
       card.classList.remove('good', 'bad', 'neutral');
@@ -944,7 +980,7 @@ async function editReferenceTime(button) {
     sector3Ms: 'reference-sector3-ms'
   };
   if (!key || !inputByKey[key]) return;
-  const card = button.closest('.metric-box');
+  const card = button.closest('.metric-box, .timing-row');
   if (!card || card.querySelector('.ref-edit-input')) return;
   const currentMs = msFromHiddenInput(inputByKey[key]);
   const editor = document.createElement('input');

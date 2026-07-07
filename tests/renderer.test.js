@@ -98,10 +98,10 @@ class FakeElement {
   focus() {}
   select() {}
   closest(selector) {
-    if (selector !== '.metric-box') return null;
+    if (!selector.includes('.metric-box') && !selector.includes('.timing-row')) return null;
     let node = this;
     while (node) {
-      if (node.classList.contains('metric-box')) return node;
+      if (node.classList.contains('metric-box') || node.classList.contains('timing-row')) return node;
       node = node.parentElement;
     }
     return null;
@@ -122,22 +122,16 @@ function createFakeDocument() {
     return elements.get(id);
   }
 
-  ['last-time-card', 'best-time-card', 'best-sector1-card', 'best-sector2-card', 'best-sector3-card',
-    'delta-best-last-card', 'delta-best-best-card', 'delta-average-drivers-card', 'delta-bic-card', 'delta-xic-card',
-    'predicted-lap-card', 'reference-lap-card', 'ref-sector1-card', 'ref-sector2-card', 'ref-sector3-card'
+  ['best-sector1-card', 'best-sector2-card', 'best-sector3-card',
+    'ref-sector1-card', 'ref-sector2-card', 'ref-sector3-card'
   ].forEach((id) => byId(id).classList.add('metric-box'));
+  ['best-time-card', 'predicted-lap-card', 'reference-lap-card'].forEach((id) => byId(id).classList.add('timing-row'));
 
   const metricChildren = {
-    'last-time': 'last-time-card',
     'best-time': 'best-time-card',
     'best-sector-1': 'best-sector1-card',
     'best-sector-2': 'best-sector2-card',
-    'best-sector-3': 'best-sector3-card',
-    'delta-best-last': 'delta-best-last-card',
-    'delta-best-best': 'delta-best-best-card',
-    'delta-average-drivers': 'delta-average-drivers-card',
-    'delta-bic': 'delta-bic-card',
-    'delta-xic': 'delta-xic-card'
+    'best-sector-3': 'best-sector3-card'
   };
   Object.entries(metricChildren).forEach(([childId, parentId]) => {
     byId(childId).parentElement = byId(parentId);
@@ -159,7 +153,7 @@ function createFakeDocument() {
     elements,
     documentElement: new FakeElement('html', 'html'),
     body: new FakeElement('body', 'body'),
-    getElementById: byId,
+    getElementById: (id) => elements.get(id) || null,
     createElement: (tagName) => new FakeElement('', tagName),
     querySelector: (selector) => tableBodies.has(selector) ? tableBodies.get(selector) : null,
     querySelectorAll: (selector) => selector === '.edit-ref' ? [editReferenceLap] : []
@@ -333,7 +327,7 @@ const liveTiming = {
 };
 
 const context = {
-  window: { location: { search: '' }, liveTiming, classBattle: {}, lapAnalytics: require('../src/shared/lapAnalytics'), pitstopCircuits: require('../src/shared/pitstopCircuits'), pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
+  window: { location: { search: '' }, liveTiming, classBattle: {}, lapAnalytics: require('../src/shared/lapAnalytics'), timingHighlights: require('../src/shared/timingHighlights'), pitstopCircuits: require('../src/shared/pitstopCircuits'), pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
   document,
   URLSearchParams,
   console,
@@ -362,7 +356,7 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('info-car').textContent, '13');
   assert.strictEqual(document.getElementById('info-driver').textContent, 'Nigel Moore');
   assert.strictEqual(document.getElementById('info-class-pic').textContent, 'LMP3 / 1');
-  assert.strictEqual(document.getElementById('last-time').textContent, '2:05.000');
+  assert.strictEqual(document.getElementById('last-time'), null, 'last time is represented by the lap strip instead of a duplicate card');
   assert.strictEqual(document.getElementById('best-time').textContent, '2:03.500');
   assert.strictEqual(document.getElementById('sector-1').textContent, '41.000');
   assert.strictEqual(document.getElementById('reference-lap-time').textContent, '2:04.500');
@@ -400,6 +394,20 @@ module.exports = (async () => {
   assert.strictEqual(lapRows[1].children[3].textContent, 'P');
   assert.strictEqual(lapRows[2].classList.contains('neutralized'), true);
   assert.strictEqual(lapRows[3].classList.contains('class-best'), true);
+  const stateWithFreshLapAndStaleHighlights = {
+    ...updatedState,
+    lapHistory: [
+      ...updatedState.lapHistory,
+      { carNumber: '13', driverName: 'Nigel Moore', lapNumber: 5, lapTimeMs: 124000, pitInfo: '0', sessionFlag: 'Green flag', collectedAt: '2026-06-25T10:11:44.000Z' }
+    ]
+  };
+  collectorUpdate(stateWithFreshLapAndStaleHighlights);
+  await flushAsync();
+  const refreshedLapRows = document.getElementById('lap-strip-list').children;
+  assert.strictEqual(refreshedLapRows.length, 5, 'lap strip follows fresh history even when the analytics summary is one poll behind');
+  assert.strictEqual(refreshedLapRows[0].children[0].textContent, '5', 'the newly completed lap is immediately visible at the top');
+  collectorUpdate(updatedState);
+  await flushAsync();
   assert.strictEqual(document.getElementById('best-time').classList.contains('class-best-value'), true);
 
   assert.strictEqual(document.getElementById('best-sector-1').textContent, '0:41.000');
@@ -439,14 +447,7 @@ module.exports = (async () => {
   await flushAsync();
   assert.strictEqual(lastSettingsPatch.referenceTimes.lapMs, 126000);
 
-  assert.strictEqual(document.getElementById('best-d1-a').textContent, '2:03.000');
-  assert.strictEqual(document.getElementById('last-d2').textContent, '2:06.500');
-  assert.strictEqual(document.getElementById('delta-best-last').textContent, '+3.500s');
-  assert.ok(document.getElementById('delta-best-last-card').classList.contains('bad'));
-  assert.strictEqual(document.getElementById('delta-bic').textContent, '-0.500s');
-  assert.ok(document.getElementById('delta-bic-card').classList.contains('good'));
-  assert.strictEqual(document.getElementById('delta-xic').textContent, '-1.000s');
-  assert.ok(document.getElementById('delta-xic-card').classList.contains('good'));
+  assert.ok(document.getElementById('comparison-placeholder'), 'the redesigned comparison area remains intentionally empty');
   assert.strictEqual(document.getElementById('pit-status').textContent, 'Pit window open');
   assert.strictEqual(document.getElementById('pit-stops-summary').textContent, '1/2');
   assert.strictEqual(document.getElementById('pit-next').textContent, 'Now');
@@ -481,8 +482,9 @@ module.exports = (async () => {
   assert.ok(cooldownPeriods[0].style.width.startsWith('10.416'));
   assert.strictEqual(cooldownPeriods[1].style.left, '50%');
   assert.strictEqual(document.getElementById('battle-ahead-main').textContent, '#2 · Gap 5.000s');
-  assert.ok(document.getElementById('battle-ahead-detail').textContent.includes('Last lap Δ +0.500s'));
-  assert.ok(document.getElementById('battle-ahead-detail').textContent.includes('10.0 laps'));
+  assert.strictEqual(document.getElementById('battle-ahead-delta').textContent, 'Last lap Δ +0.500s');
+  assert.ok(document.getElementById('battle-ahead-trend').textContent.includes('we catch #2'));
+  assert.ok(document.getElementById('battle-ahead-prediction').textContent.includes('10.0 laps'));
   assert.ok(document.getElementById('battle-ahead-card').classList.contains('good'));
   assert.strictEqual(document.getElementById('battle-behind-main').textContent, '#56 · Gap 10.000s');
   assert.ok(document.getElementById('battle-behind-card').classList.contains('bad'));
@@ -559,12 +561,11 @@ module.exports = (async () => {
   };
   collectorUpdate(qualifyingState);
   await flushAsync();
-  assert.strictEqual(document.getElementById('comparison-3-top-label').textContent, 'Last team driver');
-  assert.strictEqual(document.getElementById('average-d1').textContent, '2:04.500');
-  assert.strictEqual(document.getElementById('comparison-4-top-label').textContent, 'Best BIC');
-  assert.strictEqual(document.getElementById('delta-bic').textContent, '+1.000s');
+  assert.ok(document.getElementById('comparison-placeholder'), 'mode changes do not repopulate the reserved comparison area');
   assert.strictEqual(document.getElementById('battle-ahead-main').textContent, '#2 · Best Δ +1.500s');
-  assert.ok(document.getElementById('battle-ahead-detail').textContent.includes('Their best 2:02.000'));
+  assert.strictEqual(document.getElementById('battle-ahead-delta').textContent, 'Their best 2:02.000');
+  assert.strictEqual(document.getElementById('battle-ahead-trend').textContent, 'Our best 2:03.500');
+  assert.strictEqual(document.getElementById('battle-ahead-prediction').textContent, 'Qualifying comparison');
 
   document.getElementById('mode-race').checked = false;
   document.getElementById('mode-qualifying').checked = true;

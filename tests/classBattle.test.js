@@ -160,6 +160,8 @@ assert.strictEqual(chaserItem.battle.lapsToCatch, 12);
 assert.ok(chaserItem.battle.catchInfo.includes('#2 catches us'));
 assert.ok(chaserItem.battle.catchInfo.includes('they gain 1.000s/l'));
 assert.ok(chaserItem.battle.catchInfo.includes('12.0 laps'));
+assert.strictEqual(chaserItem.battle.trendLabel, '#2 catches us · they gain 1.000s/l');
+assert.strictEqual(chaserItem.battle.predictionLabel, 'Expected in 12.0 laps · 25.2 min');
 
 const followedBehindSummary = buildClassBattleSummary(sameClassRows, history, 2);
 const leaderItem = followedBehindSummary.items.find((item) => String(item.row.carNumber) === '13');
@@ -175,6 +177,7 @@ const slowerBehindSummary = buildClassBattleSummary(sameClassRows, [
 const slowerLeaderItem = slowerBehindSummary.items.find((item) => String(item.row.carNumber) === '13');
 assert.strictEqual(slowerLeaderItem.battle.estimate, 'we are not catching');
 assert.ok(slowerLeaderItem.battle.catchInfo.includes('we lose 1.000s/l'));
+assert.strictEqual(slowerLeaderItem.battle.predictionLabel, 'No catch predicted at current pace');
 
 const slowerTrailingCar = buildAdjacentClassBattles(sameClassRows, [
   { carNumber: 13, lapNumber: 1, lastLapMs: 125000 },

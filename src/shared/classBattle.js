@@ -324,6 +324,14 @@ function buildBattleItem({ rows, classRows, followed, row, history, lapWindow, c
     Number.isFinite(lapsToCatch) ? `${gapIsEstimate ? 'est. ' : ''}${lapsToCatch.toFixed(1)} laps` : '',
     Number.isFinite(minutesToCatch) ? `${gapIsEstimate ? 'est. ' : ''}${minutesToCatch.toFixed(1)} min` : ''
   ].filter(Boolean).join(' · ');
+  // Keep the dashboard copy structured. Views can place the pace statement
+  // and catch estimate on separate lines without parsing catchInfo.
+  const trendLabel = [estimate, deltaLabel].filter(Boolean).join(' · ');
+  const predictionLabel = Number.isFinite(lapsToCatch)
+    ? `${gapIsEstimate ? 'Estimated' : 'Expected'} in ${lapsToCatch.toFixed(1)} laps${Number.isFinite(minutesToCatch) ? ` · ${minutesToCatch.toFixed(1)} min` : ''}`
+    : suppressed
+      ? `Prediction paused after ${confirmedGap?.rivalPitLaps || 0} of our laps`
+      : 'No catch predicted at current pace';
   const trendState = !Number.isFinite(deltaPerLap) || deltaPerLap === 0
     ? 'neutral'
     : relation === 'ahead'
@@ -350,6 +358,8 @@ function buildBattleItem({ rows, classRows, followed, row, history, lapWindow, c
     minutesToCatch,
     estimate,
     catchInfo,
+    trendLabel,
+    predictionLabel,
     trendState,
     suppressed,
     gapSource: confirmedGap?.source || (Number.isFinite(relativeGap) ? 'live-poll' : 'unavailable'),
