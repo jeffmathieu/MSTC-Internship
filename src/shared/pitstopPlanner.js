@@ -869,6 +869,75 @@ function buildPitRecommendation({ clock, rules, schedule, windowState, pitLoss, 
   return { ...base, action: 'PLAN PIT', level: 'normal', reason: 'Keep this stop before the safe deadline or use an earlier FCY opportunity.', targetElapsedMs: deadlineMs };
 }
 
+// Evaluates a manually configured tyre-change scenario without pretending the
+// timing feed knows rain intensity, track temperature, tyre age, or grip. The
+// result is advisory only: legal pit-window recommendations remain independent.
+// When the change is combined with an already planned stop, only the extra tyre
+// service time must be earned back. A standalone tyre stop must earn back the
+// complete current pit loss as well.
+function buildTyreStrategyScenario({ strategy = {}, pitLoss = {}, currentCondition = 'unknown' } = {}) {
+  const enabled = strategy.enabled === true;
+  const currentTyre = String(strategy.currentTyre || 'unknown');
+  const candidateTyre = String(strategy.candidateTyre || 'unknown');
+  const gainMinMsPerLap = Math.max(0, numberOrNull(strategy.gainMinMsPerLap) || 0);
+  const gainMaxMsPerLap = Math.max(gainMinMsPerLap, numberOrNull(strategy.gainMaxMsPerLap) || 0);
+  const expectedLaps = Math.max(0, Math.floor(numberOrNull(strategy.expectedLaps) || 0));
+  const additionalPitTimeMs = Math.max(0, numberOrNull(strategy.additionalPitTimeMs) || 0);
+  const combinedWithPlannedStop = strategy.combinedWithPlannedStop === true;
+  const fullPitLossMs = numberOrNull(pitLoss.pitLossMs);
+  const changeCostMs = combinedWithPlannedStop
+    ? additionalPitTimeMs
+    : fullPitLossMs === null ? null : fullPitLossMs + additionalPitTimeMs;
+  const base = {
+    enabled,
+    currentCondition: String(currentCondition || 'unknown'),
+    currentTyre,
+    candidateTyre,
+    gainMinMsPerLap,
+    gainMaxMsPerLap,
+    expectedLaps,
+    additionalPitTimeMs,
+    combinedWithPlannedStop,
+    changeCostMs
+  };
+
+  if (!enabled) return { ...base, available: false, status: 'disabled', reason: 'Tyre scenario is disabled.' };
+  if (candidateTyre === 'unknown' || candidateTyre === currentTyre) {
+    return { ...base, available: false, status: 'invalid', reason: 'Choose a different candidate tyre.' };
+  }
+  if (!(gainMaxMsPerLap > 0) || expectedLaps <= 0) {
+    return { ...base, available: false, status: 'insufficient-data', reason: 'Enter an expected lap gain and the number of laps in these conditions.' };
+  }
+  if (changeCostMs === null) {
+    return { ...base, available: false, status: 'waiting', reason: 'Waiting for a reliable pit-loss estimate.' };
+  }
+
+  const breakEvenBestCaseLaps = changeCostMs / gainMaxMsPerLap;
+  const breakEvenWorstCaseLaps = gainMinMsPerLap > 0 ? changeCostMs / gainMinMsPerLap : null;
+  const netGainMinMs = expectedLaps * gainMinMsPerLap - changeCostMs;
+  const netGainMaxMs = expectedLaps * gainMaxMsPerLap - changeCostMs;
+  const status = netGainMinMs > 0 ? 'favourable' : netGainMaxMs > 0 ? 'possible' : 'not-favourable';
+  const conditionMismatch = (currentCondition === 'wet' && candidateTyre === 'dry')
+    || (currentCondition === 'dry' && candidateTyre === 'wet');
+  return {
+    ...base,
+    available: true,
+    status,
+    breakEvenBestCaseLaps,
+    breakEvenWorstCaseLaps,
+    netGainMinMs,
+    netGainMaxMs,
+    conditionMismatch,
+    reason: conditionMismatch
+      ? `Candidate ${candidateTyre} tyres do not match the manually selected ${currentCondition} condition.`
+      : status === 'favourable'
+        ? 'The entered gain pays back the tyre-change cost in both estimates.'
+        : status === 'possible'
+          ? 'The tyre change only pays back in the optimistic estimate.'
+          : 'The entered gain does not pay back the tyre-change cost over the expected laps.'
+  };
+}
+
 // Produces the full dashboard-facing pitstop object. Callers pass live rows,
 // session clock, current pit state, and rules; the returned object contains all
 // status labels, required-stop counts, timing windows, and after-pit projection.
@@ -910,6 +979,11 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
     requirementsComplete,
     averageLapMs
   });
+  const tyreScenario = buildTyreStrategyScenario({
+    strategy: strategyInputs.tyreScenario || {},
+    pitLoss,
+    currentCondition: strategyInputs.currentCondition || 'unknown'
+  });
   const isStrategyUrgent = ['critical', 'warning'].includes(recommendation.level)
     && windowState.allowed
     && !requirementsComplete;
@@ -950,6 +1024,7 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
     mustPitSoonMs,
     schedule,
     recommendation,
+    tyreScenario,
     projection,
     pitLoss,
     fcyGapState
@@ -982,6 +1057,7 @@ return {
   latestSafePitElapsedMsForRemainingStops,
   buildRequiredStopSchedule,
   buildPitRecommendation,
+  buildTyreStrategyScenario,
   buildPitstopPlan
 };
 });

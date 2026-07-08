@@ -202,6 +202,8 @@ function buildPayload(history, carNumber, rawHistory = history) {
     referenceTimes: SPA_REFERENCE_TIMES,
     raceSummary: {
       stats: raceStats,
+      statsByCondition: Object.fromEntries(Object.entries(analytics.statsByCondition(ourLaps))
+        .map(([condition, conditionStats]) => [condition, compactStats(conditionStats)])),
       recordedRaceTimeMs: elapsedMs(ourLaps),
       totalLaps: ourLaps.length,
       finalClassPosition: ourLaps.at(-1)?.classPosition || '',
@@ -240,6 +242,8 @@ function buildPayload(history, carNumber, rawHistory = history) {
         stintTimeMs: elapsedMs(stint.laps),
         totalDriverTimeMs: elapsedMs(stint.laps),
         stats: compactStats(stats),
+        statsByCondition: Object.fromEntries(Object.entries(analytics.statsByCondition(stint.laps))
+          .map(([condition, conditionStats]) => [condition, compactStats(conditionStats)])),
         driverRaceStats: driverTotal,
         teammates,
         classComparisons,
@@ -255,6 +259,10 @@ function buildPayload(history, carNumber, rawHistory = history) {
           sector2Status: statusForSector(lap, 2),
           sector3Status: statusForSector(lap, 3),
           lapPhase: lap.lapPhase || '',
+          lapCondition: lap.lapCondition || lap.trackCondition || 'unknown',
+          sector1Condition: lap.sector1Condition || lap.lapCondition || lap.trackCondition || 'unknown',
+          sector2Condition: lap.sector2Condition || lap.lapCondition || lap.trackCondition || 'unknown',
+          sector3Condition: lap.sector3Condition || lap.lapCondition || lap.trackCondition || 'unknown',
           sessionFlag: lap.sessionFlag || lap.lapFlag || '',
           classPosition: lap.classPosition || '',
           gapToOverallLeaderMs: numericGapMs(lap.gap),

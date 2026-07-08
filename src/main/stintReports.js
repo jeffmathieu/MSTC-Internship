@@ -5,7 +5,7 @@ const { spawnSync } = require('child_process');
 const lapAnalytics = require('../shared/lapAnalytics');
 const { buildStintInsights, classComparisonsForStint, classRankingForStint } = require('../shared/stintInsights');
 
-const REPORT_LAYOUT_VERSION = 'canonical-reportlab-landscape-v3';
+const REPORT_LAYOUT_VERSION = 'canonical-reportlab-landscape-v4-conditions';
 
 function safeFilePart(value, fallback = 'Unknown') {
   const safe = String(value || '')
@@ -104,6 +104,10 @@ function buildStintReportPayload(stint, session = {}, gapSamples = []) {
         sector3Ms: lap.sector3Ms,
         lapPhase: lap.lapPhase || '',
         flag: lap.sessionFlag || lap.lapFlag || '',
+        lapCondition: lap.lapCondition || lap.trackCondition || 'unknown',
+        sector1Condition: lap.sector1Condition || lap.lapCondition || lap.trackCondition || 'unknown',
+        sector2Condition: lap.sector2Condition || lap.lapCondition || lap.trackCondition || 'unknown',
+        sector3Condition: lap.sector3Condition || lap.lapCondition || lap.trackCondition || 'unknown',
         status: lapStatus(lap, representativeLaps),
         sector1Status: sectorStatus(lap, 1),
         sector2Status: sectorStatus(lap, 2),
@@ -210,6 +214,8 @@ function canonicalStint(stint, session, gapSamples, driverStats, history, refere
     stintTimeMs: legacy.stint.stintTimeMs,
     totalDriverTimeMs: legacy.stint.totalDriverTimeMs,
     stats: compactStats(stats),
+    statsByCondition: Object.fromEntries(Object.entries(lapAnalytics.statsByCondition(stint.laps || []))
+      .map(([condition, conditionStats]) => [condition, compactStats(conditionStats)])),
     driverRaceStats: driverStats.find((driver) => driver.driverName === legacy.session.driverName) || null,
     teammates,
     classComparisons,
@@ -256,6 +262,8 @@ function buildCanonicalReportPayload({ stints = [], session = {}, gapSamples = [
     },
     raceSummary: {
       stats: compactStats(lapAnalytics.statsForLaps(raceLaps)),
+      statsByCondition: Object.fromEntries(Object.entries(lapAnalytics.statsByCondition(raceLaps))
+        .map(([condition, conditionStats]) => [condition, compactStats(conditionStats)])),
       recordedRaceTimeMs: sumLapTimes(raceLaps),
       totalLaps: raceLaps.length,
       finalClassPosition: raceLaps.at(-1)?.classPosition || '',

@@ -17,8 +17,8 @@ const {
 } = require('../src/main/stintReports');
 
 const history = [
-  lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver / One', lapNumber: 1, lapTimeMs: 180000, sector1Ms: 55000, sector2Ms: 79000, sector3Ms: 46000 }),
-  lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver / One', lapNumber: 2, lapTimeMs: 240000, sector1Ms: 70000, sector2Ms: 100000, sector3Ms: 70000, sessionFlag: 'FCY' }),
+  lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver / One', lapNumber: 1, lapTimeMs: 180000, sector1Ms: 55000, sector2Ms: 79000, sector3Ms: 46000, lapCondition: 'dry', sector1Condition: 'dry', sector2Condition: 'dry', sector3Condition: 'dry' }),
+  lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver / One', lapNumber: 2, lapTimeMs: 240000, sector1Ms: 70000, sector2Ms: 100000, sector3Ms: 70000, sessionFlag: 'FCY', lapCondition: 'transition', sector1Condition: 'dry', sector2Condition: 'transition', sector3Condition: 'wet' }),
   lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver Two', lapNumber: 3, lapTimeMs: 181000, sector1Ms: 55000, sector2Ms: 79500, sector3Ms: 46500 })
 ];
 const closedStint = stintsForCar(history, 33)[0];
@@ -34,6 +34,8 @@ assert.strictEqual(htmlEscape('<MSTC & "team">'), '&lt;MSTC &amp; &quot;team&quo
 assert.strictEqual(payload.stint.laps[0].status, 'valid');
 assert.strictEqual(payload.stint.laps[1].status, 'neutralized');
 assert.strictEqual(payload.stint.stats.paceLapCount, 1);
+assert.strictEqual(payload.stint.laps[0].lapCondition, 'dry');
+assert.strictEqual(payload.stint.laps[1].sector3Condition, 'wet');
 assert.strictEqual(payload.gapHistory.length, 1);
 assert.strictEqual(payload.gapHistory[0].rivalCarNumber, '2');
 const html = buildStintReportHtml(payload);
@@ -57,6 +59,8 @@ assert.strictEqual(canonical.stints.length, 1);
 assert.strictEqual(canonical.stints[0].driverName, 'Driver / One');
 assert.strictEqual(canonical.stints[0].laps[1].status, 'neutralized');
 assert.strictEqual(canonical.stints[0].teammates[0].driverName, 'Driver Two');
+assert.strictEqual(canonical.stints[0].statsByCondition.dry.paceLapCount, 1);
+assert.strictEqual(canonical.stints[0].statsByCondition.wet.averageSector3Ms, null, 'neutralized wet sectors stay out of report pace');
 assert.strictEqual(canonical.stints[0].gapHistory.length, 1, 'suppressed long-pit samples stay out of the PDF');
 
 const output = fs.mkdtempSync(path.join(os.tmpdir(), 'mstc-stint-report-'));

@@ -10,6 +10,8 @@ assert.ok(html.includes('class="timing-stack board-box"'), 'best, ideal, referen
 assert.ok(html.includes('class="comparison-placeholder board-box"'), 'comparison space remains reserved and empty');
 assert.strictEqual(html.includes('id="last-time-card"'), false, 'the duplicate last-time card is removed');
 assert.strictEqual(html.includes('class="compare-stack"'), false, 'old comparison cards are absent');
+assert.match(html, /id="track-condition"[\s\S]*?<option value="dry"[^>]*>☀<\/option>/, 'track condition uses compact weather symbols');
+assert.match(html, /id="analysis-condition"[\s\S]*?<option value="combined"[^>]*>Σ<\/option>/, 'analysis condition uses a compact combined symbol');
 
 const timingOrder = ['best-time-card', 'ideal-time', 'reference-lap-card', 'predicted-lap-card']
   .map((id) => html.indexOf(`id="${id}"`));

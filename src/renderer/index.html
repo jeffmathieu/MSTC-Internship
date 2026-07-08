@@ -108,6 +108,46 @@
             FCY pit-now saving (seconds)
             <input id="pit-fcy-strong-seconds" type="number" min="0" step="1" value="15" />
           </label>
+          <label class="pit-tyre-toggle">
+            <span>Evaluate tyre-change scenario</span>
+            <input id="pit-tyre-enabled" type="checkbox" />
+          </label>
+          <label>
+            Current tyres
+            <select id="pit-current-tyre">
+              <option value="unknown">Unknown</option>
+              <option value="dry">Dry</option>
+              <option value="wet">Wet</option>
+            </select>
+          </label>
+          <label>
+            Candidate tyres
+            <select id="pit-candidate-tyre">
+              <option value="unknown">Choose tyres</option>
+              <option value="dry">Dry</option>
+              <option value="wet">Wet</option>
+            </select>
+          </label>
+          <label>
+            Expected gain min (s/lap)
+            <input id="pit-tyre-gain-min" type="number" min="0" step="0.1" value="0" />
+          </label>
+          <label>
+            Expected gain max (s/lap)
+            <input id="pit-tyre-gain-max" type="number" min="0" step="0.1" value="0" />
+          </label>
+          <label>
+            Expected laps in condition
+            <input id="pit-tyre-expected-laps" type="number" min="0" step="1" value="0" />
+          </label>
+          <label>
+            Extra tyre service time (seconds)
+            <input id="pit-tyre-extra-seconds" type="number" min="0" step="1" value="0" />
+          </label>
+          <label class="pit-tyre-toggle">
+            <span>Combine with planned stop</span>
+            <input id="pit-tyre-combined" type="checkbox" checked />
+          </label>
         </div>
         <p id="pit-distance-note" class="subtitle"></p>
         <div class="button-row end">
@@ -146,6 +186,18 @@
           <strong id="status-text">—</strong>
         </div>
         <div class="controls">
+          <select id="track-condition" class="condition-select" title="Current track condition: dry, wet or transition" aria-label="Current track condition">
+            <option value="dry" title="Dry">☀</option>
+            <option value="wet" title="Wet">☂</option>
+            <option value="transition" title="Transition">🌦</option>
+          </select>
+          <select id="analysis-condition" class="condition-select" title="Pace filter: current condition, dry, wet, transition or combined" aria-label="Pace analysis condition">
+            <option value="current" title="Current condition">◉</option>
+            <option value="dry" title="Dry only">☀</option>
+            <option value="wet" title="Wet only">☂</option>
+            <option value="transition" title="Transition only">🌦</option>
+            <option value="combined" title="Combined conditions">Σ</option>
+          </select>
           <button id="open-graphs" class="secondary icon-button" title="Open graphs" aria-label="Open graphs">
             <svg class="graph-icon" aria-hidden="true" viewBox="0 0 24 24">
               <path d="M3 3v18h18"></path>
@@ -342,6 +394,7 @@
       </div>
     </main>
 
+    <script src="../shared/trackConditions.js"></script>
     <script src="../shared/lapAnalytics.js"></script>
     <script src="../shared/classBattle.js"></script>
     <script src="../shared/pitstopCircuits.js"></script>

@@ -13,6 +13,10 @@ const {
   average,
   numberOrNull
 } = require('./lapAnalytics');
+const {
+  normalizeTrackCondition,
+  sectorMatchesCondition
+} = require('./trackConditions');
 
 const DEFAULT_OPTIONS = {
   // Ten laps is a practical compromise for endurance racing: it reacts to tyre,
@@ -24,11 +28,12 @@ function liveSectorMs(row, sectorNumber) {
   return numberOrNull(row?.[`sector${sectorNumber}Ms`]) ?? parseLapTimeToMs(row?.[`sector${sectorNumber}`]);
 }
 
-function currentSectorUsable(row, sectorNumber) {
+function currentSectorUsable(row, sectorNumber, condition = 'combined') {
   const explicit = row?.[`sector${sectorNumber}Eligible`];
   if (explicit === false || explicit === 'false' || explicit === 0 || explicit === '0') return false;
   const flag = String(row?.[`sector${sectorNumber}Flag`] || row?.lapFlag || row?.sessionFlag || '');
-  return !/safety\s*car|full\s*course\s*yellow|\bfcy\b|code\s*60|yellow|red\s*flag|\bred\b/i.test(flag);
+  if (/safety\s*car|full\s*course\s*yellow|\bfcy\b|code\s*60|yellow|red\s*flag|\bred\b/i.test(flag)) return false;
+  return condition === 'combined' || sectorMatchesCondition(row, sectorNumber, condition);
 }
 
 function sortLapsChronologically(laps) {
@@ -42,10 +47,29 @@ function sortLapsChronologically(laps) {
 
 // Returns the most recent valid sector values for one driver. Sector validity is
 // checked per sector, so an FCY in sector 3 does not throw away sector 1 and 2.
-function recentDriverSectorValues(history, carNumber, driverName, sectorNumber, sampleSize = DEFAULT_OPTIONS.sampleSize) {
+function recentDriverSectorValues(history, carNumber, driverName, sectorNumber, sampleSize = DEFAULT_OPTIONS.sampleSize, options = {}) {
+  const condition = options.condition || 'combined';
   return sortLapsChronologically(completedLaps(history))
     .filter((lap) => lap.carNumber === String(carNumber) && lap.driverName === driverName)
-    .filter((lap) => sectorPaceEligible(lap, sectorNumber))
+    .filter((lap) => sectorPaceEligible(lap, sectorNumber, { conditionFilter: condition }))
+    .map((lap) => numberOrNull(lap[`sector${sectorNumber}Ms`]))
+    .filter((value) => value !== null)
+    .slice(-sampleSize);
+}
+
+function weightedAverage(values) {
+  if (!values.length) return null;
+  const weighted = values.reduce((result, value, index) => ({
+    total: result.total + value * (index + 1),
+    weight: result.weight + index + 1
+  }), { total: 0, weight: 0 });
+  return weighted.total / weighted.weight;
+}
+
+function recentCarSectorValues(history, carNumber, sectorNumber, sampleSize, condition) {
+  return sortLapsChronologically(completedLaps(history))
+    .filter((lap) => lap.carNumber === String(carNumber))
+    .filter((lap) => sectorPaceEligible(lap, sectorNumber, { conditionFilter: condition }))
     .map((lap) => numberOrNull(lap[`sector${sectorNumber}Ms`]))
     .filter((value) => value !== null)
     .slice(-sampleSize);
@@ -53,18 +77,26 @@ function recentDriverSectorValues(history, carNumber, driverName, sectorNumber, 
 
 function recentDriverSectorAverages(history, carNumber, driverName, options = {}) {
   const sampleSize = Math.max(1, Math.floor(options.sampleSize || DEFAULT_OPTIONS.sampleSize));
+  const condition = options.condition || 'combined';
   const sectors = [1, 2, 3].map((sectorNumber) => {
-    const values = recentDriverSectorValues(history, carNumber, driverName, sectorNumber, sampleSize);
+    let values = recentDriverSectorValues(history, carNumber, driverName, sectorNumber, sampleSize, { condition });
+    let modelScope = 'driver';
+    if (!values.length && condition !== 'combined') {
+      values = recentCarSectorValues(history, carNumber, sectorNumber, sampleSize, condition);
+      modelScope = values.length ? 'car' : 'none';
+    }
     return {
       sectorNumber,
       sampleCount: values.length,
-      averageMs: average(values),
+      averageMs: condition === 'combined' ? average(values) : weightedAverage(values),
+      modelScope,
       values
     };
   });
   return {
     driverName,
     carNumber: String(carNumber),
+    condition,
     sampleSize,
     sectors
   };
@@ -90,13 +122,20 @@ function buildLapPrediction({ history = [], rows = [], carNumber = '', currentDr
     return { available: false, reason: 'No current driver yet', carNumber: String(carNumber), driverName: '' };
   }
 
-  const averages = recentDriverSectorAverages(history, carNumber, driverName, options);
+  const currentCondition = options.currentCondition
+    ? normalizeTrackCondition(options.currentCondition)
+    : normalizeTrackCondition(row.trackCondition);
+  const predictionCondition = currentCondition === 'unknown' ? 'combined' : currentCondition;
+  const averages = recentDriverSectorAverages(history, carNumber, driverName, {
+    ...options,
+    condition: predictionCondition
+  });
   const liveSectors = [1, 2, 3].map((sectorNumber) => {
     const liveMs = liveSectorMs(row, sectorNumber);
     return {
       sectorNumber,
       valueMs: liveMs,
-      usable: liveMs !== null && currentSectorUsable(row, sectorNumber)
+      usable: liveMs !== null && currentSectorUsable(row, sectorNumber, predictionCondition)
     };
   });
   const sectorParts = [1, 2, 3].map((sectorNumber) => {
@@ -114,7 +153,10 @@ function buildLapPrediction({ history = [], rows = [], carNumber = '', currentDr
   });
 
   if (!liveSectors[0].usable) {
-    return { available: false, reason: 'Waiting for sector 1', carNumber: String(carNumber), driverName, averages, sectors: sectorParts };
+    const reason = currentCondition === 'transition'
+      ? 'Transition lap: waiting for condition-specific sector 1'
+      : 'Waiting for sector 1';
+    return { available: false, reason, carNumber: String(carNumber), driverName, condition: predictionCondition, averages, sectors: sectorParts };
   }
 
   const missingAverage = sectorParts.find((part) => part.valueMs === null);
@@ -124,6 +166,7 @@ function buildLapPrediction({ history = [], rows = [], carNumber = '', currentDr
       reason: `Need sector ${missingAverage.sectorNumber} history for ${driverName}`,
       carNumber: String(carNumber),
       driverName,
+      condition: predictionCondition,
       averages,
       sectors: sectorParts
     };
@@ -138,6 +181,7 @@ function buildLapPrediction({ history = [], rows = [], carNumber = '', currentDr
     available: true,
     carNumber: String(carNumber),
     driverName,
+    condition: predictionCondition,
     predictedLapMs,
     actualLapMs,
     predictionDeltaMs: actualLapMs === null ? null : actualLapMs - predictedLapMs,
@@ -153,5 +197,6 @@ module.exports = {
   DEFAULT_OPTIONS,
   recentDriverSectorValues,
   recentDriverSectorAverages,
+  weightedAverage,
   buildLapPrediction
 };

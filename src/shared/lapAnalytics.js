@@ -3,10 +3,13 @@
 // This file is UMD-style so it can be used by Node tests with require() and by
 // the renderer as window.lapAnalytics without a build step.
 (function initLapAnalytics(root, factory) {
-  const api = factory();
+  const conditions = typeof module === 'object' && module.exports
+    ? require('./trackConditions')
+    : root?.trackConditions;
+  const api = factory(conditions);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.lapAnalytics = api;
-})(typeof globalThis !== 'undefined' ? globalThis : null, function createLapAnalyticsApi() {
+})(typeof globalThis !== 'undefined' ? globalThis : null, function createLapAnalyticsApi(trackConditions) {
 // This module works on saved lap history records, not live DOM rows. It accepts
 // both the new normalized storage fields (driverName, teamName, lapTimeMs) and
 // older in-memory fields (driver, team, lastLapMs), so existing dashboard state
@@ -136,6 +139,15 @@ function normalizeLap(entry) {
     sector1Eligible: boolOrNull(entry.sector1Eligible),
     sector2Eligible: boolOrNull(entry.sector2Eligible),
     sector3Eligible: boolOrNull(entry.sector3Eligible),
+    trackCondition: trackConditions.normalizeTrackCondition(entry.trackCondition),
+    lapCondition: trackConditions.deriveLapCondition(entry),
+    conditionPhaseId: String(entry.conditionPhaseId || ''),
+    sector1Condition: trackConditions.normalizeTrackCondition(entry.sector1Condition),
+    sector2Condition: trackConditions.normalizeTrackCondition(entry.sector2Condition),
+    sector3Condition: trackConditions.normalizeTrackCondition(entry.sector3Condition),
+    sector1ConditionPhaseId: String(entry.sector1ConditionPhaseId || ''),
+    sector2ConditionPhaseId: String(entry.sector2ConditionPhaseId || ''),
+    sector3ConditionPhaseId: String(entry.sector3ConditionPhaseId || ''),
     pitInfo: String(entry.pitInfo ?? entry.pit ?? ''),
     lapPhase: String(entry.lapPhase ?? ''),
     isPitLap: boolOrNull(entry.isPitLap),
@@ -246,7 +258,10 @@ function lapPaceEligible(lap) {
 // session-elapsed value such as 35:05 among 2:53 laps without discarding normal
 // traffic, mistakes, or a roughly one-minute wet-weather pace change.
 function representativePaceLaps(laps, options = {}) {
-  const eligible = (laps || []).filter(lapPaceEligible);
+  const conditionFilter = trackConditions.normalizeAnalysisFilter(options.conditionFilter, 'combined');
+  const eligible = (laps || [])
+    .filter((lap) => trackConditions.lapMatchesCondition(lap, conditionFilter))
+    .filter(lapPaceEligible);
   const minimumSamples = Number.isFinite(Number(options.minimumSamples)) ? Number(options.minimumSamples) : 3;
   if (eligible.length < minimumSamples) return eligible;
 
@@ -275,8 +290,10 @@ function representativePaceLaps(laps, options = {}) {
 // Decides whether one sector should count for sector averages/bests. This is
 // deliberately more granular than lapPaceEligible: a lap can become FCY in S3
 // while S1/S2 remain valid.
-function sectorPaceEligible(lap, sectorNumber) {
+function sectorPaceEligible(lap, sectorNumber, options = {}) {
   if (pitAffectedLap(lap)) return false;
+  const conditionFilter = trackConditions.normalizeAnalysisFilter(options.conditionFilter, 'combined');
+  if (!trackConditions.sectorMatchesCondition(lap, sectorNumber, conditionFilter)) return false;
   const explicit = boolOrNull(lap[`sector${sectorNumber}Eligible`]);
   const sectorFlag = lap[`sector${sectorNumber}Flag`];
   if (isNeutralizedFlag(sectorFlag)) return false;
@@ -315,21 +332,25 @@ function lapsForDriver(history, carNumber, driverName) {
 
 // Calculates all lap/sector statistics from a set of laps. Full-lap averages
 // use only pace-eligible laps; sector averages use sector-level eligibility.
-function statsForLaps(laps) {
-  const sorted = [...laps].sort((a, b) => {
+function statsForLaps(laps, options = {}) {
+  const conditionFilter = trackConditions.normalizeAnalysisFilter(options.conditionFilter, 'combined');
+  const sortedAll = [...laps].sort((a, b) => {
     const lapDelta = (a.lapNumber ?? 0) - (b.lapNumber ?? 0);
     if (lapDelta) return lapDelta;
     return new Date(a.recordedAt || 0) - new Date(b.recordedAt || 0);
   });
-  const rawPaceLaps = sorted.filter(lapPaceEligible);
-  const paceLaps = representativePaceLaps(sorted);
+  const lapCandidates = conditionFilter === 'combined'
+    ? sortedAll
+    : sortedAll.filter((lap) => trackConditions.lapMatchesCondition(lap, conditionFilter));
+  const rawPaceLaps = lapCandidates.filter(lapPaceEligible);
+  const paceLaps = representativePaceLaps(lapCandidates, { ...options, conditionFilter });
   const paceLapSet = new Set(paceLaps);
   const rawPaceLapSet = new Set(rawPaceLaps);
   const lapTimes = paceLaps.map((lap) => lap.lapTimeMs);
-  const sectorValues = (sectorNumber) => sorted
-    .filter((lap) => sectorPaceEligible(lap, sectorNumber))
+  const sectorValues = (sectorNumber) => sortedAll
+    .filter((lap) => sectorPaceEligible(lap, sectorNumber, { conditionFilter }))
     .map((lap) => lap[`sector${sectorNumber}Ms`]);
-  const excludedLaps = sorted.filter((lap) => !paceLapSet.has(lap)).map((lap) => ({
+  const excludedLaps = lapCandidates.filter((lap) => !paceLapSet.has(lap)).map((lap) => ({
     lapNumber: lap.lapNumber,
     lapTimeMs: lap.lapTimeMs,
     reasons: rawPaceLapSet.has(lap) ? ['timing-outlier'] : baseLapExclusionReasons(lap)
@@ -339,14 +360,16 @@ function statsForLaps(laps) {
     return counts;
   }, {});
   const sectorSelection = (sectorNumber) => {
-    const included = sorted.filter((lap) => sectorPaceEligible(lap, sectorNumber) && numberOrNull(lap[`sector${sectorNumber}Ms`]) !== null);
+    const included = sortedAll.filter((lap) => sectorPaceEligible(lap, sectorNumber, { conditionFilter }) && numberOrNull(lap[`sector${sectorNumber}Ms`]) !== null);
     return {
       includedCount: included.length,
-      excludedCount: sorted.length - included.length
+      excludedCount: sortedAll.length - included.length
     };
   };
   return {
-    lapCount: sorted.length,
+    lapCount: lapCandidates.length,
+    conditionFilter,
+    conditionCounts: trackConditions.conditionCounts(sortedAll),
     paceLapCount: paceLaps.length,
     excludedOutlierLapCount: rawPaceLaps.length - paceLaps.length,
     averageLapMs: average(lapTimes),
@@ -371,12 +394,22 @@ function statsForLaps(laps) {
         sector3: sectorSelection(3)
       }
     },
-    laps: sorted
+    laps: lapCandidates
   };
 }
 
+// Returns separate pace summaries without blending wet and dry performance.
+// "combined" remains available for descriptive race totals, but live models
+// should select the current condition explicitly.
+function statsByCondition(laps) {
+  return Object.fromEntries(['dry', 'wet', 'transition', 'combined'].map((conditionFilter) => [
+    conditionFilter,
+    statsForLaps(laps, { conditionFilter })
+  ]));
+}
+
 // Groups one car's laps by driver name and returns stats for each driver/stint.
-function driverStats(history, carNumber) {
+function driverStats(history, carNumber, options = {}) {
   const groups = new Map();
   lapsForCar(history, carNumber).forEach((lap) => {
     const driver = lap.driverName || 'Unknown';
@@ -387,7 +420,7 @@ function driverStats(history, carNumber) {
   return [...groups.entries()].map(([driverName, laps]) => ({
     driverName,
     carNumber: String(carNumber),
-    ...statsForLaps(laps)
+    ...statsForLaps(laps, options)
   }));
 }
 
@@ -401,18 +434,18 @@ function currentDriverName(history, carNumber, explicitDriverName = '') {
 
 // Finds the driver with the lowest average lap time in one car. This is used as
 // D1/reference driver in the dashboard comparison boxes.
-function bestDriverByAverage(history, carNumber) {
-  return driverStats(history, carNumber)
+function bestDriverByAverage(history, carNumber, options = {}) {
+  return driverStats(history, carNumber, options)
     .filter((stats) => stats.averageLapMs !== null)
     .sort((a, b) => a.averageLapMs - b.averageLapMs)[0] || null;
 }
 
 // Compares the current driver with the best-average driver in the same car.
 // Deltas are current minus reference: positive means the current driver is slower.
-function compareBestDriverToCurrentDriver(history, carNumber, explicitCurrentDriverName = '') {
+function compareBestDriverToCurrentDriver(history, carNumber, explicitCurrentDriverName = '', options = {}) {
   const currentName = currentDriverName(history, carNumber, explicitCurrentDriverName);
-  const current = driverStats(history, carNumber).find((stats) => stats.driverName === currentName) || null;
-  const best = bestDriverByAverage(history, carNumber);
+  const current = driverStats(history, carNumber, options).find((stats) => stats.driverName === currentName) || null;
+  const best = bestDriverByAverage(history, carNumber, options);
   if (!current || !best) return null;
 
   return {
@@ -429,9 +462,9 @@ function compareBestDriverToCurrentDriver(history, carNumber, explicitCurrentDri
 
 // Returns aggregate pace statistics for one car, including class/team metadata
 // from its first stored lap.
-function carStats(history, carNumber) {
+function carStats(history, carNumber, options = {}) {
   const laps = lapsForCar(history, carNumber);
-  const base = statsForLaps(laps);
+  const base = statsForLaps(laps, options);
   return {
     carNumber: String(carNumber),
     className: laps[0]?.className || '',
@@ -441,14 +474,14 @@ function carStats(history, carNumber) {
 }
 
 // Returns stats for every car with at least one completed lap in the class.
-function carsInClass(history, className) {
+function carsInClass(history, className, options = {}) {
   const carNumbers = new Set(completedLaps(history).filter((lap) => lap.className === className).map((lap) => lap.carNumber));
-  return [...carNumbers].map((carNumber) => carStats(history, carNumber));
+  return [...carNumbers].map((carNumber) => carStats(history, carNumber, options));
 }
 
 // Finds the best-in-class car by average lap time.
-function bestCarInClassByAverage(history, className) {
-  return carsInClass(history, className)
+function bestCarInClassByAverage(history, className, options = {}) {
+  return carsInClass(history, className, options)
     .filter((stats) => stats.averageLapMs !== null)
     .sort((a, b) => a.averageLapMs - b.averageLapMs)[0] || null;
 }
@@ -456,7 +489,7 @@ function bestCarInClassByAverage(history, className) {
 // Returns only the final contiguous block for the active driver. A driver can
 // return later in the race, so filtering every lap by name would incorrectly
 // merge two separate stints into the current-stint comparison.
-function currentStintStats(history, carNumber, currentDriver = '') {
+function currentStintStats(history, carNumber, currentDriver = '', options = {}) {
   const driver = currentDriverName(history, carNumber, currentDriver);
   const carLaps = lapsForCar(history, carNumber);
   const driverKey = String(driver || '').trim().toLocaleLowerCase();
@@ -468,18 +501,18 @@ function currentStintStats(history, carNumber, currentDriver = '') {
   return {
     driverName: driver,
     carNumber: String(carNumber),
-    ...statsForLaps(currentLaps)
+    ...statsForLaps(currentLaps, options)
   };
 }
 
 // Compares our current stint/driver average with the best car in class and an
 // optional selected class car. Deltas are our current stint average minus target
 // car average: positive means our current stint is slower.
-function compareCarToClassTargets(history, ourCarNumber, selectedCarNumber = '', currentDriver = '') {
-  const ourCar = carStats(history, ourCarNumber);
-  const ourCurrentStint = currentStintStats(history, ourCarNumber, currentDriver);
-  const bestClassCar = ourCar.className ? bestCarInClassByAverage(history, ourCar.className) : null;
-  const selectedCar = selectedCarNumber ? carStats(history, selectedCarNumber) : null;
+function compareCarToClassTargets(history, ourCarNumber, selectedCarNumber = '', currentDriver = '', options = {}) {
+  const ourCar = carStats(history, ourCarNumber, options);
+  const ourCurrentStint = currentStintStats(history, ourCarNumber, currentDriver, options);
+  const bestClassCar = ourCar.className ? bestCarInClassByAverage(history, ourCar.className, options) : null;
+  const selectedCar = selectedCarNumber ? carStats(history, selectedCarNumber, options) : null;
 
   const deltaTo = (target) => {
     if (!target || ourCurrentStint.averageLapMs === null || target.averageLapMs === null) return null;
@@ -507,9 +540,10 @@ function buildDashboardAnalysis(history, options = {}) {
   return {
     ourCarNumber: String(ourCarNumber),
     selectedCarNumber: options.selectedCarNumber ? String(options.selectedCarNumber) : '',
+    conditionFilter: trackConditions.normalizeAnalysisFilter(options.conditionFilter, 'combined'),
     currentDriverName: currentDriver,
-    driverComparison: compareBestDriverToCurrentDriver(history, ourCarNumber, currentDriver),
-    classComparison: compareCarToClassTargets(history, ourCarNumber, options.selectedCarNumber || '', currentDriver)
+    driverComparison: compareBestDriverToCurrentDriver(history, ourCarNumber, currentDriver, options),
+    classComparison: compareCarToClassTargets(history, ourCarNumber, options.selectedCarNumber || '', currentDriver, options)
   };
 }
 
@@ -532,6 +566,7 @@ return {
   lapsForCar,
   lapsForDriver,
   statsForLaps,
+  statsByCondition,
   driverStats,
   currentDriverName,
   bestDriverByAverage,

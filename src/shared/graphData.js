@@ -49,6 +49,7 @@
         y: lap.lapTimeMs,
         eligible: true,
         raceLapNumber,
+        condition: lap.lapCondition || lap.trackCondition || 'unknown',
         label: `Driver lap ${driverLapNumber} · race lap ${raceLapNumber}`
       });
     });
@@ -159,6 +160,7 @@
               x: raceLapNumber,
               y: lap.lapTimeMs,
               eligible: true,
+              condition: lap.lapCondition || lap.trackCondition || 'unknown',
               label: `Lap ${raceLapNumber}`,
               deltaToOurCarMs: Number.isFinite(ourLapMs) ? lap.lapTimeMs - ourLapMs : null
             };

@@ -334,7 +334,7 @@ const liveTiming = {
 };
 
 const context = {
-  window: { location: { search: '' }, liveTiming, classBattle: {}, lapAnalytics: require('../src/shared/lapAnalytics'), timingHighlights: require('../src/shared/timingHighlights'), pitstopCircuits: require('../src/shared/pitstopCircuits'), pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
+  window: { location: { search: '' }, liveTiming, classBattle: {}, trackConditions: require('../src/shared/trackConditions'), lapAnalytics: require('../src/shared/lapAnalytics'), timingHighlights: require('../src/shared/timingHighlights'), pitstopCircuits: require('../src/shared/pitstopCircuits'), pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
   document,
   URLSearchParams,
   console,
@@ -529,6 +529,14 @@ module.exports = (async () => {
   document.getElementById('pit-rule-reference').value = 'pit-exit';
   document.getElementById('pit-fcy-consider-seconds').value = '8';
   document.getElementById('pit-fcy-strong-seconds').value = '18';
+  document.getElementById('pit-tyre-enabled').checked = true;
+  document.getElementById('pit-current-tyre').value = 'dry';
+  document.getElementById('pit-candidate-tyre').value = 'wet';
+  document.getElementById('pit-tyre-gain-min').value = '2.5';
+  document.getElementById('pit-tyre-gain-max').value = '4.0';
+  document.getElementById('pit-tyre-expected-laps').value = '12';
+  document.getElementById('pit-tyre-extra-seconds').value = '10';
+  document.getElementById('pit-tyre-combined').checked = true;
   await document.getElementById('pit-fcy-speed').trigger('input');
   assert.ok(document.getElementById('pit-distance-note').textContent.includes('36.0s'));
   await document.getElementById('pit-setup-save').trigger('click');
@@ -548,6 +556,16 @@ module.exports = (async () => {
   assert.strictEqual(lastSettingsPatch.pitRules.ruleTimingReference, 'pit-exit');
   assert.strictEqual(lastSettingsPatch.pitRules.fcyConsiderSavingsMs, 8000);
   assert.strictEqual(lastSettingsPatch.pitRules.fcyStrongSavingsMs, 18000);
+  assert.deepStrictEqual({ ...lastSettingsPatch.tyreStrategy }, {
+    enabled: true,
+    currentTyre: 'dry',
+    candidateTyre: 'wet',
+    gainMinMsPerLap: 2500,
+    gainMaxMsPerLap: 4000,
+    expectedLaps: 12,
+    additionalPitTimeMs: 10000,
+    combinedWithPlannedStop: true
+  });
   assert.strictEqual(document.getElementById('pit-setup-modal').classList.contains('hidden'), true);
 
   collectorUpdate({ ...updatedState, mode: 'live', status: 'collecting' });

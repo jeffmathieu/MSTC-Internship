@@ -272,6 +272,17 @@ button { cursor: pointer; }
   justify-content: flex-end;
   gap: 6px;
 }
+.condition-select {
+  width: 58px;
+  min-width: 0;
+  height: 35px;
+  border: 2px solid var(--line);
+  background: var(--control);
+  color: var(--ink);
+  padding: 4px 5px;
+  font-size: 18px;
+  font-weight: 900;
+}
 button {
   border: 2px solid var(--line);
   background: var(--control);
@@ -836,6 +847,15 @@ pre {
   gap: 0 14px;
 }
 .pit-setup-grid .pit-circuit-field { grid-column: 1 / -1; }
+.pit-setup-grid .pit-tyre-toggle {
+  align-items: center;
+  grid-template-columns: 1fr auto;
+  min-height: 52px;
+}
+.pit-setup-grid .pit-tyre-toggle input {
+  width: 22px;
+  height: 22px;
+}
 .pit-setup-grid select {
   width: 100%;
   min-height: 39px;

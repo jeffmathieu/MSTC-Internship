@@ -18,12 +18,17 @@ MUTED = HexColor('#68716D')
 PAPER = HexColor('#F5F6F2')
 PANEL = HexColor('#FFFFFF')
 GRID = HexColor('#D8DDD7')
+MINOR_GRID = HexColor("#A3A3A3C8")
 BLUE = HexColor('#2474B5')
 GREEN = HexColor('#1F9D70')
 YELLOW = HexColor('#E6AD2F')
 RED = HexColor('#D94C5F')
 ORANGE = HexColor('#D97730')
 GRAY = HexColor('#9AA19D')
+WET = HexColor('#2A9DB0')
+TRANSITION = HexColor('#D97730')
+POINT_RADIUS = 1.5
+CONDITION_RING_RADIUS = 2.6
 
 
 def fmt_time(ms, decimals=3):
@@ -126,14 +131,20 @@ def draw_chart(c, x, y, w, h, title, laps, value_key, average=None, annotate=Tru
     if high <= low:
         high = low + 1000
 
-    c.setStrokeColor(GRID)
-    c.setLineWidth(0.5)
-    for index in range(4):
-        gy = plot_y + plot_h * index / 3
+    # Major grid lines keep the strong rhythm. Minor dashed lines between them
+    # add extra time references without making the charts visually heavy.
+    for index in range(7):
+        is_major = index % 2 == 0
+        gy = plot_y + plot_h * index / 6
+        label_value = low + (high - low) * index / 6
+        c.setStrokeColor(GRID if is_major else MINOR_GRID)
+        c.setLineWidth(0.5 if is_major else 0.35)
+        if not is_major:
+            c.setDash(1.2, 2.2)
         c.line(plot_x, gy, plot_x + plot_w, gy)
-        label_value = low + (high - low) * index / 3
+        c.setDash()
         c.setFillColor(MUTED)
-        c.setFont('Helvetica', 6.5)
+        c.setFont('Helvetica', 6.5 if is_major else 5.6)
         c.drawRightString(plot_x - 5, gy - 2, fmt_time(label_value))
 
     lap_numbers = [lap.get('lapNumber') or index + 1 for index, (lap, _) in enumerate(points)]
@@ -147,10 +158,21 @@ def draw_chart(c, x, y, w, h, title, laps, value_key, average=None, annotate=Tru
     for index, (lap, value) in enumerate(points):
         px, py = x_for(index), y_for(value)
         if last is not None:
+            # Condition rings change the canvas stroke color. Reset the pace
+            # line before every segment so wet/transition markers never tint
+            # the following line section.
+            c.setStrokeColor(BLUE)
+            c.setLineWidth(1.1)
             c.line(last[0], last[1], px, py)
         last = (px, py)
         c.setFillColor(BLUE)
-        c.circle(px, py, 2.8, fill=1, stroke=0)
+        c.circle(px, py, POINT_RADIUS, fill=1, stroke=0)
+        condition_key = 'lapCondition' if value_key == 'lapTimeMs' else value_key.replace('Ms', 'Condition')
+        condition = lap.get(condition_key, 'unknown')
+        if condition in ('wet', 'transition'):
+            c.setStrokeColor(WET if condition == 'wet' else TRANSITION)
+            c.setLineWidth(0.75)
+            c.circle(px, py, CONDITION_RING_RADIUS, fill=0, stroke=1)
 
     if isinstance(average, (int, float)) and low <= average <= high:
         ay = y_for(average)
@@ -182,6 +204,16 @@ def draw_chart(c, x, y, w, h, title, laps, value_key, average=None, annotate=Tru
 def draw_summary(c, x, y, w, h, stint):
     panel(c, x, y, w, h, 'Stint statistics')
     stats = stint['stats']
+    by_condition = stint.get('statsByCondition') or {}
+    condition_parts = []
+    for condition, label in (('dry', 'Dry'), ('wet', 'Wet')):
+        condition_stats = by_condition.get(condition) or {}
+        if condition_stats.get('paceLapCount', 0):
+            condition_parts.append(f"{label} {fmt_time(condition_stats.get('averageLapMs'))} ({condition_stats.get('paceLapCount')})")
+    if condition_parts:
+        c.setFillColor(MUTED)
+        c.setFont('Helvetica', 5.5)
+        c.drawRightString(x + w - 10, y + h - 15, ' | '.join(condition_parts))
     best_sectors = [stats.get('bestSector1Ms'), stats.get('bestSector2Ms'), stats.get('bestSector3Ms')]
     ideal_time = sum(best_sectors) if all(isinstance(value, (int, float)) and math.isfinite(value) for value in best_sectors) else None
     metrics = [
@@ -272,8 +304,8 @@ def draw_insights(c, x, y, w, h, stint):
     left = [
         ('Consistency*', f"{fmt_gap(consistency.get('standardDeviationMs'))} | {consistency.get('coefficientPercent', 0):.2f}%" if isinstance(consistency.get('coefficientPercent'), (int, float)) else '-'),
         ('Pace trend', signed_rate(data.get('paceTrendMsPerLap'))),
-        ('Best theoretical', fmt_time(data.get('bestTheoreticalLapMs'))),
-        ('Average theoretical', fmt_time(data.get('averageTheoreticalLapMs'))),
+        ('Best theoretical (all)', fmt_time(data.get('bestTheoreticalLapMs'))),
+        ('Average theoretical (all)', fmt_time(data.get('averageTheoreticalLapMs'))),
         ('Stint phases F/M/L', phase_text),
         ('First 5 vs last 5', f"{fmt_time(data.get('firstFiveMs'))} / {fmt_time(data.get('lastFiveMs'))} | {fmt_delta(data.get('firstVsLastFiveDeltaMs'))}"),
     ]
@@ -306,7 +338,16 @@ def draw_legend(c, x, y):
     c.circle(x, y, 3, fill=1, stroke=0)
     c.setFillColor(MUTED)
     c.setFont('Helvetica', 6.5)
-    c.drawString(x + 6, y - 2, 'Charts show valid samples only; excluded laps remain counted in the summary.')
+    c.drawString(x + 6, y - 2, 'Valid samples only; rings:')
+    c.setStrokeColor(WET)
+    c.setLineWidth(1.2)
+    c.circle(x + 94, y, 4, fill=0, stroke=1)
+    c.setFillColor(MUTED)
+    c.drawString(x + 103, y - 2, 'wet')
+    c.setStrokeColor(TRANSITION)
+    c.circle(x + 136, y, 4, fill=0, stroke=1)
+    c.setFillColor(MUTED)
+    c.drawString(x + 145, y - 2, 'transition; excluded laps remain counted.')
 
 
 def draw_consistency_note(c, x, y):
