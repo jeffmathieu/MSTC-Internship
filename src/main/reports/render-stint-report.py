@@ -304,22 +304,28 @@ def draw_insights(c, x, y, w, h, stint):
     left = [
         ('Consistency*', f"{fmt_gap(consistency.get('standardDeviationMs'))} | {consistency.get('coefficientPercent', 0):.2f}%" if isinstance(consistency.get('coefficientPercent'), (int, float)) else '-'),
         ('Pace trend', signed_rate(data.get('paceTrendMsPerLap'))),
-        ('Best theoretical (all)', fmt_time(data.get('bestTheoreticalLapMs'))),
-        ('Average theoretical (all)', fmt_time(data.get('averageTheoreticalLapMs'))),
-        ('Stint phases F/M/L', phase_text),
-        ('First 5 vs last 5', f"{fmt_time(data.get('firstFiveMs'))} / {fmt_time(data.get('lastFiveMs'))} | {fmt_delta(data.get('firstVsLastFiveDeltaMs'))}"),
+        ('Best theoretical', fmt_time(data.get('bestTheoreticalLapMs'))),
+        ('Average theoretical', fmt_time(data.get('averageTheoreticalLapMs'))),
     ]
     right = [
         ('Class average rank', rank_text('average')),
         ('Class best-lap rank', rank_text('best')),
-        ('Lap reference', compliance_text('lap')),
-        ('S1 reference', compliance_text('sector1')),
-        ('S2 reference', compliance_text('sector2')),
-        ('S3 reference', compliance_text('sector3')),
+        ('Stint phases F/M/L', phase_text),
+        ('First 5 vs last 5', f"{fmt_time(data.get('firstFiveMs'))} / {fmt_time(data.get('lastFiveMs'))} | {fmt_delta(data.get('firstVsLastFiveDeltaMs'))}"),
     ]
 
+    c.setFillColor(MUTED)
+    c.setFont('Helvetica-Bold', 4.9)
+    c.drawString(x + 10, y + h - 30, 'COACHING SUMMARY')
+    yy = y + h - 39
+    c.setFont('Helvetica', 5.6)
+    c.setFillColor(INK)
+    for line in (data.get('coachingSummary') or ['No coaching summary available.'])[:3]:
+        c.drawString(x + 10, yy, str(line)[:82])
+        yy -= 8
+
     def draw_column(items, xx, width):
-        yy = y + h - 31
+        yy = y + h - 69
         for label, value in items:
             c.setFillColor(MUTED)
             c.setFont('Helvetica-Bold', 4.8)
@@ -458,7 +464,6 @@ def render_race_summary(c, payload):
         yy -= 20
     c.setFillColor(MUTED)
     c.setFont('Helvetica', 5.7)
-    c.drawString(left_x + pace_w + 22, 316, 'Laps includes neutralized laps; average and best use valid pace laps only.')
 
     panel(c, pit_x, pit_y, pit_w, pit_h, 'Pitstops - provider measured L. PIT')
     pit_stops = summary.get('pitStops', [])

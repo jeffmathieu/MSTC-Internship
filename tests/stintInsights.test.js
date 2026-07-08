@@ -4,6 +4,7 @@ const {
   standardDeviation,
   paceSlope,
   compliance,
+  buildCoachingSummary,
   buildStintInsights,
   classComparisonsForStint,
   classRankingForStint
@@ -26,6 +27,10 @@ assert.strictEqual(insights.personalBestProgression.length, 3);
 assert.strictEqual(insights.compliance.lap.violationCount, 2);
 assert.strictEqual(insights.compliance.sector1.label, 'OK - reference not set');
 assert.strictEqual(insights.compliance.sector2.violationCount, 0);
+assert.ok(insights.coachingSummary.some((line) => line.includes('Main time loss was S2')), 'coaching finds the largest sector spread');
+assert.ok(insights.coachingSummary.some((line) => line.includes('Pace improved')), 'coaching describes pace trend direction');
+assert.ok(insights.coachingSummary.some((line) => line.includes('Best phase')), 'coaching points to the strongest stint phase');
+assert.deepStrictEqual(buildCoachingSummary([], [], {}), ['No valid pace laps available for coaching yet.']);
 assert.strictEqual(compliance([1, 2], 0).known, false);
 
 const history = [

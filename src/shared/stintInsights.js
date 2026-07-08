@@ -41,6 +41,43 @@ function phaseAverages(values = []) {
   };
 }
 
+function formatSeconds(valueMs) {
+  return Number.isFinite(valueMs) ? `${Math.abs(valueMs / 1000).toFixed(3)}s` : '-';
+}
+
+function formatLapTime(valueMs) {
+  if (!Number.isFinite(valueMs)) return '-';
+  const totalMs = Math.round(valueMs);
+  const minutes = Math.floor(totalMs / 60000);
+  const seconds = Math.floor((totalMs % 60000) / 1000);
+  const ms = totalMs % 1000;
+  return minutes ? `${minutes}:${String(seconds).padStart(2, '0')}.${String(ms).padStart(3, '0')}` : `${seconds}.${String(ms).padStart(3, '0')}s`;
+}
+
+function validLapPhases(validLaps = []) {
+  if (!validLaps.length) return [];
+  const size = Math.ceil(validLaps.length / 3);
+  return [
+    validLaps.slice(0, size),
+    validLaps.slice(size, size * 2),
+    validLaps.slice(size * 2)
+  ].filter((phase) => phase.length).map((phase) => {
+    const values = phase.map((lap) => lap.lapTimeMs).filter(Number.isFinite);
+    return {
+      startLap: phase[0]?.lapNumber,
+      endLap: phase.at(-1)?.lapNumber,
+      averageLapMs: average(values),
+      consistencyMs: standardDeviation(values),
+      lapCount: values.length
+    };
+  });
+}
+
+function phaseLabel(phase) {
+  if (!phase) return 'laps -';
+  return phase.startLap === phase.endLap ? `lap ${phase.startLap}` : `laps ${phase.startLap}-${phase.endLap}`;
+}
+
 function personalBestProgression(laps = []) {
   let best = Infinity;
   return laps.reduce((progression, lap) => {
@@ -68,6 +105,48 @@ function compliance(values = [], referenceMs = null) {
   };
 }
 
+function buildCoachingSummary(validLaps = [], sectorValues = [], stats = {}) {
+  if (!validLaps.length) return ['No valid pace laps available for coaching yet.'];
+
+  const messages = [];
+  const sectorLosses = sectorValues.map((values, index) => {
+    const sectorAverage = average(values);
+    const sectorBest = values.length ? Math.min(...values) : null;
+    return {
+      sector: index + 1,
+      lossMs: Number.isFinite(sectorAverage) && Number.isFinite(sectorBest) ? sectorAverage - sectorBest : null
+    };
+  }).filter((item) => Number.isFinite(item.lossMs));
+  const mainLoss = sectorLosses.sort((a, b) => b.lossMs - a.lossMs)[0];
+  if (mainLoss && mainLoss.lossMs > 250) {
+    messages.push(`Main time loss was S${mainLoss.sector}: avg ${formatSeconds(mainLoss.lossMs)} from best.`);
+  } else {
+    messages.push('Sector spread was balanced; no clear main loss sector.');
+  }
+
+  const trend = stats.paceTrendMsPerLap;
+  if (Number.isFinite(trend)) {
+    if (trend < -150) messages.push(`Pace improved through the stint by ${formatSeconds(trend)}/lap.`);
+    else if (trend > 150) messages.push(`Pace faded through the stint by ${formatSeconds(trend)}/lap.`);
+    else messages.push('Pace stayed stable through the stint.');
+  }
+
+  const phases = validLapPhases(validLaps);
+  const bestPhase = phases.filter((phase) => Number.isFinite(phase.averageLapMs))
+    .sort((a, b) => a.averageLapMs - b.averageLapMs)[0];
+  if (bestPhase) {
+    messages.push(`Best phase: ${phaseLabel(bestPhase)} at ${formatLapTime(bestPhase.averageLapMs)} avg.`);
+  }
+
+  const consistentPhase = phases.filter((phase) => phase.lapCount >= 2 && Number.isFinite(phase.consistencyMs))
+    .sort((a, b) => a.consistencyMs - b.consistencyMs)[0];
+  if (consistentPhase) {
+    messages.push(`Most consistent: ${phaseLabel(consistentPhase)} (${formatSeconds(consistentPhase.consistencyMs)} stdev).`);
+  }
+
+  return messages.slice(0, 4);
+}
+
 function buildStintInsights(laps = [], referenceTimes = {}) {
   const normalizedLaps = lapAnalytics.completedLaps(laps);
   const validLaps = lapAnalytics.representativePaceLaps(normalizedLaps);
@@ -82,7 +161,7 @@ function buildStintInsights(laps = [], referenceTimes = {}) {
   const lastFiveMs = average(lapValues.slice(-5));
   const deviationMs = standardDeviation(lapValues);
   const lapAverageMs = average(lapValues);
-  return {
+  const baseInsights = {
     consistency: {
       standardDeviationMs: deviationMs,
       coefficientPercent: Number.isFinite(deviationMs) && Number.isFinite(lapAverageMs) && lapAverageMs > 0 ? deviationMs / lapAverageMs * 100 : null
@@ -101,6 +180,10 @@ function buildStintInsights(laps = [], referenceTimes = {}) {
       sector2: compliance(sectorValues[1], Number(referenceTimes.sector2Ms)),
       sector3: compliance(sectorValues[2], Number(referenceTimes.sector3Ms))
     }
+  };
+  return {
+    ...baseInsights,
+    coachingSummary: buildCoachingSummary(validLaps, sectorValues, baseInsights)
   };
 }
 
@@ -166,6 +249,7 @@ module.exports = {
   phaseAverages,
   personalBestProgression,
   compliance,
+  buildCoachingSummary,
   buildStintInsights,
   classComparisonsForStint,
   classRankingForStint
