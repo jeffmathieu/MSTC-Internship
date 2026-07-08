@@ -437,29 +437,28 @@ def render_race_summary(c, payload):
     panel(c, left_x + pace_w + 8, 300, condition_w, 140, 'Condition pace breakdown')
     by_condition = summary.get('statsByCondition') or {}
     condition_rows = [
+        ('Combined', by_condition.get('combined') or stats),
         ('Dry', by_condition.get('dry') or {}),
         ('Wet', by_condition.get('wet') or {}),
-        ('Transition', by_condition.get('transition') or {}),
-        ('Combined', by_condition.get('combined') or stats),
+        ('Intermediate', by_condition.get('transition') or {}),
     ]
     c.setFillColor(MUTED)
     c.setFont('Helvetica-Bold', 6.5)
-    for text, xx in [('Mode', left_x + pace_w + 22), ('Valid', left_x + pace_w + 92), ('Average', left_x + pace_w + 129), ('Best', left_x + pace_w + 192)]:
+    for text, xx in [('Mode', left_x + pace_w + 22), ('Laps', left_x + pace_w + 92), ('Average', left_x + pace_w + 129), ('Best', left_x + pace_w + 192)]:
         c.drawString(xx, 406, text)
     yy = 386
     for label, condition_stats in condition_rows:
-        if label != 'Combined' and not condition_stats.get('paceLapCount'):
-            continue
+        pace_laps = condition_stats.get('paceLapCount', 0)
         c.setFillColor(INK)
         c.setFont('Helvetica-Bold' if label == 'Combined' else 'Helvetica', 7)
         c.drawString(left_x + pace_w + 22, yy, label)
-        c.drawRightString(left_x + pace_w + 111, yy, str(condition_stats.get('paceLapCount', 0)))
-        c.drawString(left_x + pace_w + 129, yy, fmt_time(condition_stats.get('averageLapMs')))
-        c.drawString(left_x + pace_w + 192, yy, fmt_time(condition_stats.get('bestLapMs')))
+        c.drawRightString(left_x + pace_w + 111, yy, str(condition_stats.get('lapCount', 0)))
+        c.drawString(left_x + pace_w + 129, yy, fmt_time(condition_stats.get('averageLapMs')) if pace_laps else '-')
+        c.drawString(left_x + pace_w + 192, yy, fmt_time(condition_stats.get('bestLapMs')) if pace_laps else '-')
         yy -= 20
     c.setFillColor(MUTED)
     c.setFont('Helvetica', 5.7)
-    c.drawString(left_x + pace_w + 22, 316, 'Use condition rows to see whether race pace was dry-, wet-, or transition-driven.')
+    c.drawString(left_x + pace_w + 22, 316, 'Laps includes neutralized laps; average and best use valid pace laps only.')
 
     panel(c, pit_x, pit_y, pit_w, pit_h, 'Pitstops - provider measured L. PIT')
     pit_stops = summary.get('pitStops', [])
@@ -560,7 +559,13 @@ def render_page(c, payload, stint, page_number):
     laps = stint.get('laps', [])
     start_lap = stint.get('startLap') if stint.get('startLap') is not None else (laps[0].get('lapNumber') if laps else '-')
     end_lap = stint.get('endLap') if stint.get('endLap') is not None else (laps[-1].get('lapNumber') if laps else '-')
-    c.drawRightString(PAGE_W - 28, PAGE_H - 43, f"Stint {stint['stintNumber']}  |  laps {start_lap}-{end_lap}")
+    driver_stint_number = stint.get('driverStintNumber') or stint.get('stintNumber') or '-'
+    car_stint_number = stint.get('stintNumber') or '-'
+    c.drawRightString(
+        PAGE_W - 28,
+        PAGE_H - 43,
+        f"Driver stint {driver_stint_number}  |  Car stint {car_stint_number}  |  laps {start_lap}-{end_lap}"
+    )
 
     draw_chart(c, 28, 328, PAGE_W - 56, 190, 'Lap times', stint['laps'], 'lapTimeMs', stint['stats'].get('averageLapMs'), True, 'status')
     chart_w = (PAGE_W - 72) / 3

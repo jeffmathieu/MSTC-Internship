@@ -62,6 +62,10 @@ assert.strictEqual(canonical.stints[0].teammates[0].driverName, 'Driver Two');
 assert.strictEqual(canonical.stints[0].statsByCondition.dry.paceLapCount, 1);
 assert.strictEqual(canonical.stints[0].statsByCondition.wet.averageSector3Ms, null, 'neutralized wet sectors stay out of report pace');
 assert.strictEqual(canonical.stints[0].gapHistory.length, 1, 'suppressed long-pit samples stay out of the PDF');
+assert.strictEqual(canonical.raceSummary.statsByCondition.combined.lapCount, 3);
+assert.strictEqual(canonical.raceSummary.statsByCondition.transition.lapCount, 1, 'condition overview counts neutralized laps as laps');
+assert.strictEqual(canonical.raceSummary.statsByCondition.transition.paceLapCount, 0, 'condition overview averages exclude neutralized laps');
+assert.strictEqual(canonical.raceSummary.statsByCondition.wet.lapCount, 0, 'empty conditions remain available for fixed PDF rows');
 
 const output = fs.mkdtempSync(path.join(os.tmpdir(), 'mstc-stint-report-'));
 const paths = artifactPaths(output, closedStint);

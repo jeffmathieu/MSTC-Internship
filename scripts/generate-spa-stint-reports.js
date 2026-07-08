@@ -9,6 +9,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const analytics = require('../src/shared/lapAnalytics');
 const { buildStintInsights, classComparisonsForStint, classRankingForStint } = require('../src/shared/stintInsights');
+const { stintsForCar } = require('../src/shared/stintTracker');
 
 const SPA_REFERENCE_TIMES = { lapMs: 180000, sector1Ms: 0, sector2Ms: 0, sector3Ms: 0 };
 
@@ -218,7 +219,7 @@ function buildPayload(history, carNumber, rawHistory = history) {
       'Class-gap history cannot be reconstructed reliably from lap-only records. Recorded GAP-to-overall-leader samples are shown instead.',
       'Stint duration is the sum of stored lap times; the first/last partial timing outside those laps is unavailable.'
     ],
-    stints: stintGroups(ourLaps).map((stint) => {
+    stints: stintsForCar(history, carNumber, { closeFinalAt: new Date().toISOString() }).map((stint) => {
       const stats = analytics.statsForLaps(stint.laps);
       const representative = new Set(analytics.representativePaceLaps(stint.laps));
       const driverTotal = driverTotals[stint.driverName] || null;
@@ -236,11 +237,12 @@ function buildPayload(history, carNumber, rawHistory = history) {
       insights.classRanking = classRankingForStint(stint.laps, classComparisons);
       return {
         stintNumber: stint.stintNumber,
+        driverStintNumber: stint.driverStintNumber,
         driverName: stint.driverName,
         startLap: stint.laps[0].lapNumber,
         endLap: stint.laps.at(-1).lapNumber,
         stintTimeMs: elapsedMs(stint.laps),
-        totalDriverTimeMs: elapsedMs(stint.laps),
+        totalDriverTimeMs: stint.totalDriverTimeMs,
         stats: compactStats(stats),
         statsByCondition: Object.fromEntries(Object.entries(analytics.statsByCondition(stint.laps))
           .map(([condition, conditionStats]) => [condition, compactStats(conditionStats)])),
