@@ -27,9 +27,14 @@ function syncConditionControlTitles() {
   const track = $('track-condition');
   const analysis = $('analysis-condition');
   const trackLabels = { dry: 'Dry', wet: 'Wet', transition: 'Transition' };
-  const analysisLabels = { current: 'Current condition', dry: 'Dry only', wet: 'Wet only', transition: 'Transition only', combined: 'Combined conditions' };
+  const analysisLabels = { combined: 'Overall', dry: 'Dry only', wet: 'Wet only' };
   if (track) track.title = `Track condition: ${trackLabels[track.value] || 'Unknown'}`;
-  if (analysis) analysis.title = `Pace filter: ${analysisLabels[analysis.value] || 'Unknown'}`;
+  if (analysis) analysis.title = `Pace view: ${analysisLabels[analysis.value] || 'Unknown'}`;
+}
+
+function normalizeAnalysisSelectValue(value) {
+  const normalized = trackConditions.normalizeAnalysisFilter(value, 'combined');
+  return ['dry', 'wet'].includes(normalized) ? normalized : 'combined';
 }
 
 // Applies one of the two supported visual themes. Theme colors themselves are
@@ -1024,8 +1029,9 @@ function render(state) {
   );
   if ($('analysis-condition')) $('analysis-condition').value = trackConditions.normalizeAnalysisFilter(
     summaryFilter || currentSettings?.analysisConditionFilter,
-    'current'
+    'combined'
   );
+  if ($('analysis-condition')) $('analysis-condition').value = normalizeAnalysisSelectValue($('analysis-condition').value);
   syncConditionControlTitles();
   setStatus(currentState.status, currentState.message);
   updateSession(currentState.session || {}, rows.length > 0);
@@ -1078,7 +1084,7 @@ async function saveSettingsFromInputs(setupComplete = false) {
     followedCars,
     sessionMode,
     trackCondition: $('track-condition')?.value || currentSettings?.trackCondition || 'dry',
-    analysisConditionFilter: $('analysis-condition')?.value || currentSettings?.analysisConditionFilter || 'current',
+    analysisConditionFilter: $('analysis-condition')?.value || currentSettings?.analysisConditionFilter || 'combined',
     comparisonCar: $('comparison-car')?.value.trim() || '',
     referenceTimes: activeReferenceTimes,
     referenceTimesByMode,
@@ -1234,7 +1240,7 @@ async function init() {
   syncReferenceInputs(currentSettings);
   syncSessionMode(currentSettings.sessionMode || 'race');
   if ($('track-condition')) $('track-condition').value = currentSettings.trackCondition || 'dry';
-  if ($('analysis-condition')) $('analysis-condition').value = currentSettings.analysisConditionFilter || 'current';
+  if ($('analysis-condition')) $('analysis-condition').value = normalizeAnalysisSelectValue(currentSettings.analysisConditionFilter);
   syncConditionControlTitles();
   populatePitstopCircuits();
   if ($('pit-circuit')) $('pit-circuit').value = currentSettings.pitCircuitId || currentSettings.pitRules?.circuitId || 'zolder';

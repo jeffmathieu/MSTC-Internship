@@ -16,7 +16,7 @@
 
   function normalizeAnalysisFilter(value, fallback = 'current') {
     const normalized = String(value || '').trim().toLowerCase();
-    if (normalized === 'all') return 'combined';
+    if (normalized === 'all' || normalized === 'overall') return 'combined';
     return ANALYSIS_FILTERS.includes(normalized) ? normalized : fallback;
   }
 

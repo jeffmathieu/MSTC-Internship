@@ -6,6 +6,7 @@ const { buildLapPrediction } = require('../src/shared/lapPrediction');
 assert.strictEqual(conditions.normalizeTrackCondition('WET'), 'wet');
 assert.strictEqual(conditions.normalizeTrackCondition('rain'), 'unknown');
 assert.strictEqual(conditions.normalizeAnalysisFilter('all'), 'combined');
+assert.strictEqual(conditions.normalizeAnalysisFilter('overall'), 'combined');
 assert.strictEqual(conditions.resolveAnalysisCondition('current', 'wet'), 'wet');
 assert.strictEqual(conditions.mergeConditions('dry', 'wet'), 'transition');
 

@@ -77,6 +77,12 @@ body {
 }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
+select:focus,
+select:focus-visible {
+  outline: none;
+  box-shadow: none;
+  border-color: var(--line);
+}
 
 .engineer-dashboard {
   width: 100vw;

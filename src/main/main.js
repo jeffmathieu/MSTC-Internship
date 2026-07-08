@@ -153,6 +153,10 @@ function normalizeSettings(settings) {
   const configuredPitDistance = Number(settings?.pitRules?.regularTrackDistanceMeters);
   const configuredFcySpeed = Number(settings?.pitRules?.fcySpeedKph);
   const trackCondition = normalizeTrackCondition(settings?.trackCondition, 'dry');
+  const requestedAnalysisFilter = normalizeAnalysisFilter(settings?.analysisConditionFilter, 'combined');
+  const analysisConditionFilter = ['dry', 'wet'].includes(requestedAnalysisFilter)
+    ? requestedAnalysisFilter
+    : 'combined';
   const conditionPhaseCounter = Math.max(1, Math.floor(Number(settings?.conditionPhaseCounter) || 1));
   const tyreStrategy = settings?.tyreStrategy || {};
   const legacyReferenceTimes = { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimes || {}) };
@@ -168,7 +172,7 @@ function normalizeSettings(settings) {
     sessionMode,
     theme,
     trackCondition,
-    analysisConditionFilter: normalizeAnalysisFilter(settings?.analysisConditionFilter, 'current'),
+    analysisConditionFilter,
     conditionPhaseCounter,
     conditionPhaseId: String(settings?.conditionPhaseId || `${trackCondition}-${conditionPhaseCounter}`),
     tyreStrategy: {
@@ -215,7 +219,7 @@ function loadSettings() {
     followedCars: ['33'],
     sessionMode: 'race',
     trackCondition: 'dry',
-    analysisConditionFilter: 'current',
+    analysisConditionFilter: 'combined',
     conditionPhaseCounter: 1,
     conditionPhaseId: 'dry-1',
     tyreStrategy: {
