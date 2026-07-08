@@ -277,6 +277,8 @@ function nextPitStateFromRow({ previous = {}, row = {}, session = {}, rules = {}
   const windowAtPit = timeUntilNextAllowedPit({ clock, rules: normalizedRules, pitState: previousState });
   const isFirstPitSample = previousState.rawPitCount === null || previousState.rawPitCount === undefined;
   const pitCountIncreased = !isFirstPitSample && nextCount > (previousState.rawPitCount || 0);
+  const measuredPitDurationMs = parseTimeToMs(row.lastPit || row.lastPitDuration || row.lPit);
+  const measuredPitRawDuration = row.lastPit || row.lastPitDuration || row.lPit || '';
   // Existing stops that are already present on the first sample are accepted as
   // baseline stops because the app cannot reconstruct when they happened. Every
   // new increase after that must happen in a green/open window to count.
@@ -292,11 +294,20 @@ function nextPitStateFromRow({ previous = {}, row = {}, session = {}, rules = {}
   if (pitCountIncreased) {
     next.lastPitAt = collectedAt || new Date().toISOString();
     next.lastPitElapsedMs = clock.elapsedMs;
+    next.lastPitDurationMs = measuredPitDurationMs;
+    next.lastPitRawDuration = measuredPitRawDuration;
+    next.lastPitTargetDurationMs = normalizedRules.pitStopDurationMs;
     next.lastPitCountedAsValid = windowAtPit.allowed;
     next.lastPitValidityReason = windowAtPit.allowed ? 'Pitstop counted: pit window was open.' : `Pitstop not counted: ${windowAtPit.reason}.`;
     if (windowAtPit.allowed && Number.isFinite(clock.elapsedMs)) {
       next.validPitElapsedHistoryMs = [...(previousState.validPitElapsedHistoryMs || []), clock.elapsedMs];
     }
+  } else if (isFirstPitSample && nextCount > 0 && (Number.isFinite(measuredPitDurationMs) || measuredPitRawDuration)) {
+    // If the app is opened mid-race, L. PIT still tells us the most recent
+    // measured stop. Show it without pretending a new pitstop just happened.
+    next.lastPitDurationMs = measuredPitDurationMs;
+    next.lastPitRawDuration = measuredPitRawDuration;
+    next.lastPitTargetDurationMs = normalizedRules.pitStopDurationMs;
   }
   return next;
 }
@@ -1016,6 +1027,9 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
     completedPitStops,
     totalPitStops,
     lastPitElapsedMs: numberOrNull(pitState.lastPitElapsedMs),
+    lastPitDurationMs: numberOrNull(pitState.lastPitDurationMs),
+    lastPitTargetDurationMs: numberOrNull(pitState.lastPitTargetDurationMs),
+    lastPitRawDuration: pitState.lastPitRawDuration || '',
     validPitElapsedHistoryMs: (pitState.validPitElapsedHistoryMs || []).map(numberOrNull).filter(Number.isFinite),
     remainingRequiredStops,
     requirementsComplete,

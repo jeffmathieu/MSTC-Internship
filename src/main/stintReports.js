@@ -155,8 +155,23 @@ function raceControlSummary(history = []) {
 }
 
 function durationMs(value) {
-  const match = String(value || '').trim().match(/^(\d+):(\d{2})$/);
-  return match ? (Number(match[1]) * 60 + Number(match[2])) * 1000 : null;
+  const text = String(value || '').trim().replace(/^\+/, '');
+  if (!text || text === '--') return null;
+  if (/^\d+(?:\.\d+)?$/.test(text)) return Math.round(Number(text) * 1000);
+  const parts = text.split(':');
+  if (parts.length === 2) return Math.round((Number(parts[0]) * 60 + Number(parts[1])) * 1000);
+  if (parts.length === 3) return Math.round((Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2])) * 1000);
+  return null;
+}
+
+function expectedPitDurationMsFromRules(pitRules = {}) {
+  const value = Number(pitRules.pitStopDurationMs ?? pitRules.expectedPitDurationMs ?? pitRules.pitTimeMs);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function storedPitTargetDurationMs(lap = {}) {
+  const value = Number(lap.pitTargetDurationMs ?? lap.pitTargetMs ?? lap.expectedPitDurationMs ?? lap.pitStopDurationMs);
+  return Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 // PIT is cumulative and L. PIT is the provider-measured duration of the last
@@ -176,15 +191,59 @@ function pitStopsFromHistory(history = [], carNumber = '') {
       lapNumber,
       durationMs: durationMs(lap.lastPit),
       rawDuration: lap.lastPit || '',
+      targetDurationMs: storedPitTargetDurationMs(lap),
       driverBefore: before?.driverName || '',
-      driverAfter: lap.driverName || ''
+      driverAfter: lap.driverName || '',
+      positionAfter: lap.position || '',
+      classPositionAfter: lap.classPosition || '',
+      gapAfterRaw: lap.gap || '',
+      diffAfterRaw: lap.diff || lap.interval || ''
     });
     previousCount = count;
   });
   return stops;
 }
 
-function canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes) {
+function enrichPitStops(pitStops = [], expectedPitDurationMs = null) {
+  return pitStops.map((stop) => {
+    const duration = Number(stop.durationMs);
+    const target = Number.isFinite(Number(stop.targetDurationMs)) ? Number(stop.targetDurationMs) : expectedPitDurationMs;
+    const hasDuration = Number.isFinite(duration);
+    const hasTarget = Number.isFinite(target);
+    return {
+      ...stop,
+      targetDurationMs: hasTarget ? target : null,
+      deltaVsTargetMs: hasDuration && hasTarget ? duration - target : null,
+      driverChanged: Boolean(stop.driverBefore && stop.driverAfter && stop.driverBefore !== stop.driverAfter)
+    };
+  });
+}
+
+function pitstopAnalysis(pitStops = []) {
+  const measured = pitStops.filter((stop) => Number.isFinite(Number(stop.durationMs)));
+  const deltas = pitStops.map((stop) => Number(stop.deltaVsTargetMs)).filter(Number.isFinite);
+  const fastestStop = measured.reduce((best, stop) => (!best || stop.durationMs < best.durationMs ? stop : best), null);
+  const slowestStop = measured.reduce((worst, stop) => (!worst || stop.durationMs > worst.durationMs ? stop : worst), null);
+  return {
+    stopCount: pitStops.length,
+    measuredCount: measured.length,
+    averageDurationMs: measured.length ? measured.reduce((sum, stop) => sum + stop.durationMs, 0) / measured.length : null,
+    fastestStop: fastestStop ? { stopNumber: fastestStop.stopNumber, durationMs: fastestStop.durationMs } : null,
+    slowestStop: slowestStop ? { stopNumber: slowestStop.stopNumber, durationMs: slowestStop.durationMs } : null,
+    targetDurationMs: pitStops.find((stop) => Number.isFinite(Number(stop.targetDurationMs)))?.targetDurationMs ?? null,
+    averageDeltaVsTargetMs: deltas.length ? deltas.reduce((sum, value) => sum + value, 0) / deltas.length : null,
+    totalDeltaVsTargetMs: deltas.length ? deltas.reduce((sum, value) => sum + value, 0) : null,
+    driverChangeCount: pitStops.filter((stop) => stop.driverChanged).length
+  };
+}
+
+function endPitStopForStint(stint = {}, pitStops = []) {
+  const endLap = Number(stint.endLap ?? stint.laps?.at?.(-1)?.lapNumber);
+  if (!Number.isFinite(endLap)) return null;
+  return pitStops.find((stop) => Number(stop.lapNumber) === endLap + 1) || null;
+}
+
+function canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes, pitStops = []) {
   const legacy = buildStintReportPayload(stint, session, gapSamples);
   const stats = legacy.stint.stats || {};
   const firstLap = legacy.stint.laps[0];
@@ -220,6 +279,7 @@ function canonicalStint(stint, session, gapSamples, driverStats, history, refere
     teammates,
     classComparisons,
     insights,
+    endPitStop: endPitStopForStint(stint, pitStops),
     laps: legacy.stint.laps,
     gapHistory: legacy.gapHistory
   };
@@ -228,7 +288,7 @@ function canonicalStint(stint, session, gapSamples, driverStats, history, refere
 // Adapts live stint objects to the exact payload consumed by the polished
 // ReportLab renderer used by the post-race script. This is the single contract
 // that keeps manual and automatic PDFs visually and statistically identical.
-function buildCanonicalReportPayload({ stints = [], session = {}, gapSamples = [], history = [], carNumber = '', referenceTimes = {} }) {
+function buildCanonicalReportPayload({ stints = [], session = {}, gapSamples = [], history = [], carNumber = '', referenceTimes = {}, pitRules = {} }) {
   const followedCar = String(carNumber || stints[0]?.carNumber || '');
   const carLaps = lapAnalytics.lapsForCar(history, followedCar);
   const fallbackLaps = stints.flatMap((stint) => stint.laps || []);
@@ -241,7 +301,9 @@ function buildCanonicalReportPayload({ stints = [], session = {}, gapSamples = [
       ...lapAnalytics.statsForLaps(fallbackLaps.filter((lap) => lap.driverName === driverName))
     }));
   const driverStats = rawDriverStats.map(compactStats);
-  const pitStops = pitStopsFromHistory(history, followedCar);
+  const expectedPitDurationMs = expectedPitDurationMsFromRules(pitRules);
+  const pitStops = enrichPitStops(pitStopsFromHistory(history, followedCar), expectedPitDurationMs);
+  const pitAnalysis = pitstopAnalysis(pitStops);
   const legacy = stints[0] ? buildStintReportPayload(stints[0], session, gapSamples) : null;
   return {
     schemaVersion: 2,
@@ -269,13 +331,14 @@ function buildCanonicalReportPayload({ stints = [], session = {}, gapSamples = [
       finalClassPosition: raceLaps.at(-1)?.classPosition || '',
       drivers: driverStats,
       pitStops,
+      pitAnalysis,
       totalPitTimeMs: pitStops.length && pitStops.every((stop) => Number.isFinite(stop.durationMs))
         ? pitStops.reduce((total, stop) => total + stop.durationMs, 0)
         : null,
       raceControl: raceControlSummary(history)
     },
     caveats: [],
-    stints: stints.map((stint) => canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes)),
+    stints: stints.map((stint) => canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes, pitStops)),
     // Keep the first automatic-report schema available to existing readers.
     session: legacy?.session || null,
     stint: legacy?.stint || null,
@@ -490,6 +553,7 @@ async function writeClosedStintArtifacts({
   gapSamples = [],
   history = [],
   referenceTimes = {},
+  pitRules = {},
   renderPdf = renderReportLabPdf
 }) {
   if (!stint?.closed) return { written: false, reason: 'stint-open' };
@@ -507,6 +571,7 @@ async function writeClosedStintArtifacts({
     gapSamples,
     history,
     referenceTimes,
+    pitRules,
     carNumber: stint.carNumber
   });
   fs.writeFileSync(paths.jsonPath, JSON.stringify(payload, null, 2));
@@ -565,6 +630,7 @@ async function writeEventSummaryArtifacts({
   gapSamples = [],
   history = [],
   referenceTimes = {},
+  pitRules = {},
   renderPdf = renderReportLabPdf
 }) {
   const closed = stints.filter((stint) => stint.closed);
@@ -595,6 +661,7 @@ async function writeEventSummaryArtifacts({
       gapSamples,
       history,
       referenceTimes,
+      pitRules,
       carNumber
     });
     payload.title = group.title;
@@ -630,6 +697,10 @@ module.exports = {
   compactStats,
   raceControlSummary,
   pitStopsFromHistory,
+  expectedPitDurationMsFromRules,
+  enrichPitStops,
+  pitstopAnalysis,
+  endPitStopForStint,
   gapSamplesForStint,
   signedGapMs,
   buildLineChart,

@@ -911,7 +911,8 @@ async function writeStintStateAndReports(settings, context, rows = []) {
           session: context?.session || collectorState.session || {},
           gapSamples: gapMemoryState?.samples || [],
           history: collectorState.lapHistory || [],
-          referenceTimes: settings.referenceTimes || {}
+          referenceTimes: settings.referenceTimes || {},
+          pitRules: settings.pitRules || {}
         });
       } finally {
         pendingStintReports.delete(reportKey);
@@ -926,7 +927,8 @@ async function writeStintStateAndReports(settings, context, rows = []) {
         session: context?.session || collectorState.session || {},
         gapSamples: gapMemoryState?.samples || [],
         history: collectorState.lapHistory || [],
-        referenceTimes: settings.referenceTimes || {}
+        referenceTimes: settings.referenceTimes || {},
+        pitRules: settings.pitRules || {}
       });
     }
   }
@@ -1021,9 +1023,15 @@ function liveRowKey(row) {
   return [row.sourceProvider, row.timingUrl, row.sessionName, row.carNumber].join('|');
 }
 
+function currentPitTargetDurationMs(settings = {}) {
+  const value = Number(settings.pitRules?.pitStopDurationMs);
+  return Number.isFinite(value) && value >= 0 ? String(Math.round(value)) : '';
+}
+
 // Stores newly completed laps from provider-independent normalized storage rows.
 function updateLapHistory(settings, storageRows) {
   const newEntries = [];
+  const pitTargetDurationMs = currentPitTargetDurationMs(settings);
   storageRows.forEach((row) => {
     if (!row.carNumber || !row.lastLap) return;
     const carKey = liveRowKey(row);
@@ -1034,6 +1042,7 @@ function updateLapHistory(settings, storageRows) {
 
     const completedRow = completedLapRowFromLiveRow(row, previousRow);
     const entry = lapRecordFromNormalizedRow(completedRow);
+    entry.pitTargetDurationMs = pitTargetDurationMs;
     if (!entry.carNumber || !entry.lastLap || entry.lapTimeMs === '') return;
     const key = lapIdentity(entry);
     if (knownLapKeys.has(key)) return;

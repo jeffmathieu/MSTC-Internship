@@ -228,6 +228,9 @@ const updatedState = {
     canPitNow: true,
     waitMs: 0,
     completedPitStops: 1,
+    lastPitDurationMs: 78000,
+    lastPitTargetDurationMs: 75000,
+    lastPitRawDuration: '1:18',
     lastPitElapsedMs: 3600000,
     validPitElapsedHistoryMs: [3600000, 7200000],
     remainingRequiredStops: 1,
@@ -580,6 +583,8 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('pit-setup-modal').classList.contains('hidden'), true);
   collectorUpdate(updatedState);
   await flushAsync();
+  assert.strictEqual(document.getElementById('pit-last').textContent, '1:18');
+  assert.strictEqual(document.getElementById('pit-last-delta').textContent, '+0:03');
 
   await document.getElementById('setup-add-car').trigger('click');
   const extraCars = document.getElementById('setup-extra-cars');

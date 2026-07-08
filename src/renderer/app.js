@@ -870,6 +870,14 @@ function projectionLabel(projection) {
   return projection.provisional ? `FCY gaps stabilizing · ${label}` : label;
 }
 
+function pitDeltaLabel(plan) {
+  const duration = numericMs(plan?.lastPitDurationMs);
+  const target = numericMs(plan?.lastPitTargetDurationMs ?? plan?.rules?.pitStopDurationMs);
+  if (!Number.isFinite(duration) || !Number.isFinite(target)) return '—';
+  const delta = duration - target;
+  return `${delta >= 0 ? '+' : '-'}${pitstopPlanner.formatDuration(Math.abs(delta))}`;
+}
+
 // Renders pit window status, required-stop progress, next allowed pit time, and
 // after-pit class projection. All rule calculations come from pitstopPlanner.
 function renderPitstopPlan(plan) {
@@ -880,6 +888,8 @@ function renderPitstopPlan(plan) {
   }
   if (!plan) {
     setText('pit-status', 'Waiting');
+    setText('pit-last', '—');
+    setText('pit-last-delta', '—');
     setText('pit-next', '—');
     setText('pit-projection', '—');
     setText('pit-stops-summary', `0/${$('pit-required-input')?.value || '2'}`);
@@ -889,6 +899,8 @@ function renderPitstopPlan(plan) {
   }
 
   setText('pit-status', plan.label || plan.status);
+  setText('pit-last', Number.isFinite(plan.lastPitDurationMs) ? pitstopPlanner.formatDuration(plan.lastPitDurationMs) : '—');
+  setText('pit-last-delta', pitDeltaLabel(plan));
   setText('pit-stops-summary', `${plan.completedPitStops}/${plan.rules?.requiredPitStops ?? $('pit-required-input')?.value ?? '2'}`);
   setText('pit-next', plan.requirementsComplete
     ? (plan.canPitNow ? 'Optional' : 'Closed')

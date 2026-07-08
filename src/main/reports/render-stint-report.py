@@ -29,6 +29,9 @@ WET = HexColor('#2A9DB0')
 TRANSITION = HexColor('#D97730')
 POINT_RADIUS = 1.5
 CONDITION_RING_RADIUS = 2.6
+# The pitstop table uses a 15 pt row height on landscape A4. Twenty-two rows
+# leave enough footer/header breathing room while keeping every column readable.
+PITSTOP_ROWS_PER_PAGE = 22
 
 
 def fmt_time(ms, decimals=3):
@@ -54,6 +57,59 @@ def fmt_delta(ms):
     if not isinstance(ms, (int, float)) or not math.isfinite(ms):
         return '-'
     return f'{ms / 1000:+.3f}s'
+
+
+def fmt_delta_duration(ms):
+    if not isinstance(ms, (int, float)) or not math.isfinite(ms):
+        return '-'
+    sign = '+' if ms >= 0 else '-'
+    return f'{sign}{fmt_duration(abs(ms))}'
+
+
+def pit_rejoin_label(stop):
+    if not stop:
+        return ''
+    pic = stop.get('classPositionAfter')
+    pos = stop.get('positionAfter')
+    bits = []
+    if pic not in (None, ''):
+        bits.append(f'PIC {pic}')
+    if pos not in (None, ''):
+        bits.append(f'P{pos}')
+    return ' / '.join(bits)
+
+
+def pitstop_header_label(stop):
+    if not stop:
+        return ''
+    parts = [f"End pit #{stop.get('stopNumber', '-')}:", fmt_duration(stop.get('durationMs'))]
+    delta = stop.get('deltaVsTargetMs')
+    if isinstance(delta, (int, float)) and math.isfinite(delta):
+        parts.append(f'({fmt_delta_duration(delta)} vs target)')
+    rejoin = pit_rejoin_label(stop)
+    if rejoin:
+        parts.append(f'· rejoined {rejoin}')
+    return ' '.join(parts)
+
+
+def short_driver_name(value):
+    parts = str(value or '').split()
+    if not parts:
+        return '-'
+    # Prefer the visible given/short name when provider names are "SURNAME Name";
+    # it keeps the narrow pitstop table readable.
+    name = parts[-1] if len(parts) > 1 else parts[0]
+    return name[:8]
+
+
+def pit_driver_change_label(stop):
+    before = short_driver_name(stop.get('driverBefore'))
+    after = short_driver_name(stop.get('driverAfter'))
+    if before == after or after == '-':
+        return before
+    if before == '-':
+        return after
+    return f'{before}>{after}'
 
 
 def fmt_gap(ms, decimals=3):
@@ -379,11 +435,7 @@ def render_race_summary(c, payload):
     summary = payload['raceSummary']
     stats = summary['stats']
     left_x = 28
-    pit_x = PAGE_W - 226
-    pit_w = PAGE_W - pit_x - 28
-    left_w = pit_x - left_x - 12
-    pit_y = 72
-    pit_h = 440
+    left_w = PAGE_W - 56
 
     def finite_values(values):
         return [value for value in values if isinstance(value, (int, float)) and math.isfinite(value)]
@@ -419,7 +471,7 @@ def render_race_summary(c, payload):
     for index, (label, value) in enumerate(cards):
         summary_card(c, left_x + index * (card_w + 4), 455, card_w, label, value)
 
-    pace_w = 342
+    pace_w = 470
     condition_w = left_w - pace_w - 8
     panel(c, left_x, 300, pace_w, 140, 'Full-race pace statistics')
     best_theoretical_ms = metric_or_dash(stats.get('bestSector1Ms'), stats.get('bestSector2Ms'), stats.get('bestSector3Ms'))
@@ -438,7 +490,7 @@ def render_race_summary(c, payload):
     ]
     for index, (label, value) in enumerate(pace_metrics):
         col, row = index % 5, index // 5
-        draw_metric(c, left_x + 13 + col * 65, 372 - row * 48, label, value, 60)
+        draw_metric(c, left_x + 16 + col * 86, 372 - row * 48, label, value, 78)
 
     panel(c, left_x + pace_w + 8, 300, condition_w, 140, 'Condition pace breakdown')
     by_condition = summary.get('statsByCondition') or {}
@@ -450,58 +502,24 @@ def render_race_summary(c, payload):
     ]
     c.setFillColor(MUTED)
     c.setFont('Helvetica-Bold', 6.5)
-    for text, xx in [('Mode', left_x + pace_w + 22), ('Laps', left_x + pace_w + 92), ('Average', left_x + pace_w + 129), ('Best', left_x + pace_w + 192)]:
+    condition_x = left_x + pace_w + 8
+    for text, xx in [('Mode', condition_x + 18), ('Laps', condition_x + 95), ('Average', condition_x + 142), ('Best', condition_x + 220)]:
         c.drawString(xx, 406, text)
     yy = 386
     for label, condition_stats in condition_rows:
         pace_laps = condition_stats.get('paceLapCount', 0)
         c.setFillColor(INK)
         c.setFont('Helvetica-Bold' if label == 'Combined' else 'Helvetica', 7)
-        c.drawString(left_x + pace_w + 22, yy, label)
-        c.drawRightString(left_x + pace_w + 111, yy, str(condition_stats.get('lapCount', 0)))
-        c.drawString(left_x + pace_w + 129, yy, fmt_time(condition_stats.get('averageLapMs')) if pace_laps else '-')
-        c.drawString(left_x + pace_w + 192, yy, fmt_time(condition_stats.get('bestLapMs')) if pace_laps else '-')
+        c.drawString(condition_x + 18, yy, label)
+        c.drawRightString(condition_x + 116, yy, str(condition_stats.get('lapCount', 0)))
+        c.drawString(condition_x + 142, yy, fmt_time(condition_stats.get('averageLapMs')) if pace_laps else '-')
+        c.drawString(condition_x + 220, yy, fmt_time(condition_stats.get('bestLapMs')) if pace_laps else '-')
         yy -= 20
     c.setFillColor(MUTED)
     c.setFont('Helvetica', 5.7)
 
-    panel(c, pit_x, pit_y, pit_w, pit_h, 'Pitstops - provider measured L. PIT')
-    pit_stops = summary.get('pitStops', [])
-    c.setFillColor(MUTED)
-    c.setFont('Helvetica-Bold', 6.2)
-    header_y = pit_y + pit_h - 36
-    for text, xx in [('Stop', pit_x + 12), ('Lap', pit_x + 42), ('Dur.', pit_x + 75), ('Driver change', pit_x + 112)]:
-        c.drawString(xx, header_y, text)
-    available_h = pit_h - 76
-    row_h = min(13, max(7.5, available_h / max(len(pit_stops), 1)))
-    row_font = 6.5 if row_h >= 9 else 5.4
-    yy = header_y - 18
-    for stop in pit_stops:
-        c.setFillColor(INK)
-        c.setFont('Helvetica', row_font)
-        c.drawString(pit_x + 12, yy, f"#{stop.get('stopNumber')}")
-        c.drawString(pit_x + 42, yy, str(stop.get('lapNumber') or '-'))
-        c.setFont('Helvetica-Bold', row_font)
-        c.drawString(pit_x + 75, yy, fmt_duration(stop.get('durationMs')))
-        c.setFont('Helvetica', max(4.8, row_font - 0.8))
-        before, after = stop.get('driverBefore', ''), stop.get('driverAfter', '')
-        change = before if before == after else f'{before} -> {after}'
-        c.drawString(pit_x + 112, yy, change[:27])
-        yy -= row_h
-        if yy < pit_y + 37:
-            c.setFillColor(MUTED)
-            c.setFont('Helvetica-Bold', 5.5)
-            remaining = max(0, len(pit_stops) - stop.get('stopNumber', len(pit_stops)))
-            if remaining:
-                c.drawString(pit_x + 12, yy, f'+ {remaining} more stops in source data')
-            break
-    pit_durations = finite_values([stop.get('durationMs') for stop in pit_stops])
-    c.setFillColor(GREEN)
-    c.setFont('Helvetica-Bold', 6.5)
-    c.drawString(pit_x + 12, pit_y + 19, f"{len(pit_stops)} stops | total {fmt_duration(summary.get('totalPitTimeMs'))} | avg {fmt_duration(average_ms(pit_durations))}")
-
     panel(c, left_x, 118, left_w, 170, 'Driver race comparison')
-    headers = [('Driver', left_x + 14), ('Laps', left_x + 188), ('Valid', left_x + 226), ('Average', left_x + 265), ('Best', left_x + 325), ('Avg S1', left_x + 380), ('Avg S2', left_x + 430), ('Avg S3', left_x + 480)]
+    headers = [('Driver', left_x + 14), ('Laps', left_x + 300), ('Valid', left_x + 350), ('Average', left_x + 405), ('Best', left_x + 482), ('Avg S1', left_x + 555), ('Avg S2', left_x + 632), ('Avg S3', left_x + 709)]
     c.setFillColor(MUTED)
     c.setFont('Helvetica-Bold', 7)
     for text, xx in headers:
@@ -511,14 +529,14 @@ def render_race_summary(c, payload):
         c.setFillColor(INK)
         c.setFont('Helvetica', 7.5)
         values = [
-            (left_x + 14, driver.get('driverName', '')[:27]),
-            (left_x + 188, str(driver.get('lapCount', 0))),
-            (left_x + 226, str(driver.get('paceLapCount', 0))),
-            (left_x + 265, fmt_time(driver.get('averageLapMs'))),
-            (left_x + 325, fmt_time(driver.get('bestLapMs'))),
-            (left_x + 380, fmt_time(driver.get('averageSector1Ms'))),
-            (left_x + 430, fmt_time(driver.get('averageSector2Ms'))),
-            (left_x + 480, fmt_time(driver.get('averageSector3Ms'))),
+            (left_x + 14, driver.get('driverName', '')[:38]),
+            (left_x + 300, str(driver.get('lapCount', 0))),
+            (left_x + 350, str(driver.get('paceLapCount', 0))),
+            (left_x + 405, fmt_time(driver.get('averageLapMs'))),
+            (left_x + 482, fmt_time(driver.get('bestLapMs'))),
+            (left_x + 555, fmt_time(driver.get('averageSector1Ms'))),
+            (left_x + 632, fmt_time(driver.get('averageSector2Ms'))),
+            (left_x + 709, fmt_time(driver.get('averageSector3Ms'))),
         ]
         for xx, value in values:
             c.drawString(xx, yy, value)
@@ -541,10 +559,97 @@ def render_race_summary(c, payload):
         c.setFillColor(INK)
         c.setFont('Helvetica-Bold', 8)
         c.drawString(xx + 35, 84, value)
-        xx += 78
+        xx += 120
     c.setFillColor(MUTED)
     c.setFont('Helvetica', 6.5)
     c.drawRightString(PAGE_W - 28, 18, 'Generated from stored race data | race overview')
+
+
+def render_pitstop_analysis_page(c, payload, stops, page_number, page_count):
+    race = payload['race']
+    summary = payload['raceSummary']
+    analysis = summary.get('pitAnalysis') or {}
+    c.setFillColor(PAPER)
+    c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
+    c.setFillColor(NAVY)
+    c.rect(0, PAGE_H - 58, PAGE_W, 58, fill=1, stroke=0)
+    c.setFillColor(HexColor('#FFFFFF'))
+    c.setFont('Helvetica-Bold', 15)
+    c.drawString(28, PAGE_H - 26, race['sessionName'])
+    c.setFont('Helvetica', 8)
+    c.drawString(28, PAGE_H - 43, race_detail_line(race))
+    c.setFont('Helvetica-Bold', 14)
+    c.drawRightString(PAGE_W - 28, PAGE_H - 27, 'PITSTOP ANALYSIS')
+    if page_count > 1:
+        c.setFont('Helvetica', 8)
+        c.drawRightString(PAGE_W - 28, PAGE_H - 43, f'page {page_number}/{page_count}')
+
+    metrics = [
+        ('Stops', str(analysis.get('stopCount', len(summary.get('pitStops', []))))),
+        ('Measured total', fmt_duration(summary.get('totalPitTimeMs'))),
+        ('Average stop', fmt_duration(analysis.get('averageDurationMs'))),
+        ('Avg vs target', fmt_delta_duration(analysis.get('averageDeltaVsTargetMs'))),
+        ('Driver changes', str(analysis.get('driverChangeCount', 0))),
+    ]
+    card_w = (PAGE_W - 56 - 16) / 5
+    for index, (label, value) in enumerate(metrics):
+        summary_card(c, 28 + index * (card_w + 4), 455, card_w, label, value)
+
+    table_x, table_y, table_w, table_h = 28, 72, PAGE_W - 56, 355
+    panel(c, table_x, table_y, table_w, table_h, 'All measured pitstops')
+    columns = [
+        ('Stop', table_x + 14),
+        ('Lap', table_x + 58),
+        ('Duration', table_x + 102),
+        ('Target', table_x + 164),
+        ('Delta', table_x + 226),
+        ('Rejoin', table_x + 286),
+        ('Driver before', table_x + 360),
+        ('Driver after', table_x + 510),
+        ('Change', table_x + 660),
+    ]
+    header_y = table_y + table_h - 38
+    c.setFillColor(MUTED)
+    c.setFont('Helvetica-Bold', 7)
+    for label, xx in columns:
+        c.drawString(xx, header_y, label)
+    c.setStrokeColor(GRID)
+    c.setLineWidth(0.5)
+    c.line(table_x + 12, header_y - 7, table_x + table_w - 12, header_y - 7)
+
+    yy = header_y - 25
+    row_h = 15
+    for stop in stops:
+        delta = stop.get('deltaVsTargetMs')
+        values = [
+            (table_x + 14, f"#{stop.get('stopNumber', '-')}"),
+            (table_x + 58, str(stop.get('lapNumber') or '-')),
+            (table_x + 102, fmt_duration(stop.get('durationMs'))),
+            (table_x + 164, fmt_duration(stop.get('targetDurationMs'))),
+            (table_x + 226, fmt_delta_duration(delta)),
+            (table_x + 286, pit_rejoin_label(stop) or '-'),
+            (table_x + 360, str(stop.get('driverBefore') or '-')[:24]),
+            (table_x + 510, str(stop.get('driverAfter') or '-')[:24]),
+            (table_x + 660, 'yes' if stop.get('driverChanged') else 'no'),
+        ]
+        c.setFont('Helvetica', 7)
+        for xx, value in values:
+            c.setFillColor(RED if xx == table_x + 226 and isinstance(delta, (int, float)) and delta > 0 else (GREEN if xx == table_x + 226 and isinstance(delta, (int, float)) else INK))
+            c.drawString(xx, yy, value)
+        yy -= row_h
+
+    fastest = analysis.get('fastestStop') or {}
+    slowest = analysis.get('slowestStop') or {}
+    c.setFillColor(MUTED)
+    c.setFont('Helvetica', 6.5)
+    c.drawString(
+        28,
+        38,
+        f"Fastest stop #{fastest.get('stopNumber', '-')} {fmt_duration(fastest.get('durationMs'))}; "
+        f"slowest stop #{slowest.get('stopNumber', '-')} {fmt_duration(slowest.get('durationMs'))}. "
+        "Delta is measured pit duration minus configured target pit time."
+    )
+    c.drawRightString(PAGE_W - 28, 18, f'Generated from stored race data | pitstops {page_number}/{page_count}')
 
 
 def render_page(c, payload, stint, page_number):
@@ -571,6 +676,10 @@ def render_page(c, payload, stint, page_number):
         PAGE_H - 43,
         f"Driver stint {driver_stint_number}  |  Car stint {car_stint_number}  |  laps {start_lap}-{end_lap}"
     )
+    end_pit_label = pitstop_header_label(stint.get('endPitStop'))
+    if end_pit_label:
+        c.setFont('Helvetica', 6.2)
+        c.drawRightString(PAGE_W - 28, PAGE_H - 54, end_pit_label[:92])
 
     draw_chart(c, 28, 328, PAGE_W - 56, 190, 'Lap times', stint['laps'], 'lapTimeMs', stint['stats'].get('averageLapMs'), True, 'status')
     chart_w = (PAGE_W - 72) / 3
@@ -595,6 +704,15 @@ def render_pdf(filename, payload, stints, include_summary=False):
     if include_summary:
         render_race_summary(pdf, payload)
         pdf.showPage()
+        pit_stops = payload.get('raceSummary', {}).get('pitStops', [])
+        if pit_stops:
+            chunks = [
+                pit_stops[index:index + PITSTOP_ROWS_PER_PAGE]
+                for index in range(0, len(pit_stops), PITSTOP_ROWS_PER_PAGE)
+            ]
+            for page_index, chunk in enumerate(chunks, 1):
+                render_pitstop_analysis_page(pdf, payload, chunk, page_index, len(chunks))
+                pdf.showPage()
     for index, stint in enumerate(stints, 1):
         render_page(pdf, payload, stint, index)
         pdf.showPage()

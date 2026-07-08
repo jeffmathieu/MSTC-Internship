@@ -625,7 +625,7 @@ input {
 }
 .pit-header {
   display: grid;
-  grid-template-columns: minmax(220px, 1.2fr) minmax(120px, .55fr) minmax(110px, .55fr) minmax(340px, 1.6fr) 92px 42px;
+  grid-template-columns: minmax(205px, 1.08fr) minmax(90px, .42fr) minmax(120px, .55fr) minmax(105px, .48fr) minmax(320px, 1.55fr) 92px 42px;
   gap: 9px;
   align-items: center;
 }
@@ -649,6 +649,17 @@ input {
   font-size: 14px;
   line-height: 1.1;
   font-weight: 900;
+}
+.pit-header small {
+  display: block;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+  line-height: 1;
+  font-weight: 800;
+  color: var(--muted);
 }
 #pit-projection {
   white-space: normal;

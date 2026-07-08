@@ -219,6 +219,7 @@ assert.ok(LAP_HISTORY_COLUMNS.includes('sessionFlag'));
 assert.ok(LAP_HISTORY_COLUMNS.includes('sector1Eligible'));
 assert.ok(LAP_HISTORY_COLUMNS.includes('lapCondition'));
 assert.ok(LAP_HISTORY_COLUMNS.includes('sector1Condition'));
+assert.ok(LAP_HISTORY_COLUMNS.includes('pitTargetDurationMs'));
 assert.strictEqual(lapIdentity(getRaceResultsLap), lapIdentity(lapRecordFromNormalizedRow(getRaceResultsRow)));
 
 const invalidLap = lapRecordFromNormalizedRow({ lastLap: 'IN PIT', bestLap: '--', sector1: '?', sessionFlag: 'Safety car' });

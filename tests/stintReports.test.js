@@ -19,7 +19,7 @@ const {
 const history = [
   lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver / One', lapNumber: 1, lapTimeMs: 180000, sector1Ms: 55000, sector2Ms: 79000, sector3Ms: 46000, lapCondition: 'dry', sector1Condition: 'dry', sector2Condition: 'dry', sector3Condition: 'dry' }),
   lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver / One', lapNumber: 2, lapTimeMs: 240000, sector1Ms: 70000, sector2Ms: 100000, sector3Ms: 70000, sessionFlag: 'FCY', lapCondition: 'transition', sector1Condition: 'dry', sector2Condition: 'transition', sector3Condition: 'wet' }),
-  lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver Two', lapNumber: 3, lapTimeMs: 181000, sector1Ms: 55000, sector2Ms: 79500, sector3Ms: 46500 })
+  lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver Two', lapNumber: 3, lapTimeMs: 181000, sector1Ms: 55000, sector2Ms: 79500, sector3Ms: 46500, pitInfo: '1', lastPit: '1:18', pitTargetDurationMs: '70000', position: 7, classPosition: 3 })
 ];
 const closedStint = stintsForCar(history, 33)[0];
 const reportGapSamples = [
@@ -51,7 +51,8 @@ const canonical = buildCanonicalReportPayload({
   session: { sessionName: 'Spa Race', circuit: 'Spa-Francorchamps' },
   gapSamples: reportGapSamples,
   history,
-  carNumber: '33'
+  carNumber: '33',
+  pitRules: { pitStopDurationMs: 75000 }
 });
 assert.strictEqual(canonical.race.sessionName, 'Spa Race');
 assert.strictEqual(canonical.race.circuit, 'Spa-Francorchamps');
@@ -66,6 +67,14 @@ assert.strictEqual(canonical.raceSummary.statsByCondition.combined.lapCount, 3);
 assert.strictEqual(canonical.raceSummary.statsByCondition.transition.lapCount, 1, 'condition overview counts neutralized laps as laps');
 assert.strictEqual(canonical.raceSummary.statsByCondition.transition.paceLapCount, 0, 'condition overview averages exclude neutralized laps');
 assert.strictEqual(canonical.raceSummary.statsByCondition.wet.lapCount, 0, 'empty conditions remain available for fixed PDF rows');
+assert.strictEqual(canonical.raceSummary.pitStops.length, 1);
+assert.strictEqual(canonical.raceSummary.pitStops[0].durationMs, 78000);
+assert.strictEqual(canonical.raceSummary.pitStops[0].targetDurationMs, 70000);
+assert.strictEqual(canonical.raceSummary.pitStops[0].deltaVsTargetMs, 8000);
+assert.strictEqual(canonical.raceSummary.pitStops[0].driverChanged, true);
+assert.strictEqual(canonical.raceSummary.pitAnalysis.averageDeltaVsTargetMs, 8000);
+assert.strictEqual(canonical.stints[0].endPitStop.stopNumber, 1);
+assert.strictEqual(canonical.stints[0].endPitStop.classPositionAfter, 3);
 
 const output = fs.mkdtempSync(path.join(os.tmpdir(), 'mstc-stint-report-'));
 const paths = artifactPaths(output, closedStint);

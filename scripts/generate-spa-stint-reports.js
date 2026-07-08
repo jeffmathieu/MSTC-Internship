@@ -10,8 +10,10 @@ const { spawnSync } = require('child_process');
 const analytics = require('../src/shared/lapAnalytics');
 const { buildStintInsights, classComparisonsForStint, classRankingForStint } = require('../src/shared/stintInsights');
 const { stintsForCar } = require('../src/shared/stintTracker');
+const { enrichPitStops, pitstopAnalysis, endPitStopForStint } = require('../src/main/stintReports');
 
 const SPA_REFERENCE_TIMES = { lapMs: 180000, sector1Ms: 0, sector2Ms: 0, sector3Ms: 0 };
+const SPA_EXPECTED_PIT_DURATION_MS = 75 * 1000;
 
 function argument(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -114,8 +116,18 @@ function elapsedMs(laps) {
 }
 
 function durationMs(value) {
-  const match = String(value || '').trim().match(/^(\d+):(\d{2})$/);
-  return match ? (Number(match[1]) * 60 + Number(match[2])) * 1000 : null;
+  const text = String(value || '').trim().replace(/^\+/, '');
+  if (!text || text === '--') return null;
+  if (/^\d+(?:\.\d+)?$/.test(text)) return Math.round(Number(text) * 1000);
+  const parts = text.split(':');
+  if (parts.length === 2) return Math.round((Number(parts[0]) * 60 + Number(parts[1])) * 1000);
+  if (parts.length === 3) return Math.round((Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2])) * 1000);
+  return null;
+}
+
+function storedPitTargetDurationMs(lap = {}) {
+  const value = Number(lap.pitTargetDurationMs ?? lap.pitTargetMs ?? lap.expectedPitDurationMs ?? lap.pitStopDurationMs);
+  return Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 // PIT is cumulative and L. PIT contains the provider-measured duration of the
@@ -137,8 +149,13 @@ function pitStopsFromHistory(history, correctedLaps, carNumber) {
       lapNumber,
       durationMs: durationMs(lap.lastPit),
       rawDuration: lap.lastPit || '',
+      targetDurationMs: storedPitTargetDurationMs(lap),
       driverBefore: before?.driverName || '',
-      driverAfter: after?.driverName || ''
+      driverAfter: after?.driverName || '',
+      positionAfter: lap.position || '',
+      classPositionAfter: lap.classPosition || '',
+      gapAfterRaw: lap.gap || '',
+      diffAfterRaw: lap.diff || lap.interval || ''
     });
     previousCount = count;
   });
@@ -195,7 +212,7 @@ function buildPayload(history, carNumber, rawHistory = history) {
   const sessionName = ourLaps.find((lap) => lap.sessionName)?.sessionName || 'Spa race';
   const driverTotals = Object.fromEntries(analytics.driverStats(history, carNumber).map((driver) => [driver.driverName, compactStats(driver)]));
   const raceStats = compactStats(analytics.statsForLaps(ourLaps));
-  const pitStops = pitStopsFromHistory(rawHistory, ourLaps, carNumber);
+  const pitStops = enrichPitStops(pitStopsFromHistory(rawHistory, ourLaps, carNumber), SPA_EXPECTED_PIT_DURATION_MS);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -210,6 +227,7 @@ function buildPayload(history, carNumber, rawHistory = history) {
       finalClassPosition: ourLaps.at(-1)?.classPosition || '',
       drivers: Object.values(driverTotals),
       pitStops,
+      pitAnalysis: pitstopAnalysis(pitStops),
       totalPitTimeMs: pitStops.every((stop) => Number.isFinite(stop.durationMs))
         ? pitStops.reduce((sum, stop) => sum + stop.durationMs, 0)
         : null,
@@ -250,6 +268,7 @@ function buildPayload(history, carNumber, rawHistory = history) {
         teammates,
         classComparisons,
         insights,
+        endPitStop: endPitStopForStint(stint, pitStops),
         laps: stint.laps.map((lap) => ({
           lapNumber: lap.lapNumber,
           lapTimeMs: lap.lapTimeMs,
