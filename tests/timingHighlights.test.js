@@ -52,4 +52,87 @@ assert.strictEqual(driverChange.lapStrip[0].marker, 'P');
 assert.strictEqual(driverChange.lapStrip[1].status, 'pit-out');
 assert.strictEqual(driverChange.lapStrip[1].marker, '');
 
+const conditionHistory = [
+  lap({
+    carNumber: 12,
+    className: 'LMP3',
+    driverName: 'Dry Driver',
+    lapNumber: 1,
+    lapTimeMs: 122659,
+    sector1Ms: 42124,
+    sector2Ms: 43907,
+    sector3Ms: 36373,
+    lapCondition: 'dry',
+    sector1Condition: 'dry',
+    sector2Condition: 'dry',
+    sector3Condition: 'dry'
+  }),
+  lap({
+    carNumber: 12,
+    className: 'LMP3',
+    driverName: 'Wet Driver',
+    lapNumber: 2,
+    lapTimeMs: 132000,
+    sector1Ms: 46000,
+    sector2Ms: 48000,
+    sector3Ms: 38000,
+    lapCondition: 'wet',
+    sector1Condition: 'wet',
+    sector2Condition: 'wet',
+    sector3Condition: 'wet'
+  }),
+  lap({
+    carNumber: 9,
+    className: 'LMP3',
+    driverName: 'Dry Rival',
+    lapNumber: 1,
+    lapTimeMs: 121000,
+    sector1Ms: 41000,
+    sector2Ms: 43000,
+    sector3Ms: 36000,
+    lapCondition: 'dry',
+    sector1Condition: 'dry',
+    sector2Condition: 'dry',
+    sector3Condition: 'dry'
+  }),
+  lap({
+    carNumber: 9,
+    className: 'LMP3',
+    driverName: 'Wet Rival',
+    lapNumber: 2,
+    lapTimeMs: 131000,
+    sector1Ms: 45500,
+    sector2Ms: 47500,
+    sector3Ms: 37500,
+    lapCondition: 'wet',
+    sector1Condition: 'wet',
+    sector2Condition: 'wet',
+    sector3Condition: 'wet'
+  })
+];
+const dryHighlights = buildTimingHighlights(conditionHistory, '12', { conditionFilter: 'dry' });
+assert.strictEqual(dryHighlights.bestLap.valueMs, 122659);
+assert.strictEqual(dryHighlights.bestLap.classBestMs, 121000);
+assert.strictEqual(dryHighlights.bestLap.isClassBest, false);
+assert.strictEqual(dryHighlights.bestSectors.sector1.valueMs, 42124);
+assert.strictEqual(dryHighlights.bestSectors.sector1.classBestMs, 41000);
+
+const wetHighlights = buildTimingHighlights(conditionHistory, '12', { conditionFilter: 'wet' });
+assert.strictEqual(wetHighlights.conditionFilter, 'wet');
+assert.strictEqual(wetHighlights.bestLap.valueMs, 132000, 'wet view uses the wet best lap, not the dry best lap');
+assert.strictEqual(wetHighlights.bestLap.classBestMs, 131000, 'wet class-best comparison only uses wet class samples');
+assert.strictEqual(wetHighlights.bestLap.isClassBest, false);
+assert.strictEqual(wetHighlights.bestSectors.sector1.valueMs, 46000);
+assert.strictEqual(wetHighlights.bestSectors.sector1.classBestMs, 45500);
+assert.strictEqual(wetHighlights.lapStrip[1].lapCondition, 'wet');
+
+const noWetOwnSamples = buildTimingHighlights([
+  conditionHistory[0],
+  conditionHistory[3]
+], '12', { conditionFilter: 'wet' });
+assert.strictEqual(noWetOwnSamples.bestLap.valueMs, null, 'wet view shows no best lap when our car has no wet lap');
+assert.strictEqual(noWetOwnSamples.bestLap.isClassBest, false, 'a missing wet best lap must not render as class-best purple');
+assert.strictEqual(noWetOwnSamples.bestSectors.sector1.valueMs, null, 'wet view shows no best sector when our car has no wet sector');
+assert.strictEqual(noWetOwnSamples.bestSectors.sector1.isClassBest, false, 'a missing wet best sector must not render as class-best purple');
+
 console.log('Timing highlight tests passed.');

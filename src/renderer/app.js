@@ -27,7 +27,7 @@ function syncConditionControlTitles() {
   const track = $('track-condition');
   const analysis = $('analysis-condition');
   const trackLabels = { dry: 'Dry', wet: 'Wet', transition: 'Transition' };
-  const analysisLabels = { combined: 'Overall', dry: 'Dry only', wet: 'Wet only' };
+  const analysisLabels = { combined: 'Full', dry: 'Dry only', wet: 'Wet only' };
   if (track) track.title = `Track condition: ${trackLabels[track.value] || 'Unknown'}`;
   if (analysis) analysis.title = `Pace view: ${analysisLabels[analysis.value] || 'Unknown'}`;
 }
@@ -452,7 +452,11 @@ function renderLapStrip(state, precomputedHighlights = null) {
   // comparison itself.
   const currentHighlights = precomputedHighlights?.lapStrip?.length === storedLapCount
     ? precomputedHighlights
-    : timingHighlights?.buildTimingHighlights(state?.lapHistory || [], carNumber) || precomputedHighlights;
+    : timingHighlights?.buildTimingHighlights(state?.lapHistory || [], carNumber, {
+      conditionFilter: state?.analyticsSummary?.resolvedConditionFilter
+        || state?.analyticsSummary?.analysisConditionFilter
+        || 'combined'
+    }) || precomputedHighlights;
   const laps = [...(currentHighlights?.lapStrip || [])].reverse();
   const currentStint = state?.stintState?.cars?.[carNumber]?.currentStint || null;
   setText('info-stint', currentStint
@@ -469,7 +473,7 @@ function renderLapStrip(state, precomputedHighlights = null) {
   }
   laps.forEach((lap, index) => {
     const row = document.createElement('div');
-    row.className = `lap-strip-row ${lap.status || 'normal'} ${lap.highlight || 'none'}`;
+    row.className = `lap-strip-row ${lap.status || 'normal'} ${lap.highlight || 'none'} condition-${lap.lapCondition || 'unknown'}`;
     row.setAttribute('title', lap.tooltip || lap.driverName || 'Unknown driver');
     const number = document.createElement('span');
     number.className = 'lap-number';
@@ -602,6 +606,7 @@ function renderRefSector(sectorNumber, refMs, lastMs, bestMs) {
 
 function renderSectorAnalytics(summary, rows = [], prediction = null) {
   const ourCar = getOurCarAnalytics(summary);
+  const combinedCar = ourCar?.byCondition?.combined || ourCar;
   const refs = currentReferenceTimes();
   const row = followedRow(rows);
   const bestS1 = numericMs(ourCar?.bestSector1Ms);
@@ -613,8 +618,11 @@ function renderSectorAnalytics(summary, rows = [], prediction = null) {
   setClassBestValue('best-sector-1', summary?.timingHighlights?.bestSectors?.sector1?.isClassBest);
   setClassBestValue('best-sector-2', summary?.timingHighlights?.bestSectors?.sector2?.isClassBest);
   setClassBestValue('best-sector-3', summary?.timingHighlights?.bestSectors?.sector3?.isClassBest);
-  const ideal = [bestS1, bestS2, bestS3].every(Number.isFinite) ? bestS1 + bestS2 + bestS3 : null;
-  const idealStatus = normReference.idealReferenceStatus(bestS1, bestS2, bestS3, refs.lapMs);
+  const idealS1 = numericMs(combinedCar?.bestSector1Ms);
+  const idealS2 = numericMs(combinedCar?.bestSector2Ms);
+  const idealS3 = numericMs(combinedCar?.bestSector3Ms);
+  const ideal = [idealS1, idealS2, idealS3].every(Number.isFinite) ? idealS1 + idealS2 + idealS3 : null;
+  const idealStatus = normReference.idealReferenceStatus(idealS1, idealS2, idealS3, refs.lapMs);
   setMetric('ideal-time', formatMs(ideal), { flash: true });
   setText('ideal-time-delta', idealStatus.deltaMs !== null ? `Delta ${idealStatus.deltaLabel}` : 'Best S1 + best S2 + best S3');
   setNormTextState('ideal-time', idealStatus.state);

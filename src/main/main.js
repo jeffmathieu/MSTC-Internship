@@ -805,7 +805,7 @@ function buildAnalyticsSummary(settings, context, rows = []) {
   ]));
   const timingHighlightsByCar = Object.fromEntries(followedCars.map((carNumber) => [
     carNumber,
-    buildTimingHighlights(history, carNumber)
+    buildTimingHighlights(history, carNumber, { conditionFilter: resolvedConditionFilter })
   ]));
   const primaryCar = String(settings.followedCar || followedCars[0] || '');
 

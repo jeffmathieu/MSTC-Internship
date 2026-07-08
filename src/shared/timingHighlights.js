@@ -7,10 +7,13 @@
   const analytics = typeof module === 'object' && module.exports
     ? require('./lapAnalytics')
     : root?.lapAnalytics;
-  const api = factory(analytics);
+  const trackConditions = typeof module === 'object' && module.exports
+    ? require('./trackConditions')
+    : root?.trackConditions;
+  const api = factory(analytics, trackConditions);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.timingHighlights = api;
-})(typeof globalThis !== 'undefined' ? globalThis : null, function createTimingHighlightsApi(lapAnalytics) {
+})(typeof globalThis !== 'undefined' ? globalThis : null, function createTimingHighlightsApi(lapAnalytics, trackConditions) {
   function finiteMs(value) {
     if (value === null || value === undefined || value === '') return null;
     const number = Number(value);
@@ -46,21 +49,24 @@
     };
   }
 
-  function buildTimingHighlights(history = [], carNumber = '') {
+  function buildTimingHighlights(history = [], carNumber = '', options = {}) {
     const followedCar = String(carNumber || '');
+    const conditionFilter = trackConditions.normalizeAnalysisFilter(options.conditionFilter, 'combined');
     const laps = lapAnalytics.lapsForCar(history, followedCar);
-    const ourStats = lapAnalytics.carStats(history, followedCar);
-    const classCars = ourStats.className ? lapAnalytics.carsInClass(history, ourStats.className) : [];
+    const ourStats = lapAnalytics.carStats(history, followedCar, { conditionFilter });
+    const className = ourStats.className || lapAnalytics.carStats(history, followedCar).className || '';
+    const classCars = className ? lapAnalytics.carsInClass(history, className, { conditionFilter }) : [];
     const classBestLapMs = minimum(classCars.map((car) => car.bestLapMs));
     const classBestSector1Ms = minimum(classCars.map((car) => car.bestSector1Ms));
     const classBestSector2Ms = minimum(classCars.map((car) => car.bestSector2Ms));
     const classBestSector3Ms = minimum(classCars.map((car) => car.bestSector3Ms));
-    const representativeLaps = new Set(lapAnalytics.representativePaceLaps(laps));
+    const representativeLaps = new Set(lapAnalytics.representativePaceLaps(laps, { conditionFilter }));
     const bestLap = classBestState(ourStats.bestLapMs, classBestLapMs);
 
     return {
       carNumber: followedCar,
-      className: ourStats.className || '',
+      className,
+      conditionFilter,
       bestLap,
       bestSectors: {
         sector1: classBestState(ourStats.bestSector1Ms, classBestSector1Ms),
@@ -76,6 +82,7 @@
         return {
           lapNumber: lap.lapNumber,
           lapTimeMs: finiteMs(lap.lapTimeMs),
+          lapCondition: trackConditions.deriveLapCondition(lap),
           driverName: lap.driverName || '',
           driverInitials: driverInitials(lap.driverName),
           status,

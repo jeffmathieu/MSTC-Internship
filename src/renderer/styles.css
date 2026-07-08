@@ -30,6 +30,7 @@
   --lap-strip-neutralized-color: #fcee59;
   --lap-strip-personal-best-color: #1e9f67;
   --lap-strip-class-best-color: rgb(177, 80, 196);
+  --lap-strip-wet-lap-number-color: #1d78b8;
   --class-best-value-color: rgb(177, 80, 196);
 }
 
@@ -65,6 +66,7 @@
   --lap-strip-neutralized-color: #fcee59;
   --lap-strip-personal-best-color: #42c98c;
   --lap-strip-class-best-color: #c19cff;
+  --lap-strip-wet-lap-number-color: #7bbcff;
   --class-best-value-color: #c19cff;
 }
 
@@ -148,6 +150,7 @@ select:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 .lap-strip-row .lap-number { color: var(--muted); font-size: 11px; font-weight: 900; }
+.lap-strip-row.condition-wet .lap-number { color: var(--lap-strip-wet-lap-number-color); }
 .lap-strip-row .lap-time { font-size: 13px; font-weight: 900; white-space: nowrap; }
 .lap-strip-row .lap-driver {
   overflow: hidden;
@@ -275,19 +278,34 @@ select:focus-visible {
 }
 .controls {
   display: flex;
+  align-items: flex-end;
   justify-content: flex-end;
   gap: 6px;
 }
 .condition-select {
-  width: 58px;
+  width: 76px;
   min-width: 0;
-  height: 35px;
+  height: 28px;
   border: 2px solid var(--line);
   background: var(--control);
   color: var(--ink);
-  padding: 4px 5px;
-  font-size: 18px;
+  padding: 2px 5px;
+  font-size: 13px;
   font-weight: 900;
+  text-transform: uppercase;
+}
+.condition-control {
+  display: grid;
+  gap: 2px;
+  align-items: end;
+}
+.condition-control span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  line-height: 1;
+  text-transform: uppercase;
 }
 button {
   border: 2px solid var(--line);
@@ -299,8 +317,8 @@ button {
 button.primary { background: var(--primary-bg); color: var(--primary-ink); }
 button:disabled { cursor: not-allowed; opacity: .38; }
 .icon-button {
-  width: 38px;
-  height: 35px;
+  width: 42px;
+  height: 42px;
   padding: 6px;
   display: inline-grid;
   place-items: center;
