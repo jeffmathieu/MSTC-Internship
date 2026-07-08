@@ -277,6 +277,7 @@ select:focus-visible {
   background: var(--red);
 }
 .controls {
+  --header-control-height: 42px;
   display: flex;
   align-items: flex-end;
   justify-content: flex-end;
@@ -285,7 +286,7 @@ select:focus-visible {
 .condition-select {
   width: 76px;
   min-width: 0;
-  height: 28px;
+  height: var(--header-control-height);
   border: 2px solid var(--line);
   background: var(--control);
   color: var(--ink);
@@ -311,14 +312,15 @@ button {
   border: 2px solid var(--line);
   background: var(--control);
   color: var(--ink);
+  min-height: var(--header-control-height, 42px);
   padding: 7px 10px;
   font-weight: 900;
 }
 button.primary { background: var(--primary-bg); color: var(--primary-ink); }
 button:disabled { cursor: not-allowed; opacity: .38; }
 .icon-button {
-  width: 42px;
-  height: 42px;
+  width: var(--header-control-height, 42px);
+  height: var(--header-control-height, 42px);
   padding: 6px;
   display: inline-grid;
   place-items: center;

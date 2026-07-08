@@ -155,6 +155,21 @@ function normalizeLap(entry) {
   };
 }
 
+function recordedTimeMs(lap) {
+  const timestamp = lap?.recordedAt || lap?.collectedAt || '';
+  const ms = new Date(timestamp).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function compareLapsChronologically(a, b) {
+  const aTime = recordedTimeMs(a);
+  const bTime = recordedTimeMs(b);
+  if (aTime !== null && bTime !== null && aTime !== bTime) return aTime - bTime;
+  const lapDelta = (a.lapNumber ?? 0) - (b.lapNumber ?? 0);
+  if (lapDelta) return lapDelta;
+  return 0;
+}
+
 // Reads the cumulative PIT counter saved with each lap. Text such as "P2" or
 // "stops 2" is accepted; status-only values remain unknown.
 function pitCountFromLap(lap) {
@@ -312,11 +327,7 @@ function completedLaps(history) {
   const sorted = (history || [])
     .map(normalizeLap)
     .filter((lap) => lap.carNumber && lap.lapTimeMs !== null)
-    .sort((a, b) => {
-      const lapDelta = (a.lapNumber ?? 0) - (b.lapNumber ?? 0);
-      if (lapDelta) return lapDelta;
-      return new Date(a.recordedAt || 0) - new Date(b.recordedAt || 0);
-    });
+    .sort(compareLapsChronologically);
   return annotatePitPhases(sorted);
 }
 
@@ -334,11 +345,7 @@ function lapsForDriver(history, carNumber, driverName) {
 // use only pace-eligible laps; sector averages use sector-level eligibility.
 function statsForLaps(laps, options = {}) {
   const conditionFilter = trackConditions.normalizeAnalysisFilter(options.conditionFilter, 'combined');
-  const sortedAll = [...laps].sort((a, b) => {
-    const lapDelta = (a.lapNumber ?? 0) - (b.lapNumber ?? 0);
-    if (lapDelta) return lapDelta;
-    return new Date(a.recordedAt || 0) - new Date(b.recordedAt || 0);
-  });
+  const sortedAll = [...laps].sort(compareLapsChronologically);
   const lapCandidates = conditionFilter === 'combined'
     ? sortedAll
     : sortedAll.filter((lap) => trackConditions.lapMatchesCondition(lap, conditionFilter));

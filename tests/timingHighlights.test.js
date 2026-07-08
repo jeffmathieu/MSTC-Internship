@@ -52,6 +52,20 @@ assert.strictEqual(driverChange.lapStrip[0].marker, 'P');
 assert.strictEqual(driverChange.lapStrip[1].status, 'pit-out');
 assert.strictEqual(driverChange.lapStrip[1].marker, '');
 
+const providerLapResetHistory = [
+  lap({ carNumber: 12, className: 'LMP3', driverName: 'Gabriele Lancieri', lapNumber: 86, lapTimeMs: 126548, collectedAt: '2026-07-08T12:00:00.000Z' }),
+  lap({ carNumber: 12, className: 'LMP3', driverName: 'Gabriele Lancieri', lapNumber: 87, lapTimeMs: 126413, collectedAt: '2026-07-08T12:02:00.000Z' }),
+  lap({ carNumber: 12, className: 'LMP3', driverName: 'Yuki Harata', lapNumber: 4, lapTimeMs: 130407, collectedAt: '2026-07-08T12:06:00.000Z' }),
+  lap({ carNumber: 12, className: 'LMP3', driverName: 'Yuki Harata', lapNumber: 5, lapTimeMs: 130619, collectedAt: '2026-07-08T12:08:00.000Z' })
+];
+const providerLapReset = buildTimingHighlights(providerLapResetHistory, '12');
+assert.deepStrictEqual(
+  providerLapReset.lapStrip.map((entry) => entry.lapNumber),
+  [86, 87, 4, 5],
+  'lap strip follows storage time, not a provider lap counter that reset after a driver change'
+);
+assert.strictEqual(providerLapReset.lapStrip.at(-1).driverInitials, 'YH');
+
 const conditionHistory = [
   lap({
     carNumber: 12,
