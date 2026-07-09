@@ -629,11 +629,17 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('battle-ahead-trend').textContent, 'Our best 2:03.500');
   assert.strictEqual(document.getElementById('battle-ahead-prediction').textContent, 'Qualifying comparison');
 
-  document.getElementById('comparison-xic-car').value = '9';
-  await document.getElementById('comparison-xic-car').trigger('change');
+  assert.strictEqual(document.getElementById('comparison-xic-car'), null, 'inline XIC selector is removed because class tabs show every car');
+  assert.strictEqual(document.getElementById('comparison-tab-title').textContent, 'Best / Last / Last 10');
+  await document.getElementById('comparison-next-tab').trigger('click');
   await flushAsync();
-  assert.strictEqual(lastSettingsPatch.comparisonCar, '9', 'inline XIC selector persists the shared comparison-car setting');
-  assert.strictEqual(document.getElementById('comparison-car').value, '9', 'inline and setup XIC inputs stay synchronized');
+  assert.strictEqual(document.getElementById('comparison-tab-title').textContent, 'Averages');
+  await document.getElementById('comparison-next-tab').trigger('click');
+  await flushAsync();
+  assert.strictEqual(document.getElementById('comparison-tab-title').textContent, 'Sectors');
+  await document.getElementById('comparison-prev-tab').trigger('click');
+  await flushAsync();
+  assert.strictEqual(document.getElementById('comparison-tab-title').textContent, 'Averages');
 
   document.getElementById('mode-race').checked = false;
   document.getElementById('mode-qualifying').checked = true;

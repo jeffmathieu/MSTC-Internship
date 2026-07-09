@@ -276,28 +276,17 @@
       </section>
 
       <section id="comparison-placeholder" class="comparison-placeholder board-box" aria-label="Comparison area">
-        <article class="comparison-column" id="comparison-team">
-          <header><strong id="comparison-team-title">D2 vs. D1</strong></header>
-          <div class="comparison-metrics" id="comparison-team-metrics"></div>
-          <div class="comparison-averages" id="comparison-team-averages"></div>
-          <div class="comparison-sectors" id="comparison-team-sectors"></div>
-        </article>
-        <article class="comparison-column" id="comparison-bic">
-          <header><strong id="comparison-bic-title">Our car vs. BIC</strong></header>
-          <div class="comparison-metrics" id="comparison-bic-metrics"></div>
-          <div class="comparison-averages" id="comparison-bic-averages"></div>
-          <div class="comparison-sectors" id="comparison-bic-sectors"></div>
-        </article>
-        <article class="comparison-column" id="comparison-xic">
-          <header class="xic-title">
-            <strong id="comparison-xic-title">Our car vs.</strong>
-            <span class="xic-number-prefix">#</span>
-            <input id="comparison-xic-car" inputmode="numeric" aria-label="Choose XIC car number" placeholder="—">
-          </header>
-          <div class="comparison-metrics" id="comparison-xic-metrics"></div>
-          <div class="comparison-averages" id="comparison-xic-averages"></div>
-          <div class="comparison-sectors" id="comparison-xic-sectors"></div>
-        </article>
+        <header class="comparison-board-header">
+          <strong>Comparisons</strong>
+          <span id="comparison-tab-title">Laps</span>
+        </header>
+        <div class="comparison-tab comparison-tab-active" id="comparison-tab-laps" aria-label="Lap comparison"></div>
+        <div class="comparison-tab" id="comparison-tab-averages" aria-label="Average comparison"></div>
+        <div class="comparison-tab" id="comparison-tab-sectors" aria-label="Sector comparison"></div>
+        <nav class="comparison-tab-controls" aria-label="Comparison tabs">
+          <button id="comparison-prev-tab" type="button" aria-label="Previous comparison tab">←</button>
+          <button id="comparison-next-tab" type="button" aria-label="Next comparison tab">→</button>
+        </nav>
       </section>
 
       <section class="battle-strip">

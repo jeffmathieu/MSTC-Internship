@@ -9,6 +9,8 @@ let currentState = null;
 let configuredFollowedCars = [];
 const DEFAULT_POLL_INTERVAL_MS = 5000;
 const MAX_FOLLOWED_CARS = 3;
+const COMPARISON_TABS = ['laps', 'averages', 'sectors'];
+let currentComparisonTab = 0;
 const dashboardQuery = new URLSearchParams(window.location?.search || '');
 const fixedDashboardCar = String(dashboardQuery.get('car') || '').trim();
 const isSecondaryDashboard = dashboardQuery.get('secondary') === '1';
@@ -657,77 +659,188 @@ function comparisonDeltaState(value) {
   return ms === null || ms === 0 ? 'neutral' : ms < 0 ? 'good' : 'bad';
 }
 
-function fillComparisonList(id, items, rowClass, labelKey = 'label', valueKey = 'deltaMs') {
-  const container = $(id);
+function comparisonMetricByLabel(metrics, label) {
+  const wanted = String(label || '').toLowerCase();
+  return (metrics || []).find((item) => String(item.label || '').toLowerCase() === wanted) || null;
+}
+
+function comparisonDeltaElement(deltaMs) {
+  const value = numericMs(deltaMs);
+  const output = document.createElement('output');
+  output.className = `comparison-delta ${comparisonDeltaState(value)}`;
+  output.textContent = value === 0 ? '' : displayDelta(value);
+  return output;
+}
+
+function comparisonTimeElement(ms, className = 'comparison-time') {
+  const output = document.createElement('output');
+  output.className = className;
+  output.textContent = formatMs(numericMs(ms));
+  return output;
+}
+
+function comparisonMetricCell(item) {
+  const cell = document.createElement('span');
+  cell.className = 'comparison-value-pair';
+  cell.appendChild(comparisonTimeElement(item?.valueMs));
+  cell.appendChild(comparisonDeltaElement(item?.deltaMs));
+  return cell;
+}
+
+function comparisonCarLabel(car, fallback = '—') {
+  const label = document.createElement('strong');
+  label.className = `comparison-car-label${car?.isBic ? ' is-bic' : ''}`;
+  const number = document.createElement('span');
+  number.textContent = car?.carNumber ? `#${car.carNumber}` : fallback;
+  label.appendChild(number);
+  if (car?.isBic) {
+    const badge = document.createElement('small');
+    badge.textContent = 'BIC';
+    label.appendChild(badge);
+  }
+  return label;
+}
+
+function appendComparisonRow(container, label, cells, rowClass = '', labelNode = null) {
+  if (!container) return;
+  const row = document.createElement('div');
+  row.className = `comparison-row ${rowClass}`.trim();
+  if (labelNode) row.appendChild(labelNode);
+  else {
+    const labelCell = document.createElement('strong');
+    labelCell.textContent = label || '—';
+    row.appendChild(labelCell);
+  }
+  cells.forEach((cell) => row.appendChild(cell));
+  container.appendChild(row);
+}
+
+function comparisonTabTitle(tab) {
+  if (tab === 'averages') return 'Averages';
+  if (tab === 'sectors') return 'Sectors';
+  return 'Best / Last / Last 10';
+}
+
+function updateComparisonTabVisibility() {
+  const tab = COMPARISON_TABS[currentComparisonTab] || 'laps';
+  setText('comparison-tab-title', comparisonTabTitle(tab));
+  COMPARISON_TABS.forEach((name) => {
+    $(`comparison-tab-${name}`)?.classList.toggle('comparison-tab-active', name === tab);
+  });
+}
+
+function setComparisonTab(index) {
+  currentComparisonTab = (index + COMPARISON_TABS.length) % COMPARISON_TABS.length;
+  updateComparisonTabVisibility();
+}
+
+function renderComparisonLapRows(cars) {
+  const container = $('comparison-tab-laps');
   if (!container) return;
   container.innerHTML = '';
-  (items || []).forEach((item) => {
-    const row = document.createElement('div');
-    row.className = `${rowClass} ${comparisonDeltaState(item[valueKey])}`;
-    const label = document.createElement('span');
-    label.textContent = item[labelKey] || '—';
-    const value = document.createElement('output');
-    if (valueKey === 'deltaMs') value.className = 'comparison-delta';
-    value.textContent = valueKey === 'deltaMs' ? displayDelta(numericMs(item[valueKey])) : formatMs(numericMs(item[valueKey]));
-    row.appendChild(label);
-    if (rowClass === 'comparison-line') {
-      const absolute = document.createElement('output');
-      absolute.className = 'comparison-absolute';
-      absolute.textContent = formatMs(numericMs(item.valueMs));
-      row.appendChild(absolute);
-    }
-    if (rowClass === 'comparison-sector') {
-      const average = document.createElement('output');
-      average.className = 'comparison-sector-average';
-      average.textContent = formatMs(numericMs(item.averageMs));
-      row.appendChild(average);
-    }
-    if (rowClass !== 'comparison-sector' || item.showDelta) row.appendChild(value);
-    container.appendChild(row);
+  appendComparisonRow(container, '', [
+    Object.assign(document.createElement('span'), { textContent: 'Best lap' }),
+    Object.assign(document.createElement('span'), { textContent: 'Last lap' }),
+    Object.assign(document.createElement('span'), { textContent: 'Last 10 avg' })
+  ], 'comparison-row-head');
+  (cars || []).forEach((car) => {
+    appendComparisonRow(container, '', [
+      comparisonMetricCell(comparisonMetricByLabel(car.metrics, 'Best')),
+      comparisonMetricCell(comparisonMetricByLabel(car.metrics, 'Last')),
+      comparisonMetricCell(comparisonMetricByLabel(car.metrics, 'Last 10'))
+    ], 'comparison-data-row', comparisonCarLabel(car));
+  });
+}
+
+function comparisonAverageChip(item) {
+  const chip = document.createElement('span');
+  chip.className = `comparison-average-chip${item?.total ? ' total' : ''}`;
+  const label = document.createElement('span');
+  label.textContent = item?.label || '—';
+  const value = comparisonTimeElement(item?.valueMs);
+  chip.appendChild(label);
+  chip.appendChild(value);
+  chip.appendChild(comparisonDeltaElement(item?.deltaMs));
+  return chip;
+}
+
+function renderComparisonAverageRows(cars) {
+  const container = $('comparison-tab-averages');
+  if (!container) return;
+  container.innerHTML = '';
+  const grid = document.createElement('div');
+  grid.className = 'comparison-average-columns';
+  (cars || []).forEach((car) => {
+    const column = document.createElement('article');
+    column.className = `comparison-average-column${car.isBic ? ' is-bic' : ''}`;
+    column.appendChild(comparisonCarLabel(car));
+    const chips = document.createElement('div');
+    const averageItems = [
+      { label: 'Total', valueMs: car.totalAverageMs, deltaMs: car.totalAverageDeltaMs, total: true },
+      ...(car.averages || [])
+    ];
+    chips.className = `comparison-average-chip-list${averageItems.length > 3 ? ' compact' : ''}`;
+    averageItems.forEach((item) => chips.appendChild(comparisonAverageChip(item)));
+    column.appendChild(chips);
+    grid.appendChild(column);
+  });
+  container.appendChild(grid);
+}
+
+function comparisonSectorCell(item, showDelta) {
+  const cell = document.createElement('span');
+  cell.className = 'comparison-sector-cell';
+  cell.appendChild(comparisonTimeElement(item?.averageMs));
+  if (showDelta) {
+    cell.appendChild(comparisonDeltaElement(item?.deltaMs));
+  }
+  return cell;
+}
+
+function renderComparisonSectorRows(cars) {
+  const container = $('comparison-tab-sectors');
+  if (!container) return;
+  container.innerHTML = '';
+  appendComparisonRow(container, '', [
+    (() => {
+      const span = document.createElement('span');
+      span.className = 'comparison-sector-label';
+      span.textContent = 'S1';
+      return span;
+    })(),
+    (() => {
+      const span = document.createElement('span');
+      span.className = 'comparison-sector-label';
+      span.textContent = 'S2';
+      return span;
+    })(),
+    (() => {
+      const span = document.createElement('span');
+      span.className = 'comparison-sector-label';
+      span.textContent = 'S3';
+      return span;
+    })()
+  ], 'comparison-sector-head');
+  (cars || []).forEach((car) => {
+    const sectors = car.sectors || [];
+    appendComparisonRow(container, '', [
+      comparisonSectorCell(sectors[0], !car.isOurCar),
+      comparisonSectorCell(sectors[1], !car.isOurCar),
+      comparisonSectorCell(sectors[2], !car.isOurCar)
+    ], 'comparison-sector-row', comparisonCarLabel(car));
   });
 }
 
 function renderComparisonMatrix(matrix) {
-  if (!matrix) return false;
-  const ourNumber = matrix.ourCarNumber || activeCarNumber() || '?';
-  setText('comparison-team-title', matrix.teammate?.title || 'D2 vs. D1');
-  $('comparison-team-title')?.setAttribute('title', matrix.teammate?.title || 'D2 vs. D1');
-  setText('comparison-bic-title', `#${ourNumber} vs. BIC${matrix.bic?.targetCarNumber ? ` #${matrix.bic.targetCarNumber}` : ''}`);
-  setText('comparison-xic-title', `#${ourNumber} vs.`);
-  if ($('comparison-xic-car') && document.activeElement !== $('comparison-xic-car')) {
-    $('comparison-xic-car').value = matrix.xic?.targetCarNumber || currentSettings?.comparisonCar || '';
+  if (!matrix) {
+    updateComparisonTabVisibility();
+    return false;
   }
-  [
-    ['team', matrix.teammate],
-    ['bic', matrix.bic],
-    ['xic', matrix.xic]
-  ].forEach(([id, column]) => {
-    fillComparisonList(`comparison-${id}-metrics`, column?.metrics, 'comparison-line');
-    const averages = [
-      { label: 'Total average', valueMs: column?.totalAverageMs, deltaMs: column?.totalAverageDeltaMs, total: true },
-      ...(column?.averages || [])
-    ];
-    const averagesContainer = $(`comparison-${id}-averages`);
-    if (averagesContainer) {
-      averagesContainer.innerHTML = '';
-      averages.forEach((item) => {
-        const row = document.createElement('div');
-        row.className = `comparison-average${item.total ? ' total' : ''}`;
-        const label = document.createElement('span');
-        label.textContent = item.label;
-        const value = document.createElement('output');
-        value.textContent = formatMs(numericMs(item.valueMs));
-        const delta = document.createElement('output');
-        delta.className = `comparison-average-delta ${comparisonDeltaState(item.deltaMs)}`;
-        delta.textContent = displayDelta(numericMs(item.deltaMs));
-        row.appendChild(label);
-        row.appendChild(value);
-        row.appendChild(delta);
-        averagesContainer.appendChild(row);
-      });
-    }
-    fillComparisonList(`comparison-${id}-sectors`, column?.sectors, 'comparison-sector');
-  });
+  const classCars = matrix.classCars || [];
+  renderComparisonLapRows(classCars);
+  renderComparisonAverageRows(classCars);
+  renderComparisonSectorRows(classCars);
+  updateComparisonTabVisibility();
   return true;
 }
 
@@ -1338,12 +1451,8 @@ async function init() {
     render(currentState);
   });
   $('open-setup')?.addEventListener('click', () => showSetup(true));
-  $('comparison-xic-car')?.addEventListener('change', async () => {
-    const comparisonCar = String($('comparison-xic-car').value || '').trim();
-    if ($('comparison-car')) $('comparison-car').value = comparisonCar;
-    currentSettings = await window.liveTiming.setSettings({ comparisonCar });
-    render(currentState);
-  });
+  $('comparison-prev-tab')?.addEventListener('click', () => setComparisonTab(currentComparisonTab - 1));
+  $('comparison-next-tab')?.addEventListener('click', () => setComparisonTab(currentComparisonTab + 1));
   $('export')?.addEventListener('click', async () => { const result = await window.liveTiming.exportCurrent(); alert(`Exported:\n${result.csvPath}\n${result.jsonPath}\n${result.historyPath || ''}`); });
 
   // Persist settings immediately when hidden inputs change. If new settings are

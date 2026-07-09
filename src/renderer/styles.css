@@ -470,74 +470,214 @@ button:disabled { cursor: not-allowed; opacity: .38; }
 .comparison-placeholder {
   min-width: 0;
   min-height: 0;
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: 34px minmax(0, 1fr);
   overflow: hidden;
 }
-.comparison-column {
+.comparison-board-header {
   min-width: 0;
-  display: grid;
-  grid-template-rows: 38px minmax(105px, .7fr) minmax(0, 1fr) 66px;
-  border-right: 2px solid var(--line);
-}
-.comparison-column:last-child { border-right: 0; }
-.comparison-column header {
-  padding: 6px 8px;
+  padding: 5px 10px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  gap: 10px;
   border-bottom: 2px solid var(--line);
-  overflow: hidden;
-  text-align: center;
 }
-.comparison-column header strong {
+.comparison-board-header > strong,
+#comparison-tab-title {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.comparison-tab {
   min-width: 0;
-  display: block;
+  min-height: 0;
+  display: none;
+  padding: 8px 12px 40px;
+  overflow: hidden;
+}
+.comparison-tab-active {
+  display: grid;
+  align-content: start;
+}
+.comparison-tab-controls {
+  position: absolute;
+  right: 8px;
+  bottom: 7px;
+  display: flex;
+  gap: 6px;
+}
+.comparison-tab-controls button {
+  width: 31px;
+  height: 26px;
+  min-width: 0;
+  padding: 0;
+  border-width: 2px;
+  background: var(--control);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1;
+}
+.comparison-tab-controls button:hover { background: var(--control-hover); }
+#comparison-tab-laps,
+#comparison-tab-sectors {
+  grid-template-rows: 18px repeat(auto-fit, 22px);
+  row-gap: 2px;
+}
+.comparison-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 130px repeat(3, minmax(0, 1fr));
+  align-items: center;
+  column-gap: 12px;
+}
+.comparison-row > strong {
+  min-width: 0;
   overflow: hidden;
   font-size: 14px;
+  font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.xic-title { gap: 5px; }
-.xic-title strong { flex: 0 1 auto; }
-.xic-number-prefix { margin: 0; font-size: 14px; font-weight: 900; }
-.xic-title input { flex: 0 0 58px; width: 58px; height: 27px; padding: 2px 6px; font-size: 14px; text-align: center; }
-.comparison-metrics { padding: 10px 12px; display: grid; align-content: center; border-bottom: 2px solid var(--line); }
-.comparison-line { display: grid; grid-template-columns: minmax(0, 1fr) 114px 82px; gap: 6px; font-size: 14px; line-height: 1.25; font-weight: 900; }
-.comparison-line span { white-space: nowrap; }
-.comparison-line output { text-align: right; font-variant-numeric: tabular-nums; }
-.comparison-line .comparison-absolute { color: var(--ink); }
-.comparison-line.good .comparison-delta,
-.comparison-sector.good .comparison-delta { color: var(--green); }
-.comparison-line.bad .comparison-delta,
-.comparison-sector.bad .comparison-delta { color: var(--red); }
-.comparison-averages { min-height: 0; padding: 9px 12px; overflow-y: auto; border-bottom: 2px solid var(--line); }
-.comparison-average { display: grid; grid-template-columns: minmax(0, 1fr) 114px 82px; gap: 6px; font-size: 13px; line-height: 1.3; font-weight: 800; }
-.comparison-average span { white-space: nowrap; }
-.comparison-average output { text-align: right; font-variant-numeric: tabular-nums; }
-.comparison-average-delta.good { color: var(--green); }
-.comparison-average-delta.bad { color: var(--red); }
-.comparison-average.total { margin-bottom: 6px; font-weight: 900; }
-.comparison-sectors {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: 10px minmax(0, 1fr);
-  align-items: center;
-  padding: 4px 10px 5px;
-  column-gap: 8px;
-}
-.comparison-sectors::before {
-  content: "Average";
-  grid-column: 1 / -1;
-  color: var(--muted);
-  font-size: 8px;
+.comparison-car-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 20px;
   font-weight: 900;
   line-height: 1;
-  text-align: center;
+}
+.comparison-car-label.is-bic {
+  color: var(--green);
+}
+.comparison-car-label small {
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+.comparison-row-head {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .06em;
   text-transform: uppercase;
 }
-.comparison-sector { display: grid; gap: 2px; font-size: 11px; line-height: 1.05; font-weight: 900; text-align: center; }
-.comparison-sector-average { color: var(--ink); }
+.comparison-value-pair {
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 900;
+}
+.comparison-value-pair output,
+.comparison-average-chip output,
+.comparison-sector-cell output {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.comparison-time { color: var(--ink); }
+.comparison-delta { color: var(--ink); }
+.comparison-delta.good { color: var(--green); }
+.comparison-delta.bad { color: var(--red); }
+.comparison-average-columns {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+
+  /* verticaal | horizontaal */
+  gap: 8px 12px;
+}
+.comparison-average-column {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+
+  gap: 5px;
+  padding: 0 12px 2px 0;
+
+  border-right: 1px solid var(--soft-line);
+}
+.comparison-average-column:nth-child(3n) { border-right: 0; }
+.comparison-average-chip-list {
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  overflow: hidden;
+}
+.comparison-average-chip {
+  min-width: 0;
+  display: grid;
+
+  /* naam | tijd | delta */
+  grid-template-columns: 42px 92px 78px;
+
+  align-items: baseline;
+  column-gap: 10px;
+
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+.comparison-average-chip output {
+  justify-self: end;
+  font-size: 15px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+.comparison-average-chip-list.compact { gap: 4px; }
+.comparison-average-chip-list.compact .comparison-average-chip {
+  grid-template-columns: 38px 84px 70px;
+  column-gap: 8px;
+  font-size: 14px;
+}
+.comparison-average-chip span:first-child {
+  color: var(--ink);
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.comparison-average-chip output {
+  justify-self: end;
+}
+.comparison-average-chip.total { margin-right: 0; }
+.comparison-sector-row {
+  grid-template-columns: 130px repeat(3, minmax(0, 1fr));
+  min-height: 0;
+}
+.comparison-sector-head > strong {
+  visibility: hidden;
+}
+.comparison-sector-cell {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: start;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 900;
+}
+.comparison-sector-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
 .xic-input {
   display: grid;
   grid-template-columns: 1fr 120px;

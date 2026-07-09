@@ -59,6 +59,54 @@
     }));
   }
 
+  function lapNumberFromRow(row) {
+    const value = Number(row?.lapNumber ?? row?.laps ?? row?.lap ?? row?.LAPS);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function isRunningClassRow(row, classLeaderLap) {
+    const state = String(row?.state || row?.status || '').trim().toLowerCase();
+    if (/\b(ret|dnf|dns|out|stop|finished|finish|disq|dq)\b/.test(state)) return false;
+    const pitLike = /\b(p|pit|in pit)\b/.test(state) || /in pit/i.test(String(row?.eta || row?.pitStatus || ''));
+    const lap = lapNumberFromRow(row);
+    if (pitLike && Number.isFinite(classLeaderLap) && Number.isFinite(lap) && classLeaderLap - lap >= 5) return false;
+    return true;
+  }
+
+  function classCarsForComparison(history, rows, ourCarNumber, ourReference) {
+    const ourRow = (rows || []).find((row) => String(row.carNumber) === String(ourCarNumber));
+    const ourCar = ourReference || lapAnalytics.carStats(history, ourCarNumber);
+    const className = ourRow?.className || ourCar.className;
+    if (!className) return [];
+    const classRows = (rows || [])
+      .filter((row) => row.className === className)
+      .sort((a, b) => (Number(a.classPosition) || 999999) - (Number(b.classPosition) || 999999));
+    const classLeaderLap = Math.max(...classRows.map(lapNumberFromRow).filter(Number.isFinite));
+    const activeRows = classRows.filter((row) => isRunningClassRow(row, classLeaderLap));
+    const bic = lapAnalytics.bestCarInClassByAverage(history, className);
+
+    return activeRows.map((row) => {
+      const stats = lapAnalytics.carStats(history, row.carNumber);
+      const drivers = lapAnalytics.driverStats(history, row.carNumber);
+      return {
+        carNumber: String(row.carNumber || stats.carNumber || ''),
+        classPosition: row.classPosition || '',
+        teamName: row.team || row.teamName || stats.teamName || '',
+        isOurCar: String(row.carNumber) === String(ourCarNumber),
+        isBic: bic && String(row.carNumber) === String(bic.carNumber),
+        metrics: [
+          targetMetric('Best', ourCar.bestLapMs, stats.bestLapMs),
+          targetMetric('Last', ourCar.lastLapMs, stats.lastLapMs),
+          targetMetric('Last 10', recentAverage(ourCar), recentAverage(stats))
+        ],
+        totalAverageMs: stats.averageLapMs,
+        totalAverageDeltaMs: subtract(ourCar.averageLapMs, stats.averageLapMs),
+        averages: averageRows(drivers, ourCar.averageLapMs, true),
+        sectors: sectorAverages(stats, ourCar)
+      };
+    });
+  }
+
   function averageRows(stats = [], comparisonMs = null, comparisonFirst = true) {
     return stats.map((driver) => ({
       label: initials(driver.driverName),
@@ -105,7 +153,8 @@
         sectors: sectorAverages(ourCar)
       },
       bic: column(bic, 'bic'),
-      xic: column(xic, 'xic')
+      xic: column(xic, 'xic'),
+      classCars: classCarsForComparison(history, rows, ourCarNumber, ourCar)
     };
   }
 

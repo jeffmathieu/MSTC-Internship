@@ -85,6 +85,17 @@ assert.strictEqual(raceView.matrix.teammate.sectors[0].showDelta, false, 'team s
 assert.strictEqual(raceView.matrix.bic.sectors[2].averageMs, 29500, 'BIC sector average comes from valid BIC sectors');
 assert.strictEqual(raceView.matrix.bic.sectors[2].deltaMs, 10250, 'BIC sector delta compares our average sector with their average sector');
 assert.strictEqual(raceView.matrix.bic.sectors[2].showDelta, true);
+assert.deepStrictEqual(raceView.matrix.classCars.map((car) => car.carNumber), ['2', '13', '9'], 'class comparison tabs include every active car in class order');
+assert.strictEqual(raceView.matrix.classCars[0].isBic, true, 'best-in-class car is marked for the UI');
+assert.strictEqual(raceView.matrix.classCars[1].isOurCar, true, 'our car is marked so sector deltas can be hidden');
+
+const longPitRows = [
+  { position: 1, carNumber: '2', className: 'LMP3', classPosition: 1, driver: 'Rival A', lapNumber: 20 },
+  { position: 2, carNumber: '13', className: 'LMP3', classPosition: 2, driver: 'Driver B', lapNumber: 20 },
+  { position: 3, carNumber: '9', className: 'LMP3', classPosition: 3, driver: 'Rival B', lapNumber: 14, state: 'P' }
+];
+const longPitView = buildComparisonView({ history, rows: longPitRows, ourCarNumber: 13, selectedCarNumber: 9, mode: 'race' });
+assert.deepStrictEqual(longPitView.matrix.classCars.map((car) => car.carNumber), ['2', '13'], 'cars that are 5+ laps down in pit are hidden from live class comparison tabs');
 
 // BIC/XIC use the same current-minus-reference sign contract even when the
 // target car's current driver differs from its full-car average.
