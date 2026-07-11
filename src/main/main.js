@@ -27,6 +27,9 @@ const {
   driverStats,
   carStats,
   carsInClass,
+  lapsForCar,
+  statsByCondition,
+  currentStintStats,
   buildDashboardAnalysis
 } = require('../shared/lapAnalytics');
 const {
@@ -50,6 +53,13 @@ const { resolveSessionFolder, loadSessionHistory, loadStoredJson } = require('..
 const { setupAutoUpdates } = require('./autoUpdater');
 const { setupAppLifecycle } = require('./appLifecycle');
 const { writeClosedStintArtifacts, writeEventSummaryArtifacts } = require('./stintReports');
+const {
+  normalizeTrackCondition,
+  normalizeAnalysisFilter,
+  resolveAnalysisCondition,
+  captureSectorConditions,
+  conditionFilteredHistory
+} = require('../shared/trackConditions');
 
 // Main-process references. Electron keeps UI windows and timers alive through
 // these variables, so every start/stop function below updates them carefully.
@@ -142,6 +152,13 @@ function normalizeSettings(settings) {
   const pitCircuit = pitstopCircuitById(pitCircuitId);
   const configuredPitDistance = Number(settings?.pitRules?.regularTrackDistanceMeters);
   const configuredFcySpeed = Number(settings?.pitRules?.fcySpeedKph);
+  const trackCondition = normalizeTrackCondition(settings?.trackCondition, 'dry');
+  const requestedAnalysisFilter = normalizeAnalysisFilter(settings?.analysisConditionFilter, 'combined');
+  const analysisConditionFilter = ['dry', 'wet'].includes(requestedAnalysisFilter)
+    ? requestedAnalysisFilter
+    : 'combined';
+  const conditionPhaseCounter = Math.max(1, Math.floor(Number(settings?.conditionPhaseCounter) || 1));
+  const tyreStrategy = settings?.tyreStrategy || {};
   const legacyReferenceTimes = { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimes || {}) };
   const referenceTimesByMode = {
     race: { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimesByMode?.race || legacyReferenceTimes) },
@@ -154,6 +171,20 @@ function normalizeSettings(settings) {
     followedCars,
     sessionMode,
     theme,
+    trackCondition,
+    analysisConditionFilter,
+    conditionPhaseCounter,
+    conditionPhaseId: String(settings?.conditionPhaseId || `${trackCondition}-${conditionPhaseCounter}`),
+    tyreStrategy: {
+      enabled: tyreStrategy.enabled === true,
+      currentTyre: ['dry', 'wet', 'unknown'].includes(tyreStrategy.currentTyre) ? tyreStrategy.currentTyre : 'unknown',
+      candidateTyre: ['dry', 'wet', 'unknown'].includes(tyreStrategy.candidateTyre) ? tyreStrategy.candidateTyre : 'unknown',
+      gainMinMsPerLap: Math.max(0, Number(tyreStrategy.gainMinMsPerLap) || 0),
+      gainMaxMsPerLap: Math.max(0, Number(tyreStrategy.gainMaxMsPerLap) || 0),
+      additionalPitTimeMs: Math.max(0, Number(tyreStrategy.additionalPitTimeMs) || 0),
+      expectedLaps: Math.max(0, Math.floor(Number(tyreStrategy.expectedLaps) || 0)),
+      combinedWithPlannedStop: tyreStrategy.combinedWithPlannedStop !== false
+    },
     pitCircuitId,
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     referenceTimesByMode,
@@ -187,6 +218,20 @@ function loadSettings() {
     followedCar: '33',
     followedCars: ['33'],
     sessionMode: 'race',
+    trackCondition: 'dry',
+    analysisConditionFilter: 'combined',
+    conditionPhaseCounter: 1,
+    conditionPhaseId: 'dry-1',
+    tyreStrategy: {
+      enabled: false,
+      currentTyre: 'unknown',
+      candidateTyre: 'unknown',
+      gainMinMsPerLap: 0,
+      gainMaxMsPerLap: 0,
+      additionalPitTimeMs: 0,
+      expectedLaps: 0,
+      combinedWithPlannedStop: true
+    },
     comparisonCar: '',
     referenceTimes: DEFAULT_REFERENCE_TIMES,
     storageFolder: defaultStorageFolder(),
@@ -200,6 +245,33 @@ function loadSettings() {
 function saveSettings(settings) {
   fs.mkdirSync(app.getPath('userData'), { recursive: true });
   fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 2));
+}
+
+// Track-condition changes are append-only race events. Lap records also carry
+// their resolved sector conditions, while this small log preserves exactly
+// when the engineer changed the manual condition selector for later auditing.
+function appendTrackConditionEvent(previous, next) {
+  if (previous.trackCondition === next.trackCondition || !next.setupComplete) return null;
+  const folder = resolveSessionFolder(
+    collectorState.storageSessionFolder || next.storageFolder,
+    defaultStorageFolder()
+  );
+  fs.mkdirSync(folder, { recursive: true });
+  const event = {
+    changedAt: new Date().toISOString(),
+    source: 'manual',
+    previousCondition: previous.trackCondition || 'unknown',
+    condition: next.trackCondition,
+    conditionPhaseId: next.conditionPhaseId,
+    analysisConditionFilter: next.analysisConditionFilter,
+    followedCars: normalizeFollowedCars(next),
+    liveLapNumbers: Object.fromEntries((collectorState.rows || [])
+      .filter((row) => normalizeFollowedCars(next).includes(String(row.carNumber)))
+      .map((row) => [String(row.carNumber), row.lapNumber ?? row.laps ?? null]))
+  };
+  fs.appendFileSync(path.join(folder, 'track_condition_events.jsonl'), `${JSON.stringify(event)}\n`);
+  fs.writeFileSync(path.join(folder, 'track_condition_state.json'), JSON.stringify(event, null, 2));
+  return event;
 }
 
 // Creates the visible application window. Size, minimum size, theme background,
@@ -449,7 +521,9 @@ function storageContext(settings, normalized, collectedAt = new Date().toISOStri
     sourceProvider: detectSourceProvider({ timingUrl }),
     session: normalized.session || {},
     startedAt: collectorState.startedAt,
-    followedCar: settings.followedCar || ''
+    followedCar: settings.followedCar || '',
+    trackCondition: settings.trackCondition || 'unknown',
+    conditionPhaseId: settings.conditionPhaseId || ''
   };
 }
 
@@ -458,10 +532,17 @@ function storageContext(settings, normalized, collectedAt = new Date().toISOStri
 // the fallback while stint data is still building.
 function averageLapForPitPlan(settings, carNumber = settings.followedCar) {
   const key = String(carNumber || '');
-  const analysis = collectorState.analyticsSummary?.dashboardAnalysisByCar?.[key]
-    || (key === String(settings.followedCar || '') ? collectorState.analyticsSummary?.dashboardAnalysis : null);
-  const fromCurrentStint = analysis?.classComparison?.ourCurrentStint?.averageLapMs;
-  const fromOurCar = collectorState.analyticsSummary?.cars?.find((car) => String(car.carNumber) === key)?.averageLapMs;
+  const currentConditionHistory = conditionFilteredHistory(
+    collectorState.lapHistory || [],
+    normalizeTrackCondition(settings.trackCondition)
+  );
+  const liveRow = (collectorState.rows || []).find((row) => String(row.carNumber) === key);
+  const fromCurrentStint = currentStintStats(
+    currentConditionHistory,
+    key,
+    liveRow?.driver || liveRow?.driverName || ''
+  ).averageLapMs;
+  const fromOurCar = carStats(currentConditionHistory, key).averageLapMs;
   const n = Number(fromCurrentStint ?? fromOurCar);
   return Number.isFinite(n) ? n : null;
 }
@@ -512,6 +593,10 @@ function buildAndWritePitstopPlan(settings, context, rows, carNumber) {
     rules: {
       ...settings.pitRules,
       averageLapMs: averageLapForPitPlan(settings, followedCarNumber)
+    },
+    strategyInputs: {
+      currentCondition: settings.trackCondition,
+      tyreScenario: settings.tyreStrategy
     }
   });
   const payload = { ...plan, pitState };
@@ -544,7 +629,13 @@ function annotateLiveSectorFlags(storageRows, context) {
   const currentFlag = String(context?.session?.flag || context?.sessionFlag || '');
   return storageRows.map((row) => {
     const previous = latestLiveRowByCar.get(liveRowKey(row));
-    return captureSectorFlags(row, previous, currentFlag);
+    const flagged = captureSectorFlags(row, previous, currentFlag);
+    return captureSectorConditions(
+      flagged,
+      previous,
+      context?.trackCondition || 'unknown',
+      context?.conditionPhaseId || ''
+    );
   });
 }
 
@@ -639,7 +730,7 @@ function writeSessionMetadata(settings, context) {
     followedCars: normalizeFollowedCars(settings),
     baseStorageFolder: folder,
     storageFolder: folder,
-    storageSchemaVersion: 1
+    storageSchemaVersion: 2
   }, null, 2));
 }
 
@@ -675,6 +766,8 @@ function compactDashboardAnalysis(analysis) {
 // every poll, but the output stays compact enough for renderer state and disk.
 function buildAnalyticsSummary(settings, context, rows = []) {
   const history = collectorState.lapHistory || [];
+  const resolvedConditionFilter = resolveAnalysisCondition(settings.analysisConditionFilter, settings.trackCondition);
+  const analysisHistory = conditionFilteredHistory(history, resolvedConditionFilter);
   const laps = completedLaps(history);
   const carNumbers = [...new Set(laps.map((lap) => lap.carNumber).filter(Boolean))];
   const classNames = [...new Set(laps.map((lap) => lap.className).filter(Boolean))];
@@ -683,9 +776,10 @@ function buildAnalyticsSummary(settings, context, rows = []) {
   const sessionMode = normalizeMode(settings.sessionMode);
   const dashboardAnalysisByCar = Object.fromEntries(followedCars.map((carNumber) => [
     carNumber,
-    compactDashboardAnalysis(buildDashboardAnalysis(history, {
+    compactDashboardAnalysis(buildDashboardAnalysis(analysisHistory, {
       ourCarNumber: carNumber,
       selectedCarNumber,
+      conditionFilter: 'combined',
       currentDriverName: (() => {
         const liveRow = rows.find((row) => String(row.carNumber) === String(carNumber));
         return liveRow?.driver || liveRow?.driverName || '';
@@ -694,29 +788,29 @@ function buildAnalyticsSummary(settings, context, rows = []) {
   ]));
   const adjacentClassBattlesByCar = Object.fromEntries(followedCars.map((carNumber) => [
     carNumber,
-    buildAdjacentClassBattles(rows, history, carNumber, {
+    buildAdjacentClassBattles(rows, analysisHistory, carNumber, {
       lapWindow: gapMemoryState?.paceWindow || DEFAULT_GAP_PACE_WINDOW,
       confirmedGapView: gapMemoryState?.viewsByCar?.[carNumber] || null
     })
   ]));
   const comparisonViewsByCar = Object.fromEntries(followedCars.map((carNumber) => [
     carNumber,
-    buildComparisonView({ history, rows, ourCarNumber: carNumber, selectedCarNumber, mode: sessionMode })
+    buildComparisonView({ history: analysisHistory, rows, ourCarNumber: carNumber, selectedCarNumber, mode: sessionMode })
   ]));
   const modeAdjacentViewsByCar = Object.fromEntries(followedCars.map((carNumber) => [
     carNumber,
     sessionMode === 'qualifying'
-      ? qualifyingAdjacentView(history, rows, carNumber)
+      ? qualifyingAdjacentView(analysisHistory, rows, carNumber)
       : sessionMode === 'race' ? adjacentClassBattlesByCar[carNumber] : null
   ]));
   const timingHighlightsByCar = Object.fromEntries(followedCars.map((carNumber) => [
     carNumber,
-    buildTimingHighlights(history, carNumber)
+    buildTimingHighlights(history, carNumber, { conditionFilter: resolvedConditionFilter })
   ]));
   const primaryCar = String(settings.followedCar || followedCars[0] || '');
 
   return {
-    storageSchemaVersion: 1,
+    storageSchemaVersion: 2,
     generatedFrom: 'lap_history',
     analyticsSourceOfTruth: true,
     paceSelectionRules: {
@@ -728,6 +822,10 @@ function buildAnalyticsSummary(settings, context, rows = []) {
     followedCar: primaryCar,
     followedCars,
     sessionMode,
+    trackCondition: settings.trackCondition,
+    conditionPhaseId: settings.conditionPhaseId,
+    analysisConditionFilter: settings.analysisConditionFilter,
+    resolvedConditionFilter,
     selectedComparisonCar: selectedCarNumber,
     gapModel: {
       source: 'start-finish-confirmed-memory',
@@ -737,15 +835,20 @@ function buildAnalyticsSummary(settings, context, rows = []) {
       viewsByCar: gapMemoryState?.viewsByCar || {}
     },
     lapCount: laps.length,
-    paceLapCount: representativePaceLaps(laps).length,
-    cars: carNumbers.map((carNumber) => compactStats(carStats(history, carNumber))),
+    paceLapCount: representativePaceLaps(completedLaps(analysisHistory)).length,
+    cars: carNumbers.map((carNumber) => ({
+      ...compactStats(carStats(analysisHistory, carNumber)),
+      byCondition: Object.fromEntries(Object.entries(statsByCondition(
+        lapsForCar(history, carNumber)
+      )).map(([condition, stats]) => [condition, compactStats(stats)]))
+    })),
     classes: classNames.map((className) => ({
       className,
-      cars: carsInClass(history, className).map(compactStats)
+      cars: carsInClass(analysisHistory, className).map(compactStats)
     })),
     driversByCar: Object.fromEntries(carNumbers.map((carNumber) => [
       carNumber,
-      driverStats(history, carNumber).map(compactStats)
+      driverStats(analysisHistory, carNumber).map(compactStats)
     ])),
     stintsByCar: collectorState.stintState?.cars || {},
     timingHighlightsByCar,
@@ -807,7 +910,9 @@ async function writeStintStateAndReports(settings, context, rows = []) {
           stint,
           session: context?.session || collectorState.session || {},
           gapSamples: gapMemoryState?.samples || [],
-          history: collectorState.lapHistory || []
+          history: collectorState.lapHistory || [],
+          referenceTimes: settings.referenceTimes || {},
+          pitRules: settings.pitRules || {}
         });
       } finally {
         pendingStintReports.delete(reportKey);
@@ -821,7 +926,9 @@ async function writeStintStateAndReports(settings, context, rows = []) {
         stints: closedStints,
         session: context?.session || collectorState.session || {},
         gapSamples: gapMemoryState?.samples || [],
-        history: collectorState.lapHistory || []
+        history: collectorState.lapHistory || [],
+        referenceTimes: settings.referenceTimes || {},
+        pitRules: settings.pitRules || {}
       });
     }
   }
@@ -840,7 +947,7 @@ function buildAndWriteLapPrediction(settings, context, rows, carNumber) {
     rows,
     carNumber: followedCarNumber,
     currentDriver: liveRow?.driver || liveRow?.driverName || '',
-    options: { sampleSize: 10 }
+    options: { sampleSize: 10, currentCondition: settings.trackCondition }
   });
   const payload = { ...prediction, updatedAt: context?.collectedAt || new Date().toISOString() };
   fs.writeFileSync(path.join(folder, `lap_prediction_car-${slugPart(followedCarNumber, 'unknown')}.json`), JSON.stringify(payload, null, 2));
@@ -916,9 +1023,15 @@ function liveRowKey(row) {
   return [row.sourceProvider, row.timingUrl, row.sessionName, row.carNumber].join('|');
 }
 
+function currentPitTargetDurationMs(settings = {}) {
+  const value = Number(settings.pitRules?.pitStopDurationMs);
+  return Number.isFinite(value) && value >= 0 ? String(Math.round(value)) : '';
+}
+
 // Stores newly completed laps from provider-independent normalized storage rows.
 function updateLapHistory(settings, storageRows) {
   const newEntries = [];
+  const pitTargetDurationMs = currentPitTargetDurationMs(settings);
   storageRows.forEach((row) => {
     if (!row.carNumber || !row.lastLap) return;
     const carKey = liveRowKey(row);
@@ -929,6 +1042,7 @@ function updateLapHistory(settings, storageRows) {
 
     const completedRow = completedLapRowFromLiveRow(row, previousRow);
     const entry = lapRecordFromNormalizedRow(completedRow);
+    entry.pitTargetDurationMs = pitTargetDurationMs;
     if (!entry.carNumber || !entry.lastLap || entry.lapTimeMs === '') return;
     const key = lapIdentity(entry);
     if (knownLapKeys.has(key)) return;
@@ -1075,11 +1189,27 @@ function stopCollector(closeLiveWindow = true) {
 ipcMain.handle('settings:get', () => loadSettings());
 ipcMain.handle('settings:set', (_event, settings) => {
   const previous = loadSettings();
-  const merged = normalizeSettings({ ...previous, ...settings });
+  const requestedCondition = settings?.trackCondition === undefined
+    ? previous.trackCondition
+    : normalizeTrackCondition(settings.trackCondition, previous.trackCondition || 'dry');
+  const conditionChanged = requestedCondition !== previous.trackCondition;
+  const conditionPhaseCounter = conditionChanged
+    ? Math.max(1, Number(previous.conditionPhaseCounter) || 1) + 1
+    : previous.conditionPhaseCounter;
+  const merged = normalizeSettings({
+    ...previous,
+    ...settings,
+    trackCondition: requestedCondition,
+    conditionPhaseCounter,
+    conditionPhaseId: conditionChanged
+      ? `${requestedCondition}-${conditionPhaseCounter}`
+      : previous.conditionPhaseId
+  });
   // Clamp user-editable timing values so accidental input cannot create an
   // unusably fast/slow collector.
   merged.pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
   saveSettings(merged);
+  try { appendTrackConditionEvent(previous, merged); } catch (error) { addError(error, 'appendTrackConditionEvent'); }
   syncAdditionalDashboardWindows(merged);
   if (previous.theme !== merged.theme) {
     BrowserWindow.getAllWindows().forEach((window) => window.webContents.send('theme:update', merged.theme));
@@ -1141,7 +1271,13 @@ ipcMain.handle('export:current', async () => {
 app.whenReady().then(() => {
   createMainWindow();
   syncAdditionalDashboardWindows(loadSettings());
-  setupAutoUpdates({ app, dialog, autoUpdater, getParentWindow: () => mainWindow });
+  setupAutoUpdates({
+    app,
+    dialog,
+    autoUpdater,
+    getParentWindow: () => mainWindow,
+    onBeforeQuitAndInstall: () => appLifecycle.beginQuit()
+  });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createMainWindow();

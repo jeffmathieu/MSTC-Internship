@@ -16,6 +16,13 @@ const DEFAULT_RULES = {
   pitStopDurationMs: 75 * 1000,
   requiredPitStops: 2,
   nearWindowLaps: 2,
+  safetyBufferLaps: 2,
+  fixedSafetyBufferMs: 30 * 1000,
+  decisionLeadMs: 15 * 1000,
+  timingUncertaintyMs: 10 * 1000,
+  ruleTimingReference: 'pit-entry',
+  fcyConsiderSavingsMs: 5 * 1000,
+  fcyStrongSavingsMs: 15 * 1000,
   averageLapMs: null,
   circuitId: 'zolder',
   regularTrackDistanceMeters: null,
@@ -53,6 +60,7 @@ function positiveNumber(value, fallback) {
 function normalizeRules(rules = {}) {
   const merged = { ...DEFAULT_RULES, ...rules };
   const configuredFcySpeedKph = numberOrNull(merged.fcySpeedKph);
+  const fcyConsiderSavingsMs = positiveNumber(merged.fcyConsiderSavingsMs, DEFAULT_RULES.fcyConsiderSavingsMs);
   return {
     raceDurationMs: positiveNumber(merged.raceDurationMs, DEFAULT_RULES.raceDurationMs),
     pitClosedStartMs: positiveNumber(merged.pitClosedStartMs, DEFAULT_RULES.pitClosedStartMs),
@@ -61,6 +69,13 @@ function normalizeRules(rules = {}) {
     pitStopDurationMs: positiveNumber(merged.pitStopDurationMs, DEFAULT_RULES.pitStopDurationMs),
     requiredPitStops: Math.max(0, Math.floor(positiveNumber(merged.requiredPitStops, DEFAULT_RULES.requiredPitStops))),
     nearWindowLaps: Math.max(0, Math.floor(positiveNumber(merged.nearWindowLaps, DEFAULT_RULES.nearWindowLaps))),
+    safetyBufferLaps: Math.max(0, positiveNumber(merged.safetyBufferLaps, DEFAULT_RULES.safetyBufferLaps)),
+    fixedSafetyBufferMs: positiveNumber(merged.fixedSafetyBufferMs, DEFAULT_RULES.fixedSafetyBufferMs),
+    decisionLeadMs: positiveNumber(merged.decisionLeadMs, DEFAULT_RULES.decisionLeadMs),
+    timingUncertaintyMs: positiveNumber(merged.timingUncertaintyMs, DEFAULT_RULES.timingUncertaintyMs),
+    ruleTimingReference: merged.ruleTimingReference === 'pit-exit' ? 'pit-exit' : 'pit-entry',
+    fcyConsiderSavingsMs,
+    fcyStrongSavingsMs: Math.max(fcyConsiderSavingsMs, positiveNumber(merged.fcyStrongSavingsMs, DEFAULT_RULES.fcyStrongSavingsMs)),
     averageLapMs: numberOrNull(merged.averageLapMs),
     circuitId: String(merged.circuitId || DEFAULT_RULES.circuitId),
     regularTrackDistanceMeters: numberOrNull(merged.regularTrackDistanceMeters),
@@ -262,6 +277,8 @@ function nextPitStateFromRow({ previous = {}, row = {}, session = {}, rules = {}
   const windowAtPit = timeUntilNextAllowedPit({ clock, rules: normalizedRules, pitState: previousState });
   const isFirstPitSample = previousState.rawPitCount === null || previousState.rawPitCount === undefined;
   const pitCountIncreased = !isFirstPitSample && nextCount > (previousState.rawPitCount || 0);
+  const measuredPitDurationMs = parseTimeToMs(row.lastPit || row.lastPitDuration || row.lPit);
+  const measuredPitRawDuration = row.lastPit || row.lastPitDuration || row.lPit || '';
   // Existing stops that are already present on the first sample are accepted as
   // baseline stops because the app cannot reconstruct when they happened. Every
   // new increase after that must happen in a green/open window to count.
@@ -277,11 +294,20 @@ function nextPitStateFromRow({ previous = {}, row = {}, session = {}, rules = {}
   if (pitCountIncreased) {
     next.lastPitAt = collectedAt || new Date().toISOString();
     next.lastPitElapsedMs = clock.elapsedMs;
+    next.lastPitDurationMs = measuredPitDurationMs;
+    next.lastPitRawDuration = measuredPitRawDuration;
+    next.lastPitTargetDurationMs = normalizedRules.pitStopDurationMs;
     next.lastPitCountedAsValid = windowAtPit.allowed;
     next.lastPitValidityReason = windowAtPit.allowed ? 'Pitstop counted: pit window was open.' : `Pitstop not counted: ${windowAtPit.reason}.`;
     if (windowAtPit.allowed && Number.isFinite(clock.elapsedMs)) {
       next.validPitElapsedHistoryMs = [...(previousState.validPitElapsedHistoryMs || []), clock.elapsedMs];
     }
+  } else if (isFirstPitSample && nextCount > 0 && (Number.isFinite(measuredPitDurationMs) || measuredPitRawDuration)) {
+    // If the app is opened mid-race, L. PIT still tells us the most recent
+    // measured stop. Show it without pretending a new pitstop just happened.
+    next.lastPitDurationMs = measuredPitDurationMs;
+    next.lastPitRawDuration = measuredPitRawDuration;
+    next.lastPitTargetDurationMs = normalizedRules.pitStopDurationMs;
   }
   return next;
 }
@@ -641,44 +667,292 @@ function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) 
   };
 }
 
-// Applies the green/red pit-window rules at the current race clock. This checks
-// only whether a pitstop is allowed by time windows/cooldown; strategic urgency
-// is added in buildPitstopPlan().
+// Returns the time between pit entry and the configured rule timing point. Most
+// events use pit entry, but some regulations validate a stop at pit exit.
+function pitRuleReferenceOffsetMs(rules = {}) {
+  return rules.ruleTimingReference === 'pit-exit'
+    ? positiveNumber(rules.pitStopDurationMs, DEFAULT_RULES.pitStopDurationMs)
+    : 0;
+}
+
+// Builds the operational margin applied before the theoretical final deadline.
+// Keeping every component visible lets race engineers tune the conservative
+// margin without changing the scheduling algorithm.
+function strategySafetyBuffer({ rules = {}, averageLapMs = null } = {}) {
+  const normalized = normalizeRules({ ...rules, averageLapMs: averageLapMs ?? rules.averageLapMs });
+  const lapMs = numberOrNull(averageLapMs) ?? numberOrNull(normalized.averageLapMs);
+  const lapBufferMs = Number.isFinite(lapMs) && lapMs > 0
+    ? Math.round(lapMs * normalized.safetyBufferLaps)
+    : 0;
+  const components = {
+    lapBufferMs,
+    fixedSafetyBufferMs: normalized.fixedSafetyBufferMs,
+    decisionLeadMs: normalized.decisionLeadMs,
+    timingUncertaintyMs: normalized.timingUncertaintyMs
+  };
+  return {
+    ...components,
+    totalMs: Object.values(components).reduce((sum, value) => sum + value, 0),
+    averageLapMs: lapMs,
+    laps: normalized.safetyBufferLaps
+  };
+}
+
+// Applies the green/red pit-window rules at the current race clock. For an
+// event configured around pit exit, the projected exit time is checked instead
+// of pretending that the entry timestamp is the legal reference point.
 function timeUntilNextAllowedPit({ clock, rules, pitState = {} }) {
   if (clock.elapsedMs === null || clock.remainingMs === null) {
     return { allowed: false, reason: 'Waiting for race clock', waitMs: null };
   }
-  if (clock.elapsedMs < rules.pitClosedStartMs) {
-    return { allowed: false, reason: 'Pit closed at race start', waitMs: rules.pitClosedStartMs - clock.elapsedMs };
+  const referenceOffsetMs = pitRuleReferenceOffsetMs(rules);
+  const referenceElapsedMs = clock.elapsedMs + referenceOffsetMs;
+  const referenceRemainingMs = clock.raceDurationMs - referenceElapsedMs;
+  if (referenceElapsedMs < rules.pitClosedStartMs) {
+    return { allowed: false, reason: 'Pit closed at race start', waitMs: rules.pitClosedStartMs - referenceElapsedMs, referenceElapsedMs };
   }
-  if (clock.remainingMs <= rules.pitClosedEndMs) {
-    return { allowed: false, reason: 'Pit closed near race finish', waitMs: null };
+  if (referenceRemainingMs <= rules.pitClosedEndMs) {
+    return { allowed: false, reason: 'Pit closed near race finish', waitMs: null, referenceElapsedMs };
   }
   const lastPitElapsedMs = numberOrNull(pitState.lastPitElapsedMs);
   if (lastPitElapsedMs !== null) {
     const cooldownEnd = lastPitElapsedMs + rules.pitCooldownMs;
-    if (clock.elapsedMs < cooldownEnd) {
-      return { allowed: false, reason: 'Minimum time after last pitstop', waitMs: cooldownEnd - clock.elapsedMs };
+    if (referenceElapsedMs < cooldownEnd) {
+      return { allowed: false, reason: 'Minimum time after last pitstop', waitMs: cooldownEnd - referenceElapsedMs, referenceElapsedMs };
     }
   }
-  return { allowed: true, reason: 'Pit window open', waitMs: 0 };
+  return { allowed: true, reason: 'Pit window open', waitMs: 0, referenceElapsedMs };
 }
 
-// Calculates the latest elapsed race time at which the next required stop can
-// happen while still leaving enough cooldown-separated windows for remaining
-// mandatory stops.
-function latestSafePitElapsedMsForRemainingStops({ clock, rules, pitState = {} }) {
+// Calculates the theoretical latest pit-entry time for the next required stop.
+// No operational margin is applied here; the result is useful for showing how
+// much of the legal schedule the safety buffer deliberately gives up.
+function latestPossiblePitElapsedMsForRemainingStops({ clock, rules, pitState = {} }) {
   if (clock.elapsedMs === null || clock.remainingMs === null) return null;
   const completed = Math.max(0, Number(pitState.validCompletedPitStops ?? pitState.completedPitStops) || 0);
   const remainingStops = Math.max(0, rules.requiredPitStops - completed);
-  if (remainingStops <= 0) return clock.raceDurationMs - rules.pitClosedEndMs;
-  return clock.raceDurationMs - rules.pitClosedEndMs - ((remainingStops - 1) * rules.pitCooldownMs);
+  const referenceOffsetMs = pitRuleReferenceOffsetMs(rules);
+  if (remainingStops <= 0) return clock.raceDurationMs - rules.pitClosedEndMs - referenceOffsetMs;
+  return clock.raceDurationMs
+    - rules.pitClosedEndMs
+    - ((remainingStops - 1) * rules.pitCooldownMs)
+    - referenceOffsetMs;
+}
+
+// Calculates the real planning deadline by moving the theoretical limit
+// earlier by the configured lap, decision, polling and fixed safety margins.
+function latestSafePitElapsedMsForRemainingStops({ clock, rules, pitState = {}, averageLapMs = null }) {
+  const latestPossibleMs = latestPossiblePitElapsedMsForRemainingStops({ clock, rules, pitState });
+  if (!Number.isFinite(latestPossibleMs)) return null;
+  return latestPossibleMs - strategySafetyBuffer({ rules, averageLapMs }).totalMs;
+}
+
+// Produces a transparent schedule for every remaining mandatory stop. The
+// earliest and latest values refer to pit entry; ruleReferenceElapsedMs exposes
+// the configured pit-entry/pit-exit timestamp used for legality checks.
+function buildRequiredStopSchedule({ clock, rules, pitState = {}, averageLapMs = null, strategyInputs = {} } = {}) {
+  const completed = Math.max(0, Number(pitState.validCompletedPitStops ?? pitState.completedPitStops) || 0);
+  const remainingStops = Math.max(0, rules.requiredPitStops - completed);
+  const buffer = strategySafetyBuffer({ rules, averageLapMs });
+  if (clock.elapsedMs === null || clock.remainingMs === null) {
+    return { available: false, reason: 'Waiting for race clock', remainingStops, buffer, stops: [] };
+  }
+  if (!remainingStops) {
+    return { available: true, feasible: true, remainingStops: 0, buffer, stops: [], next: null };
+  }
+
+  const referenceOffsetMs = pitRuleReferenceOffsetMs(rules);
+  const lastPitElapsedMs = numberOrNull(pitState.lastPitElapsedMs);
+  const earliestReferenceMs = Math.max(
+    rules.pitClosedStartMs,
+    lastPitElapsedMs === null ? 0 : lastPitElapsedMs + rules.pitCooldownMs
+  );
+  const earliestEntryMs = Math.max(0, clock.elapsedMs, earliestReferenceMs - referenceOffsetMs);
+  const finalReferenceDeadlineMs = clock.raceDurationMs - rules.pitClosedEndMs;
+  const optionalDeadlines = [
+    numberOrNull(strategyInputs.fuelDeadlineElapsedMs),
+    numberOrNull(strategyInputs.driverDeadlineElapsedMs),
+    numberOrNull(strategyInputs.tyreDeadlineElapsedMs)
+  ].filter(Number.isFinite);
+  const operationalDeadlineMs = optionalDeadlines.length ? Math.min(...optionalDeadlines) : null;
+  const stops = [];
+
+  for (let index = 0; index < remainingStops; index += 1) {
+    const latestReferenceMs = finalReferenceDeadlineMs - ((remainingStops - 1 - index) * rules.pitCooldownMs);
+    const latestEntryMs = latestReferenceMs - referenceOffsetMs;
+    const safeEntryMs = latestEntryMs - buffer.totalMs;
+    const earliestForStopMs = earliestEntryMs + (index * rules.pitCooldownMs);
+    stops.push({
+      stopNumber: completed + index + 1,
+      earliestEntryElapsedMs: earliestForStopMs,
+      latestPossibleEntryElapsedMs: latestEntryMs,
+      latestSafeEntryElapsedMs: safeEntryMs,
+      ruleReferenceElapsedMs: latestReferenceMs
+    });
+  }
+
+  const next = { ...stops[0] };
+  if (Number.isFinite(operationalDeadlineMs) && operationalDeadlineMs < next.latestSafeEntryElapsedMs) {
+    next.latestSafeEntryElapsedMs = operationalDeadlineMs;
+    next.limitedBy = optionalDeadlines.indexOf(operationalDeadlineMs) === 0
+      ? 'fuel'
+      : optionalDeadlines.indexOf(operationalDeadlineMs) === 1 ? 'driver' : 'tyres';
+  }
+  const feasible = next.earliestEntryElapsedMs <= next.latestPossibleEntryElapsedMs;
+  const safeFeasible = next.earliestEntryElapsedMs <= next.latestSafeEntryElapsedMs;
+  return {
+    available: true,
+    feasible,
+    safeFeasible,
+    remainingStops,
+    buffer,
+    ruleTimingReference: rules.ruleTimingReference,
+    operationalDeadlineMs,
+    stops,
+    next
+  };
+}
+
+// Turns legality, deadline pressure and FCY time saving into one dashboard
+// recommendation. Future fuel/weather/tyre models can constrain the schedule
+// through strategyInputs without changing this decision contract.
+function buildPitRecommendation({ clock, rules, schedule, windowState, pitLoss, requirementsComplete = false, averageLapMs = null } = {}) {
+  if (requirementsComplete) {
+    return { action: 'STAY OUT', level: 'complete', reason: 'Mandatory pitstops are complete.', targetElapsedMs: null };
+  }
+  if (!schedule?.available || clock.elapsedMs === null) {
+    return { action: 'WAIT', level: 'unknown', reason: schedule?.reason || 'Waiting for race clock.', targetElapsedMs: null };
+  }
+
+  const deadlineMs = schedule.next?.latestSafeEntryElapsedMs;
+  const latestPossibleMs = schedule.next?.latestPossibleEntryElapsedMs;
+  const slackMs = Number.isFinite(deadlineMs) ? deadlineMs - clock.elapsedMs : null;
+  const warningWindowMs = Number.isFinite(averageLapMs) && averageLapMs > 0
+    ? averageLapMs * Math.max(1, rules.nearWindowLaps)
+    : 2 * 60 * 1000;
+  const greenPitLossMs = rules.pitStopDurationMs;
+  const fcySavingsMs = pitLoss?.active && Number.isFinite(pitLoss.pitLossMs)
+    ? greenPitLossMs - pitLoss.pitLossMs
+    : null;
+  const base = { deadlineMs, latestPossibleMs, slackMs, warningWindowMs, greenPitLossMs, fcySavingsMs };
+
+  if (!schedule.feasible) {
+    return { ...base, action: windowState.allowed ? 'PIT NOW' : 'NO LEGAL WINDOW', level: 'critical', reason: 'The remaining mandatory-stop schedule is no longer feasible.', targetElapsedMs: clock.elapsedMs };
+  }
+  if (!windowState.allowed) {
+    const deadlinePressure = Number.isFinite(slackMs) && slackMs <= warningWindowMs;
+    const openingSoon = Number.isFinite(windowState.waitMs) && windowState.waitMs <= warningWindowMs;
+    return {
+      ...base,
+      action: deadlinePressure ? 'PIT WHEN OPEN' : openingSoon ? 'PREPARE PIT' : 'STAY OUT',
+      level: deadlinePressure ? (slackMs <= 0 ? 'critical' : 'warning') : openingSoon ? 'soon' : 'closed',
+      reason: deadlinePressure
+        ? `${windowState.reason}; pit immediately when the legal window opens.`
+        : openingSoon
+          ? `${windowState.reason}; prepare for the opening in ${formatDuration(windowState.waitMs)}.`
+        : windowState.reason,
+      targetElapsedMs: (deadlinePressure || openingSoon) && Number.isFinite(windowState.waitMs)
+        ? clock.elapsedMs + windowState.waitMs
+        : deadlineMs
+    };
+  }
+  if (Number.isFinite(slackMs) && slackMs <= 0) {
+    return { ...base, action: 'PIT NOW', level: 'critical', reason: 'The safety deadline has been reached.', targetElapsedMs: clock.elapsedMs };
+  }
+  if (pitLoss?.active) {
+    if (!pitLoss.reliable) {
+      const reason = pitLoss.status === 'missing-distance'
+        ? pitLoss.reason
+        : 'FCY can reduce pit loss, but refreshed gaps are still stabilizing.';
+      return { ...base, action: 'CONSIDER PIT', level: 'provisional', reason, targetElapsedMs: clock.elapsedMs };
+    }
+    if (fcySavingsMs >= rules.fcyStrongSavingsMs || (Number.isFinite(slackMs) && slackMs <= warningWindowMs)) {
+      return { ...base, action: 'PIT NOW', level: 'advantage', reason: `FCY saves approximately ${formatDuration(fcySavingsMs)} versus the green estimate.`, targetElapsedMs: clock.elapsedMs };
+    }
+    if (fcySavingsMs >= rules.fcyConsiderSavingsMs) {
+      return { ...base, action: 'CONSIDER PIT', level: 'opportunity', reason: `FCY saves approximately ${formatDuration(fcySavingsMs)} versus the green estimate.`, targetElapsedMs: clock.elapsedMs };
+    }
+    return { ...base, action: 'STAY OUT', level: 'normal', reason: 'The calculated FCY saving is below the configured opportunity threshold.', targetElapsedMs: deadlineMs };
+  }
+  if (Number.isFinite(slackMs) && slackMs <= warningWindowMs) {
+    return { ...base, action: 'MUST PIT SOON', level: 'warning', reason: 'The safe deadline is within the configured warning window.', targetElapsedMs: deadlineMs };
+  }
+  return { ...base, action: 'PLAN PIT', level: 'normal', reason: 'Keep this stop before the safe deadline or use an earlier FCY opportunity.', targetElapsedMs: deadlineMs };
+}
+
+// Evaluates a manually configured tyre-change scenario without pretending the
+// timing feed knows rain intensity, track temperature, tyre age, or grip. The
+// result is advisory only: legal pit-window recommendations remain independent.
+// When the change is combined with an already planned stop, only the extra tyre
+// service time must be earned back. A standalone tyre stop must earn back the
+// complete current pit loss as well.
+function buildTyreStrategyScenario({ strategy = {}, pitLoss = {}, currentCondition = 'unknown' } = {}) {
+  const enabled = strategy.enabled === true;
+  const currentTyre = String(strategy.currentTyre || 'unknown');
+  const candidateTyre = String(strategy.candidateTyre || 'unknown');
+  const gainMinMsPerLap = Math.max(0, numberOrNull(strategy.gainMinMsPerLap) || 0);
+  const gainMaxMsPerLap = Math.max(gainMinMsPerLap, numberOrNull(strategy.gainMaxMsPerLap) || 0);
+  const expectedLaps = Math.max(0, Math.floor(numberOrNull(strategy.expectedLaps) || 0));
+  const additionalPitTimeMs = Math.max(0, numberOrNull(strategy.additionalPitTimeMs) || 0);
+  const combinedWithPlannedStop = strategy.combinedWithPlannedStop === true;
+  const fullPitLossMs = numberOrNull(pitLoss.pitLossMs);
+  const changeCostMs = combinedWithPlannedStop
+    ? additionalPitTimeMs
+    : fullPitLossMs === null ? null : fullPitLossMs + additionalPitTimeMs;
+  const base = {
+    enabled,
+    currentCondition: String(currentCondition || 'unknown'),
+    currentTyre,
+    candidateTyre,
+    gainMinMsPerLap,
+    gainMaxMsPerLap,
+    expectedLaps,
+    additionalPitTimeMs,
+    combinedWithPlannedStop,
+    changeCostMs
+  };
+
+  if (!enabled) return { ...base, available: false, status: 'disabled', reason: 'Tyre scenario is disabled.' };
+  if (candidateTyre === 'unknown' || candidateTyre === currentTyre) {
+    return { ...base, available: false, status: 'invalid', reason: 'Choose a different candidate tyre.' };
+  }
+  if (!(gainMaxMsPerLap > 0) || expectedLaps <= 0) {
+    return { ...base, available: false, status: 'insufficient-data', reason: 'Enter an expected lap gain and the number of laps in these conditions.' };
+  }
+  if (changeCostMs === null) {
+    return { ...base, available: false, status: 'waiting', reason: 'Waiting for a reliable pit-loss estimate.' };
+  }
+
+  const breakEvenBestCaseLaps = changeCostMs / gainMaxMsPerLap;
+  const breakEvenWorstCaseLaps = gainMinMsPerLap > 0 ? changeCostMs / gainMinMsPerLap : null;
+  const netGainMinMs = expectedLaps * gainMinMsPerLap - changeCostMs;
+  const netGainMaxMs = expectedLaps * gainMaxMsPerLap - changeCostMs;
+  const status = netGainMinMs > 0 ? 'favourable' : netGainMaxMs > 0 ? 'possible' : 'not-favourable';
+  const conditionMismatch = (currentCondition === 'wet' && candidateTyre === 'dry')
+    || (currentCondition === 'dry' && candidateTyre === 'wet');
+  return {
+    ...base,
+    available: true,
+    status,
+    breakEvenBestCaseLaps,
+    breakEvenWorstCaseLaps,
+    netGainMinMs,
+    netGainMaxMs,
+    conditionMismatch,
+    reason: conditionMismatch
+      ? `Candidate ${candidateTyre} tyres do not match the manually selected ${currentCondition} condition.`
+      : status === 'favourable'
+        ? 'The entered gain pays back the tyre-change cost in both estimates.'
+        : status === 'possible'
+          ? 'The tyre change only pays back in the optimistic estimate.'
+          : 'The entered gain does not pay back the tyre-change cost over the expected laps.'
+  };
 }
 
 // Produces the full dashboard-facing pitstop object. Callers pass live rows,
 // session clock, current pit state, and rules; the returned object contains all
 // status labels, required-stop counts, timing windows, and after-pit projection.
-function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pitState = {}, rules = {}, fcyGapState = {}, confirmedGapView = null } = {}) {
+function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pitState = {}, rules = {}, fcyGapState = {}, confirmedGapView = null, strategyInputs = {} } = {}) {
   const normalizedRules = normalizeRules(rules);
   const clock = raceClockFromSession(session, normalizedRules);
   const windowState = timeUntilNextAllowedPit({ clock, rules: normalizedRules, pitState });
@@ -689,15 +963,41 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
   const averageLapMs = normalizedRules.averageLapMs || numberOrNull(pitState.averageLapMs);
   const nearWindowMs = averageLapMs ? averageLapMs * normalizedRules.nearWindowLaps : null;
   const isNearlyOpen = !requirementsComplete && !windowState.allowed && Number.isFinite(windowState.waitMs) && Number.isFinite(nearWindowMs) && windowState.waitMs <= nearWindowMs;
+  const latestPossiblePitElapsedMs = requirementsComplete
+    ? null
+    : latestPossiblePitElapsedMsForRemainingStops({ clock, rules: normalizedRules, pitState });
   const latestSafePitElapsedMs = requirementsComplete
     ? null
-    : latestSafePitElapsedMsForRemainingStops({ clock, rules: normalizedRules, pitState });
+    : latestSafePitElapsedMsForRemainingStops({ clock, rules: normalizedRules, pitState, averageLapMs });
   const mustPitSoonMs = latestSafePitElapsedMs !== null && clock.elapsedMs !== null ? latestSafePitElapsedMs - clock.elapsedMs : null;
-  const isStrategyUrgent = remainingRequiredStops > 0 && Number.isFinite(mustPitSoonMs) && mustPitSoonMs <= 0;
   const pitLoss = pitLossForSession({ session, rules: normalizedRules, fcyGapState });
   const projection = Number.isFinite(pitLoss.pitLossMs)
     ? { ...projectClassAfterPit(rows, followedCarNumber, pitLoss.pitLossMs, { averageLapMs, confirmedGapView }), provisional: pitLoss.provisional, fcyStatus: pitLoss.status }
     : { available: false, reason: pitLoss.reason, items: [], fcyStatus: pitLoss.status };
+  const schedule = buildRequiredStopSchedule({
+    clock,
+    rules: normalizedRules,
+    pitState,
+    averageLapMs,
+    strategyInputs
+  });
+  const recommendation = buildPitRecommendation({
+    clock,
+    rules: normalizedRules,
+    schedule,
+    windowState,
+    pitLoss,
+    requirementsComplete,
+    averageLapMs
+  });
+  const tyreScenario = buildTyreStrategyScenario({
+    strategy: strategyInputs.tyreScenario || {},
+    pitLoss,
+    currentCondition: strategyInputs.currentCondition || 'unknown'
+  });
+  const isStrategyUrgent = ['critical', 'warning'].includes(recommendation.level)
+    && windowState.allowed
+    && !requirementsComplete;
 
   let status = 'unknown';
   if (requirementsComplete) status = 'complete';
@@ -713,7 +1013,7 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
     : status === 'soon'
       ? `Pit window soon (${formatDuration(windowState.waitMs)})`
       : status === 'urgent'
-        ? 'Pit now to finish required stops'
+        ? recommendation.action === 'PIT NOW' ? 'Pit now to finish required stops' : 'Safe pit deadline approaching'
         : windowState.reason;
 
   return {
@@ -721,17 +1021,24 @@ function buildPitstopPlan({ rows = [], session = {}, followedCarNumber = '', pit
     clock,
     status,
     label,
-    canPitNow: windowState.allowed || isStrategyUrgent,
+    canPitNow: windowState.allowed,
     isNearlyOpen,
     waitMs: windowState.waitMs,
     completedPitStops,
     totalPitStops,
     lastPitElapsedMs: numberOrNull(pitState.lastPitElapsedMs),
+    lastPitDurationMs: numberOrNull(pitState.lastPitDurationMs),
+    lastPitTargetDurationMs: numberOrNull(pitState.lastPitTargetDurationMs),
+    lastPitRawDuration: pitState.lastPitRawDuration || '',
     validPitElapsedHistoryMs: (pitState.validPitElapsedHistoryMs || []).map(numberOrNull).filter(Number.isFinite),
     remainingRequiredStops,
     requirementsComplete,
+    latestPossiblePitElapsedMs,
     latestSafePitElapsedMs,
     mustPitSoonMs,
+    schedule,
+    recommendation,
+    tyreScenario,
     projection,
     pitLoss,
     fcyGapState
@@ -758,7 +1065,13 @@ return {
   projectFromConfirmedGaps,
   projectClassAfterPit,
   timeUntilNextAllowedPit,
+  pitRuleReferenceOffsetMs,
+  strategySafetyBuffer,
+  latestPossiblePitElapsedMsForRemainingStops,
   latestSafePitElapsedMsForRemainingStops,
+  buildRequiredStopSchedule,
+  buildPitRecommendation,
+  buildTyreStrategyScenario,
   buildPitstopPlan
 };
 });

@@ -8,6 +8,12 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const analytics = require('../src/shared/lapAnalytics');
+const { buildStintInsights, classComparisonsForStint, classRankingForStint } = require('../src/shared/stintInsights');
+const { stintsForCar } = require('../src/shared/stintTracker');
+const { enrichPitStops, pitstopAnalysis, endPitStopForStint } = require('../src/main/stintReports');
+
+const SPA_REFERENCE_TIMES = { lapMs: 180000, sector1Ms: 0, sector2Ms: 0, sector3Ms: 0 };
+const SPA_EXPECTED_PIT_DURATION_MS = 75 * 1000;
 
 function argument(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -110,8 +116,18 @@ function elapsedMs(laps) {
 }
 
 function durationMs(value) {
-  const match = String(value || '').trim().match(/^(\d+):(\d{2})$/);
-  return match ? (Number(match[1]) * 60 + Number(match[2])) * 1000 : null;
+  const text = String(value || '').trim().replace(/^\+/, '');
+  if (!text || text === '--') return null;
+  if (/^\d+(?:\.\d+)?$/.test(text)) return Math.round(Number(text) * 1000);
+  const parts = text.split(':');
+  if (parts.length === 2) return Math.round((Number(parts[0]) * 60 + Number(parts[1])) * 1000);
+  if (parts.length === 3) return Math.round((Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2])) * 1000);
+  return null;
+}
+
+function storedPitTargetDurationMs(lap = {}) {
+  const value = Number(lap.pitTargetDurationMs ?? lap.pitTargetMs ?? lap.expectedPitDurationMs ?? lap.pitStopDurationMs);
+  return Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 // PIT is cumulative and L. PIT contains the provider-measured duration of the
@@ -133,8 +149,13 @@ function pitStopsFromHistory(history, correctedLaps, carNumber) {
       lapNumber,
       durationMs: durationMs(lap.lastPit),
       rawDuration: lap.lastPit || '',
+      targetDurationMs: storedPitTargetDurationMs(lap),
       driverBefore: before?.driverName || '',
-      driverAfter: after?.driverName || ''
+      driverAfter: after?.driverName || '',
+      positionAfter: lap.position || '',
+      classPositionAfter: lap.classPosition || '',
+      gapAfterRaw: lap.gap || '',
+      diffAfterRaw: lap.diff || lap.interval || ''
     });
     previousCount = count;
   });
@@ -191,18 +212,22 @@ function buildPayload(history, carNumber, rawHistory = history) {
   const sessionName = ourLaps.find((lap) => lap.sessionName)?.sessionName || 'Spa race';
   const driverTotals = Object.fromEntries(analytics.driverStats(history, carNumber).map((driver) => [driver.driverName, compactStats(driver)]));
   const raceStats = compactStats(analytics.statsForLaps(ourLaps));
-  const pitStops = pitStopsFromHistory(rawHistory, ourLaps, carNumber);
+  const pitStops = enrichPitStops(pitStopsFromHistory(rawHistory, ourLaps, carNumber), SPA_EXPECTED_PIT_DURATION_MS);
 
   return {
     generatedAt: new Date().toISOString(),
     race: { sessionName, carNumber: String(carNumber), teamName, className, circuit: 'Spa-Francorchamps' },
+    referenceTimes: SPA_REFERENCE_TIMES,
     raceSummary: {
       stats: raceStats,
+      statsByCondition: Object.fromEntries(Object.entries(analytics.statsByCondition(ourLaps))
+        .map(([condition, conditionStats]) => [condition, compactStats(conditionStats)])),
       recordedRaceTimeMs: elapsedMs(ourLaps),
       totalLaps: ourLaps.length,
       finalClassPosition: ourLaps.at(-1)?.classPosition || '',
       drivers: Object.values(driverTotals),
       pitStops,
+      pitAnalysis: pitstopAnalysis(pitStops),
       totalPitTimeMs: pitStops.every((stop) => Number.isFinite(stop.durationMs))
         ? pitStops.reduce((sum, stop) => sum + stop.durationMs, 0)
         : null,
@@ -212,7 +237,7 @@ function buildPayload(history, carNumber, rawHistory = history) {
       'Class-gap history cannot be reconstructed reliably from lap-only records. Recorded GAP-to-overall-leader samples are shown instead.',
       'Stint duration is the sum of stored lap times; the first/last partial timing outside those laps is unavailable.'
     ],
-    stints: stintGroups(ourLaps).map((stint) => {
+    stints: stintsForCar(history, carNumber, { closeFinalAt: new Date().toISOString() }).map((stint) => {
       const stats = analytics.statsForLaps(stint.laps);
       const representative = new Set(analytics.representativePaceLaps(stint.laps));
       const driverTotal = driverTotals[stint.driverName] || null;
@@ -225,16 +250,25 @@ function buildPayload(history, carNumber, rawHistory = history) {
           averageDeltaMs: Number.isFinite(stats.averageLapMs) && Number.isFinite(driver.averageLapMs) ? stats.averageLapMs - driver.averageLapMs : null,
           bestDeltaMs: Number.isFinite(stats.bestLapMs) && Number.isFinite(driver.bestLapMs) ? stats.bestLapMs - driver.bestLapMs : null
         }));
+      const classComparisons = classComparisonsForStint(history, stint.laps, carNumber, className);
+      const insights = buildStintInsights(stint.laps, SPA_REFERENCE_TIMES);
+      insights.classRanking = classRankingForStint(stint.laps, classComparisons);
       return {
         stintNumber: stint.stintNumber,
+        driverStintNumber: stint.driverStintNumber,
         driverName: stint.driverName,
         startLap: stint.laps[0].lapNumber,
         endLap: stint.laps.at(-1).lapNumber,
         stintTimeMs: elapsedMs(stint.laps),
-        totalDriverTimeMs: elapsedMs(stint.laps),
+        totalDriverTimeMs: stint.totalDriverTimeMs,
         stats: compactStats(stats),
+        statsByCondition: Object.fromEntries(Object.entries(analytics.statsByCondition(stint.laps))
+          .map(([condition, conditionStats]) => [condition, compactStats(conditionStats)])),
         driverRaceStats: driverTotal,
         teammates,
+        classComparisons,
+        insights,
+        endPitStop: endPitStopForStint(stint, pitStops),
         laps: stint.laps.map((lap) => ({
           lapNumber: lap.lapNumber,
           lapTimeMs: lap.lapTimeMs,
@@ -246,6 +280,10 @@ function buildPayload(history, carNumber, rawHistory = history) {
           sector2Status: statusForSector(lap, 2),
           sector3Status: statusForSector(lap, 3),
           lapPhase: lap.lapPhase || '',
+          lapCondition: lap.lapCondition || lap.trackCondition || 'unknown',
+          sector1Condition: lap.sector1Condition || lap.lapCondition || lap.trackCondition || 'unknown',
+          sector2Condition: lap.sector2Condition || lap.lapCondition || lap.trackCondition || 'unknown',
+          sector3Condition: lap.sector3Condition || lap.lapCondition || lap.trackCondition || 'unknown',
           sessionFlag: lap.sessionFlag || lap.lapFlag || '',
           classPosition: lap.classPosition || '',
           gapToOverallLeaderMs: numericGapMs(lap.gap),

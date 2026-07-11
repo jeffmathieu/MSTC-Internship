@@ -1,4 +1,5 @@
 const { parseLapTimeToMs } = require('./parser');
+const { normalizeTrackCondition, deriveLapCondition } = require('./trackConditions');
 
 // Provider adapters/parsers may have different raw column names, but before
 // writing anything to disk they must produce this storage schema. Future timing
@@ -29,7 +30,15 @@ const NORMALIZED_ROW_COLUMNS = [
   'pitInfo',
   'lastPit',
   'eta',
-  'stint'
+  'stint',
+  'trackCondition',
+  'conditionPhaseId',
+  'sector1Condition',
+  'sector2Condition',
+  'sector3Condition',
+  'sector1ConditionPhaseId',
+  'sector2ConditionPhaseId',
+  'sector3ConditionPhaseId'
 ];
 
 const LAP_HISTORY_COLUMNS = [
@@ -39,6 +48,8 @@ const LAP_HISTORY_COLUMNS = [
   'sector2Ms',
   'sector3Ms',
   'bestLapMs',
+  'pitTargetDurationMs',
+  'lapCondition',
   'sessionFlag',
   'lapFlag',
   'sector1Flag',
@@ -137,6 +148,14 @@ function normalizeForStorage(row, context = {}) {
     lastPit: normalizeStorageField(valueAt(row, 'lastPit')),
     eta: normalizeStorageField(valueAt(row, 'eta')),
     stint: normalizeStorageField(valueAt(row, 'stint')),
+    trackCondition: normalizeTrackCondition(valueAt(row, 'trackCondition') || context.trackCondition),
+    conditionPhaseId: normalizeStorageField(valueAt(row, 'conditionPhaseId') || context.conditionPhaseId),
+    sector1Condition: normalizeTrackCondition(valueAt(row, 'sector1Condition')),
+    sector2Condition: normalizeTrackCondition(valueAt(row, 'sector2Condition')),
+    sector3Condition: normalizeTrackCondition(valueAt(row, 'sector3Condition')),
+    sector1ConditionPhaseId: normalizeStorageField(valueAt(row, 'sector1ConditionPhaseId')),
+    sector2ConditionPhaseId: normalizeStorageField(valueAt(row, 'sector2ConditionPhaseId')),
+    sector3ConditionPhaseId: normalizeStorageField(valueAt(row, 'sector3ConditionPhaseId')),
     raw
   };
   normalized.sessionFlag = normalizeStorageField(valueAt(row, 'sessionFlag') || context.session?.flag || context.sessionFlag);
@@ -167,6 +186,14 @@ function analysisRowsFromParsedRows(parsedRows = [], storageRows = []) {
     sector1Flag: storageRows[index]?.sector1Flag || '',
     sector2Flag: storageRows[index]?.sector2Flag || '',
     sector3Flag: storageRows[index]?.sector3Flag || '',
+    trackCondition: storageRows[index]?.trackCondition || 'unknown',
+    conditionPhaseId: storageRows[index]?.conditionPhaseId || '',
+    sector1Condition: storageRows[index]?.sector1Condition || 'unknown',
+    sector2Condition: storageRows[index]?.sector2Condition || 'unknown',
+    sector3Condition: storageRows[index]?.sector3Condition || 'unknown',
+    sector1ConditionPhaseId: storageRows[index]?.sector1ConditionPhaseId || '',
+    sector2ConditionPhaseId: storageRows[index]?.sector2ConditionPhaseId || '',
+    sector3ConditionPhaseId: storageRows[index]?.sector3ConditionPhaseId || '',
     sector1Eligible: storageRows[index]?.sector1Eligible || '',
     sector2Eligible: storageRows[index]?.sector2Eligible || '',
     sector3Eligible: storageRows[index]?.sector3Eligible || ''
@@ -177,13 +204,14 @@ function analysisRowsFromParsedRows(parsedRows = [], storageRows = []) {
 // time strings and parsed millisecond values so humans and calculations can use
 // the same file.
 function lapRecordFromNormalizedRow(row) {
-  return {
+  const record = {
     ...row,
     lapTimeMs: normalizeMsField(row.lastLap),
     sector1Ms: normalizeMsField(row.sector1),
     sector2Ms: normalizeMsField(row.sector2),
     sector3Ms: normalizeMsField(row.sector3),
     bestLapMs: normalizeMsField(row.bestLap),
+    pitTargetDurationMs: normalizeStorageField(row.pitTargetDurationMs),
     sessionFlag: normalizeStorageField(row.sessionFlag),
     lapFlag: normalizeStorageField(row.lapFlag || row.sessionFlag),
     sector1Flag: normalizeStorageField(row.sector1Flag),
@@ -194,6 +222,12 @@ function lapRecordFromNormalizedRow(row) {
     sector2Eligible: normalizeStorageField(row.sector2Eligible),
     sector3Eligible: normalizeStorageField(row.sector3Eligible)
   };
+  record.trackCondition = normalizeTrackCondition(row.trackCondition);
+  record.sector1Condition = normalizeTrackCondition(row.sector1Condition);
+  record.sector2Condition = normalizeTrackCondition(row.sector2Condition);
+  record.sector3Condition = normalizeTrackCondition(row.sector3Condition);
+  record.lapCondition = deriveLapCondition(record);
+  return record;
 }
 
 // Verifies whether the sectors visible in the current live row belong to its
@@ -215,6 +249,12 @@ function withoutCurrentSectors(row) {
     sector1Flag: '',
     sector2Flag: '',
     sector3Flag: '',
+    sector1Condition: 'unknown',
+    sector2Condition: 'unknown',
+    sector3Condition: 'unknown',
+    sector1ConditionPhaseId: '',
+    sector2ConditionPhaseId: '',
+    sector3ConditionPhaseId: '',
     sector1Eligible: '',
     sector2Eligible: '',
     sector3Eligible: ''
@@ -240,6 +280,12 @@ function completedLapRowFromLiveRow(row, previousRow) {
     sector1Flag: evidence.sector1Flag || '',
     sector2Flag: evidence.sector2Flag || '',
     sector3Flag: evidence.sector3Flag || '',
+    sector1Condition: evidence.sector1Condition || 'unknown',
+    sector2Condition: evidence.sector2Condition || 'unknown',
+    sector3Condition: evidence.sector3Condition || 'unknown',
+    sector1ConditionPhaseId: evidence.sector1ConditionPhaseId || '',
+    sector2ConditionPhaseId: evidence.sector2ConditionPhaseId || '',
+    sector3ConditionPhaseId: evidence.sector3ConditionPhaseId || '',
     sector1Eligible: evidence.sector1Eligible || '',
     sector2Eligible: evidence.sector2Eligible || '',
     sector3Eligible: evidence.sector3Eligible || ''
@@ -249,6 +295,7 @@ function completedLapRowFromLiveRow(row, previousRow) {
     completed.lapFlag = neutralizedSectorFlag;
     completed.paceEligible = 'false';
   }
+  completed.lapCondition = deriveLapCondition(completed, completed.trackCondition);
   return completed;
 }
 

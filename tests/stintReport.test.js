@@ -30,6 +30,8 @@ assert.deepStrictEqual(payload.stints.map((stint) => stint.driverName), [
 ]);
 assert.strictEqual(payload.stints[0].startLap, 1);
 assert.strictEqual(payload.stints[0].endLap, 23);
+assert.deepStrictEqual(payload.stints.map((stint) => stint.stintNumber), [1, 2, 3]);
+assert.deepStrictEqual(payload.stints.map((stint) => stint.driverStintNumber), [1, 1, 1], 'driver stint numbers count per driver, not per car stint');
 assert.strictEqual(payload.stints[0].stats.paceLapCount, 18);
 assert.strictEqual(Math.round(payload.stints[0].stats.averageLapMs), 181357);
 assert.strictEqual(Math.round(payload.stints[1].stats.averageLapMs), 198655);

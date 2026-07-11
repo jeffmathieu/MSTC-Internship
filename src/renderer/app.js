@@ -9,6 +9,8 @@ let currentState = null;
 let configuredFollowedCars = [];
 const DEFAULT_POLL_INTERVAL_MS = 5000;
 const MAX_FOLLOWED_CARS = 3;
+const COMPARISON_TABS = ['laps', 'averages', 'sectors'];
+let currentComparisonTab = 0;
 const dashboardQuery = new URLSearchParams(window.location?.search || '');
 const fixedDashboardCar = String(dashboardQuery.get('car') || '').trim();
 const isSecondaryDashboard = dashboardQuery.get('secondary') === '1';
@@ -20,7 +22,22 @@ const pitstopCircuits = window.pitstopCircuits;
 const normReference = window.normReference;
 const dashboardView = window.dashboardView;
 const timingHighlights = window.timingHighlights;
+const trackConditions = window.trackConditions;
 const previousMetricValues = new Map();
+
+function syncConditionControlTitles() {
+  const track = $('track-condition');
+  const analysis = $('analysis-condition');
+  const trackLabels = { dry: 'Dry', wet: 'Wet', transition: 'Transition' };
+  const analysisLabels = { combined: 'Full', dry: 'Dry only', wet: 'Wet only' };
+  if (track) track.title = `Track condition: ${trackLabels[track.value] || 'Unknown'}`;
+  if (analysis) analysis.title = `Pace view: ${analysisLabels[analysis.value] || 'Unknown'}`;
+}
+
+function normalizeAnalysisSelectValue(value) {
+  const normalized = trackConditions.normalizeAnalysisFilter(value, 'combined');
+  return ['dry', 'wet'].includes(normalized) ? normalized : 'combined';
+}
 
 // Applies one of the two supported visual themes. Theme colors themselves are
 // grouped at the top of styles.css, so changing the palette never requires
@@ -133,6 +150,11 @@ function formatMs(ms) {
   return `${sign}${minutes}:${String(seconds).padStart(2,'0')}.${String(milli).padStart(3,'0')}`;
 }
 
+function formatSignedDelta(ms) {
+  const value = Number(ms);
+  return Number.isFinite(value) ? `${value >= 0 ? '+' : '-'}${(Math.abs(value) / 1000).toFixed(1)}s` : '—';
+}
+
 // Stint clocks prioritize readability over lap-timing precision. Internal
 // calculations keep milliseconds; the compact header displays whole minutes.
 function formatStintClock(ms) {
@@ -226,14 +248,22 @@ function pitRulesFromInputs() {
   const selectedCircuit = pitstopCircuits?.pitstopCircuitById($('pit-circuit')?.value);
   const configuredDistance = Number($('pit-distance-meters')?.value);
   const configuredFcySpeed = Number($('pit-fcy-speed')?.value);
+  const configuredSafetyLaps = Number($('pit-safety-laps')?.value);
   return {
     raceDurationMs: hoursFromInput('pit-race-hours', 24) * 60 * 60 * 1000,
-    pitClosedStartMs: 25 * 60 * 1000,
-    pitClosedEndMs: 25 * 60 * 1000,
-    pitCooldownMs: 25 * 60 * 1000,
+    pitClosedStartMs: secondsFromInput('pit-closed-start-minutes', 25) * 60 * 1000,
+    pitClosedEndMs: secondsFromInput('pit-closed-end-minutes', 25) * 60 * 1000,
+    pitCooldownMs: secondsFromInput('pit-cooldown-minutes', 25) * 60 * 1000,
     pitStopDurationMs: secondsFromInput('pit-duration', 75) * 1000,
     requiredPitStops: Math.max(0, Math.floor(secondsFromInput('pit-required-input', 2))),
     nearWindowLaps: 2,
+    safetyBufferLaps: Number.isFinite(configuredSafetyLaps) && configuredSafetyLaps >= 0 ? configuredSafetyLaps : 2,
+    fixedSafetyBufferMs: secondsFromInput('pit-safety-seconds', 30) * 1000,
+    decisionLeadMs: secondsFromInput('pit-decision-seconds', 15) * 1000,
+    timingUncertaintyMs: secondsFromInput('pit-uncertainty-seconds', 10) * 1000,
+    ruleTimingReference: $('pit-rule-reference')?.value === 'pit-exit' ? 'pit-exit' : 'pit-entry',
+    fcyConsiderSavingsMs: secondsFromInput('pit-fcy-consider-seconds', 5) * 1000,
+    fcyStrongSavingsMs: secondsFromInput('pit-fcy-strong-seconds', 15) * 1000,
     circuitId: selectedCircuit?.id || currentSettings?.pitCircuitId || 'zolder',
     regularTrackDistanceMeters: Number.isFinite(configuredDistance) && configuredDistance > 0
       ? configuredDistance
@@ -241,6 +271,22 @@ function pitRulesFromInputs() {
     fcySpeedKph: Number.isFinite(configuredFcySpeed) && configuredFcySpeed > 0
       ? configuredFcySpeed
       : selectedCircuit?.fcySpeedKph ?? 60
+  };
+}
+
+// Tyre performance is not present in either timing provider. These fields are
+// therefore an explicit engineer-entered scenario, kept separate from legal
+// pit rules so an uncertain tyre estimate can never force a pit recommendation.
+function tyreStrategyFromInputs() {
+  return {
+    enabled: $('pit-tyre-enabled')?.checked === true,
+    currentTyre: $('pit-current-tyre')?.value || 'unknown',
+    candidateTyre: $('pit-candidate-tyre')?.value || 'unknown',
+    gainMinMsPerLap: secondsFromInput('pit-tyre-gain-min', 0) * 1000,
+    gainMaxMsPerLap: secondsFromInput('pit-tyre-gain-max', 0) * 1000,
+    expectedLaps: Math.max(0, Math.floor(secondsFromInput('pit-tyre-expected-laps', 0))),
+    additionalPitTimeMs: secondsFromInput('pit-tyre-extra-seconds', 0) * 1000,
+    combinedWithPlannedStop: $('pit-tyre-combined')?.checked === true
   };
 }
 
@@ -276,19 +322,32 @@ function applyPitCircuitDefaults() {
   updatePitDistanceNote();
 }
 
-function pitSetupLocked() {
-  return currentState?.mode === 'live' && currentState?.status !== 'idle' && currentState?.status !== 'error';
-}
-
 function showPitSetup(show = true) {
-  if (show && pitSetupLocked()) return;
   if (show) {
     $('pit-race-hours').value = String((currentSettings?.pitRules?.raceDurationMs || 86400000) / 3600000);
     $('pit-required-input').value = String(currentSettings?.pitRules?.requiredPitStops ?? 2);
+    $('pit-closed-start-minutes').value = String((currentSettings?.pitRules?.pitClosedStartMs ?? 1500000) / 60000);
+    $('pit-closed-end-minutes').value = String((currentSettings?.pitRules?.pitClosedEndMs ?? 1500000) / 60000);
+    $('pit-cooldown-minutes').value = String((currentSettings?.pitRules?.pitCooldownMs ?? 1500000) / 60000);
     $('pit-circuit').value = currentSettings?.pitCircuitId || currentSettings?.pitRules?.circuitId || 'zolder';
     const selectedCircuit = pitstopCircuits?.pitstopCircuitById($('pit-circuit').value);
     $('pit-distance-meters').value = String(currentSettings?.pitRules?.regularTrackDistanceMeters ?? selectedCircuit?.regularTrackDistanceMeters ?? '');
     $('pit-fcy-speed').value = String(currentSettings?.pitRules?.fcySpeedKph ?? selectedCircuit?.fcySpeedKph ?? 60);
+    $('pit-safety-laps').value = String(currentSettings?.pitRules?.safetyBufferLaps ?? 2);
+    $('pit-safety-seconds').value = String((currentSettings?.pitRules?.fixedSafetyBufferMs ?? 30000) / 1000);
+    $('pit-decision-seconds').value = String((currentSettings?.pitRules?.decisionLeadMs ?? 15000) / 1000);
+    $('pit-uncertainty-seconds').value = String((currentSettings?.pitRules?.timingUncertaintyMs ?? 10000) / 1000);
+    $('pit-rule-reference').value = currentSettings?.pitRules?.ruleTimingReference === 'pit-exit' ? 'pit-exit' : 'pit-entry';
+    $('pit-fcy-consider-seconds').value = String((currentSettings?.pitRules?.fcyConsiderSavingsMs ?? 5000) / 1000);
+    $('pit-fcy-strong-seconds').value = String((currentSettings?.pitRules?.fcyStrongSavingsMs ?? 15000) / 1000);
+    $('pit-tyre-enabled').checked = currentSettings?.tyreStrategy?.enabled === true;
+    $('pit-current-tyre').value = currentSettings?.tyreStrategy?.currentTyre || 'unknown';
+    $('pit-candidate-tyre').value = currentSettings?.tyreStrategy?.candidateTyre || 'unknown';
+    $('pit-tyre-gain-min').value = String((currentSettings?.tyreStrategy?.gainMinMsPerLap || 0) / 1000);
+    $('pit-tyre-gain-max').value = String((currentSettings?.tyreStrategy?.gainMaxMsPerLap || 0) / 1000);
+    $('pit-tyre-expected-laps').value = String(currentSettings?.tyreStrategy?.expectedLaps || 0);
+    $('pit-tyre-extra-seconds').value = String((currentSettings?.tyreStrategy?.additionalPitTimeMs || 0) / 1000);
+    $('pit-tyre-combined').checked = currentSettings?.tyreStrategy?.combinedWithPlannedStop !== false;
     updatePitDistanceNote();
   }
   $('pit-setup-modal')?.classList.toggle('hidden', !show);
@@ -395,7 +454,11 @@ function renderLapStrip(state, precomputedHighlights = null) {
   // comparison itself.
   const currentHighlights = precomputedHighlights?.lapStrip?.length === storedLapCount
     ? precomputedHighlights
-    : timingHighlights?.buildTimingHighlights(state?.lapHistory || [], carNumber) || precomputedHighlights;
+    : timingHighlights?.buildTimingHighlights(state?.lapHistory || [], carNumber, {
+      conditionFilter: state?.analyticsSummary?.resolvedConditionFilter
+        || state?.analyticsSummary?.analysisConditionFilter
+        || 'combined'
+    }) || precomputedHighlights;
   const laps = [...(currentHighlights?.lapStrip || [])].reverse();
   const currentStint = state?.stintState?.cars?.[carNumber]?.currentStint || null;
   setText('info-stint', currentStint
@@ -412,7 +475,7 @@ function renderLapStrip(state, precomputedHighlights = null) {
   }
   laps.forEach((lap, index) => {
     const row = document.createElement('div');
-    row.className = `lap-strip-row ${lap.status || 'normal'} ${lap.highlight || 'none'}`;
+    row.className = `lap-strip-row ${lap.status || 'normal'} ${lap.highlight || 'none'} condition-${lap.lapCondition || 'unknown'}`;
     row.setAttribute('title', lap.tooltip || lap.driverName || 'Unknown driver');
     const number = document.createElement('span');
     number.className = 'lap-number';
@@ -545,6 +608,7 @@ function renderRefSector(sectorNumber, refMs, lastMs, bestMs) {
 
 function renderSectorAnalytics(summary, rows = [], prediction = null) {
   const ourCar = getOurCarAnalytics(summary);
+  const combinedCar = ourCar?.byCondition?.combined || ourCar;
   const refs = currentReferenceTimes();
   const row = followedRow(rows);
   const bestS1 = numericMs(ourCar?.bestSector1Ms);
@@ -556,8 +620,11 @@ function renderSectorAnalytics(summary, rows = [], prediction = null) {
   setClassBestValue('best-sector-1', summary?.timingHighlights?.bestSectors?.sector1?.isClassBest);
   setClassBestValue('best-sector-2', summary?.timingHighlights?.bestSectors?.sector2?.isClassBest);
   setClassBestValue('best-sector-3', summary?.timingHighlights?.bestSectors?.sector3?.isClassBest);
-  const ideal = [bestS1, bestS2, bestS3].every(Number.isFinite) ? bestS1 + bestS2 + bestS3 : null;
-  const idealStatus = normReference.idealReferenceStatus(bestS1, bestS2, bestS3, refs.lapMs);
+  const idealS1 = numericMs(combinedCar?.bestSector1Ms);
+  const idealS2 = numericMs(combinedCar?.bestSector2Ms);
+  const idealS3 = numericMs(combinedCar?.bestSector3Ms);
+  const ideal = [idealS1, idealS2, idealS3].every(Number.isFinite) ? idealS1 + idealS2 + idealS3 : null;
+  const idealStatus = normReference.idealReferenceStatus(idealS1, idealS2, idealS3, refs.lapMs);
   setMetric('ideal-time', formatMs(ideal), { flash: true });
   setText('ideal-time-delta', idealStatus.deltaMs !== null ? `Delta ${idealStatus.deltaLabel}` : 'Best S1 + best S2 + best S3');
   setNormTextState('ideal-time', idealStatus.state);
@@ -592,77 +659,188 @@ function comparisonDeltaState(value) {
   return ms === null || ms === 0 ? 'neutral' : ms < 0 ? 'good' : 'bad';
 }
 
-function fillComparisonList(id, items, rowClass, labelKey = 'label', valueKey = 'deltaMs') {
-  const container = $(id);
+function comparisonMetricByLabel(metrics, label) {
+  const wanted = String(label || '').toLowerCase();
+  return (metrics || []).find((item) => String(item.label || '').toLowerCase() === wanted) || null;
+}
+
+function comparisonDeltaElement(deltaMs) {
+  const value = numericMs(deltaMs);
+  const output = document.createElement('output');
+  output.className = `comparison-delta ${comparisonDeltaState(value)}`;
+  output.textContent = value === 0 ? '' : displayDelta(value);
+  return output;
+}
+
+function comparisonTimeElement(ms, className = 'comparison-time') {
+  const output = document.createElement('output');
+  output.className = className;
+  output.textContent = formatMs(numericMs(ms));
+  return output;
+}
+
+function comparisonMetricCell(item) {
+  const cell = document.createElement('span');
+  cell.className = 'comparison-value-pair';
+  cell.appendChild(comparisonTimeElement(item?.valueMs));
+  cell.appendChild(comparisonDeltaElement(item?.deltaMs));
+  return cell;
+}
+
+function comparisonCarLabel(car, fallback = '—') {
+  const label = document.createElement('strong');
+  label.className = `comparison-car-label${car?.isBic ? ' is-bic' : ''}`;
+  const number = document.createElement('span');
+  number.textContent = car?.carNumber ? `#${car.carNumber}` : fallback;
+  label.appendChild(number);
+  if (car?.isBic) {
+    const badge = document.createElement('small');
+    badge.textContent = 'BIC';
+    label.appendChild(badge);
+  }
+  return label;
+}
+
+function appendComparisonRow(container, label, cells, rowClass = '', labelNode = null) {
+  if (!container) return;
+  const row = document.createElement('div');
+  row.className = `comparison-row ${rowClass}`.trim();
+  if (labelNode) row.appendChild(labelNode);
+  else {
+    const labelCell = document.createElement('strong');
+    labelCell.textContent = label || '—';
+    row.appendChild(labelCell);
+  }
+  cells.forEach((cell) => row.appendChild(cell));
+  container.appendChild(row);
+}
+
+function comparisonTabTitle(tab) {
+  if (tab === 'averages') return 'Averages';
+  if (tab === 'sectors') return 'Sectors';
+  return 'Best / Last / Last 10';
+}
+
+function updateComparisonTabVisibility() {
+  const tab = COMPARISON_TABS[currentComparisonTab] || 'laps';
+  setText('comparison-tab-title', comparisonTabTitle(tab));
+  COMPARISON_TABS.forEach((name) => {
+    $(`comparison-tab-${name}`)?.classList.toggle('comparison-tab-active', name === tab);
+  });
+}
+
+function setComparisonTab(index) {
+  currentComparisonTab = (index + COMPARISON_TABS.length) % COMPARISON_TABS.length;
+  updateComparisonTabVisibility();
+}
+
+function renderComparisonLapRows(cars) {
+  const container = $('comparison-tab-laps');
   if (!container) return;
   container.innerHTML = '';
-  (items || []).forEach((item) => {
-    const row = document.createElement('div');
-    row.className = `${rowClass} ${comparisonDeltaState(item[valueKey])}`;
-    const label = document.createElement('span');
-    label.textContent = item[labelKey] || '—';
-    const value = document.createElement('output');
-    if (valueKey === 'deltaMs') value.className = 'comparison-delta';
-    value.textContent = valueKey === 'deltaMs' ? displayDelta(numericMs(item[valueKey])) : formatMs(numericMs(item[valueKey]));
-    row.appendChild(label);
-    if (rowClass === 'comparison-line') {
-      const absolute = document.createElement('output');
-      absolute.className = 'comparison-absolute';
-      absolute.textContent = formatMs(numericMs(item.valueMs));
-      row.appendChild(absolute);
-    }
-    if (rowClass === 'comparison-sector') {
-      const average = document.createElement('output');
-      average.className = 'comparison-sector-average';
-      average.textContent = formatMs(numericMs(item.averageMs));
-      row.appendChild(average);
-    }
-    if (rowClass !== 'comparison-sector' || item.showDelta) row.appendChild(value);
-    container.appendChild(row);
+  appendComparisonRow(container, '', [
+    Object.assign(document.createElement('span'), { textContent: 'Best lap' }),
+    Object.assign(document.createElement('span'), { textContent: 'Last lap' }),
+    Object.assign(document.createElement('span'), { textContent: 'Last 10 avg' })
+  ], 'comparison-row-head');
+  (cars || []).forEach((car) => {
+    appendComparisonRow(container, '', [
+      comparisonMetricCell(comparisonMetricByLabel(car.metrics, 'Best')),
+      comparisonMetricCell(comparisonMetricByLabel(car.metrics, 'Last')),
+      comparisonMetricCell(comparisonMetricByLabel(car.metrics, 'Last 10'))
+    ], 'comparison-data-row', comparisonCarLabel(car));
+  });
+}
+
+function comparisonAverageChip(item) {
+  const chip = document.createElement('span');
+  chip.className = `comparison-average-chip${item?.total ? ' total' : ''}`;
+  const label = document.createElement('span');
+  label.textContent = item?.label || '—';
+  const value = comparisonTimeElement(item?.valueMs);
+  chip.appendChild(label);
+  chip.appendChild(value);
+  chip.appendChild(comparisonDeltaElement(item?.deltaMs));
+  return chip;
+}
+
+function renderComparisonAverageRows(cars) {
+  const container = $('comparison-tab-averages');
+  if (!container) return;
+  container.innerHTML = '';
+  const grid = document.createElement('div');
+  grid.className = 'comparison-average-columns';
+  (cars || []).forEach((car) => {
+    const column = document.createElement('article');
+    column.className = `comparison-average-column${car.isBic ? ' is-bic' : ''}`;
+    column.appendChild(comparisonCarLabel(car));
+    const chips = document.createElement('div');
+    const averageItems = [
+      { label: 'Total', valueMs: car.totalAverageMs, deltaMs: car.totalAverageDeltaMs, total: true },
+      ...(car.averages || [])
+    ];
+    chips.className = `comparison-average-chip-list${averageItems.length > 3 ? ' compact' : ''}`;
+    averageItems.forEach((item) => chips.appendChild(comparisonAverageChip(item)));
+    column.appendChild(chips);
+    grid.appendChild(column);
+  });
+  container.appendChild(grid);
+}
+
+function comparisonSectorCell(item, showDelta) {
+  const cell = document.createElement('span');
+  cell.className = 'comparison-sector-cell';
+  cell.appendChild(comparisonTimeElement(item?.averageMs));
+  if (showDelta) {
+    cell.appendChild(comparisonDeltaElement(item?.deltaMs));
+  }
+  return cell;
+}
+
+function renderComparisonSectorRows(cars) {
+  const container = $('comparison-tab-sectors');
+  if (!container) return;
+  container.innerHTML = '';
+  appendComparisonRow(container, '', [
+    (() => {
+      const span = document.createElement('span');
+      span.className = 'comparison-sector-label';
+      span.textContent = 'S1';
+      return span;
+    })(),
+    (() => {
+      const span = document.createElement('span');
+      span.className = 'comparison-sector-label';
+      span.textContent = 'S2';
+      return span;
+    })(),
+    (() => {
+      const span = document.createElement('span');
+      span.className = 'comparison-sector-label';
+      span.textContent = 'S3';
+      return span;
+    })()
+  ], 'comparison-sector-head');
+  (cars || []).forEach((car) => {
+    const sectors = car.sectors || [];
+    appendComparisonRow(container, '', [
+      comparisonSectorCell(sectors[0], !car.isOurCar),
+      comparisonSectorCell(sectors[1], !car.isOurCar),
+      comparisonSectorCell(sectors[2], !car.isOurCar)
+    ], 'comparison-sector-row', comparisonCarLabel(car));
   });
 }
 
 function renderComparisonMatrix(matrix) {
-  if (!matrix) return false;
-  const ourNumber = matrix.ourCarNumber || activeCarNumber() || '?';
-  setText('comparison-team-title', matrix.teammate?.title || 'D2 vs. D1');
-  $('comparison-team-title')?.setAttribute('title', matrix.teammate?.title || 'D2 vs. D1');
-  setText('comparison-bic-title', `#${ourNumber} vs. BIC${matrix.bic?.targetCarNumber ? ` #${matrix.bic.targetCarNumber}` : ''}`);
-  setText('comparison-xic-title', `#${ourNumber} vs.`);
-  if ($('comparison-xic-car') && document.activeElement !== $('comparison-xic-car')) {
-    $('comparison-xic-car').value = matrix.xic?.targetCarNumber || currentSettings?.comparisonCar || '';
+  if (!matrix) {
+    updateComparisonTabVisibility();
+    return false;
   }
-  [
-    ['team', matrix.teammate],
-    ['bic', matrix.bic],
-    ['xic', matrix.xic]
-  ].forEach(([id, column]) => {
-    fillComparisonList(`comparison-${id}-metrics`, column?.metrics, 'comparison-line');
-    const averages = [
-      { label: 'Total average', valueMs: column?.totalAverageMs, deltaMs: column?.totalAverageDeltaMs, total: true },
-      ...(column?.averages || [])
-    ];
-    const averagesContainer = $(`comparison-${id}-averages`);
-    if (averagesContainer) {
-      averagesContainer.innerHTML = '';
-      averages.forEach((item) => {
-        const row = document.createElement('div');
-        row.className = `comparison-average${item.total ? ' total' : ''}`;
-        const label = document.createElement('span');
-        label.textContent = item.label;
-        const value = document.createElement('output');
-        value.textContent = formatMs(numericMs(item.valueMs));
-        const delta = document.createElement('output');
-        delta.className = `comparison-average-delta ${comparisonDeltaState(item.deltaMs)}`;
-        delta.textContent = displayDelta(numericMs(item.deltaMs));
-        row.appendChild(label);
-        row.appendChild(value);
-        row.appendChild(delta);
-        averagesContainer.appendChild(row);
-      });
-    }
-    fillComparisonList(`comparison-${id}-sectors`, column?.sectors, 'comparison-sector');
-  });
+  const classCars = matrix.classCars || [];
+  renderComparisonLapRows(classCars);
+  renderComparisonAverageRows(classCars);
+  renderComparisonSectorRows(classCars);
+  updateComparisonTabVisibility();
   return true;
 }
 
@@ -805,16 +983,26 @@ function projectionLabel(projection) {
   return projection.provisional ? `FCY gaps stabilizing · ${label}` : label;
 }
 
+function pitDeltaLabel(plan) {
+  const duration = numericMs(plan?.lastPitDurationMs);
+  const target = numericMs(plan?.lastPitTargetDurationMs ?? plan?.rules?.pitStopDurationMs);
+  if (!Number.isFinite(duration) || !Number.isFinite(target)) return '—';
+  const delta = duration - target;
+  return `${delta >= 0 ? '+' : '-'}${pitstopPlanner.formatDuration(Math.abs(delta))}`;
+}
+
 // Renders pit window status, required-stop progress, next allowed pit time, and
 // after-pit class projection. All rule calculations come from pitstopPlanner.
 function renderPitstopPlan(plan) {
   const pitWindow = $('pit-window');
   if ($('open-pit-setup')) {
-    $('open-pit-setup').disabled = pitSetupLocked();
-    $('open-pit-setup').title = pitSetupLocked() ? 'Stop live collection before changing fixed pitstop setup' : '';
+    $('open-pit-setup').disabled = false;
+    $('open-pit-setup').title = 'Adjust pitstop strategy settings';
   }
   if (!plan) {
     setText('pit-status', 'Waiting');
+    setText('pit-last', '—');
+    setText('pit-last-delta', '—');
     setText('pit-next', '—');
     setText('pit-projection', '—');
     setText('pit-stops-summary', `0/${$('pit-required-input')?.value || '2'}`);
@@ -824,21 +1012,43 @@ function renderPitstopPlan(plan) {
   }
 
   setText('pit-status', plan.label || plan.status);
+  setText('pit-last', Number.isFinite(plan.lastPitDurationMs) ? pitstopPlanner.formatDuration(plan.lastPitDurationMs) : '—');
+  setText('pit-last-delta', pitDeltaLabel(plan));
   setText('pit-stops-summary', `${plan.completedPitStops}/${plan.rules?.requiredPitStops ?? $('pit-required-input')?.value ?? '2'}`);
   setText('pit-next', plan.requirementsComplete
     ? (plan.canPitNow ? 'Optional' : 'Closed')
-    : plan.canPitNow ? 'Now' : (Number.isFinite(plan.waitMs) ? pitstopPlanner.formatDuration(plan.waitMs) : 'Closed'));
+    : plan.recommendation?.action || (plan.canPitNow ? 'Now' : (Number.isFinite(plan.waitMs) ? pitstopPlanner.formatDuration(plan.waitMs) : 'Closed')));
   setText('pit-projection', projectionLabel(plan.projection));
+  const safeDeadline = plan.schedule?.next?.latestSafeEntryElapsedMs ?? plan.latestSafePitElapsedMs;
+  const possibleDeadline = plan.schedule?.next?.latestPossibleEntryElapsedMs ?? plan.latestPossiblePitElapsedMs;
+  const bufferMs = plan.schedule?.buffer?.totalMs;
   const detailParts = [
     Number.isFinite(plan.clock?.elapsedMs) ? `Elapsed ${pitstopPlanner.formatDuration(plan.clock.elapsedMs)}` : '',
     Number.isFinite(plan.clock?.remainingMs) ? `remaining ${pitstopPlanner.formatDuration(plan.clock.remainingMs)}` : '',
     Number.isFinite(plan.totalPitStops) && plan.totalPitStops !== plan.completedPitStops ? `total pits ${plan.totalPitStops}, valid ${plan.completedPitStops}` : '',
-    Number.isFinite(plan.mustPitSoonMs) ? `latest safe stop in ${pitstopPlanner.formatDuration(plan.mustPitSoonMs)}` : '',
+    Number.isFinite(safeDeadline) ? `safe by ${pitstopPlanner.formatDuration(safeDeadline)} (${pitstopPlanner.formatDuration(safeDeadline - plan.clock.elapsedMs)} left)` : '',
+    Number.isFinite(possibleDeadline) ? `legal limit ${pitstopPlanner.formatDuration(possibleDeadline)}` : '',
+    Number.isFinite(bufferMs) ? `buffer ${pitstopPlanner.formatDuration(bufferMs)}` : '',
+    Number.isFinite(plan.recommendation?.fcySavingsMs) ? `FCY saves ${pitstopPlanner.formatDuration(plan.recommendation.fcySavingsMs)}` : '',
     Number.isFinite(plan.pitLoss?.pitLossMs)
       ? `${plan.pitLoss?.active ? 'FCY net pit loss' : 'pit loss'} ${pitstopPlanner.formatDuration(plan.pitLoss.pitLossMs)}`
-      : plan.pitLoss?.reason || ''
+      : plan.pitLoss?.reason || '',
+    plan.tyreScenario?.available
+      ? `tyres ${plan.tyreScenario.status}: break-even ${plan.tyreScenario.breakEvenBestCaseLaps.toFixed(1)}${Number.isFinite(plan.tyreScenario.breakEvenWorstCaseLaps) ? `-${plan.tyreScenario.breakEvenWorstCaseLaps.toFixed(1)}` : '+'} laps, net ${formatSignedDelta(plan.tyreScenario.netGainMinMs)} to ${formatSignedDelta(plan.tyreScenario.netGainMaxMs)}`
+      : plan.tyreScenario?.enabled ? `tyres: ${plan.tyreScenario.reason}` : '',
+    plan.recommendation?.reason || ''
   ].filter(Boolean);
   setText('pit-detail', detailParts.join(' · '));
+  if ($('pit-detail')) {
+    const buffer = plan.schedule?.buffer || {};
+    $('pit-detail').title = [
+      `Rule timing point: ${plan.schedule?.ruleTimingReference || plan.rules?.ruleTimingReference || 'pit-entry'}`,
+      `Lap buffer: ${pitstopPlanner.formatDuration(buffer.lapBufferMs)}`,
+      `Fixed buffer: ${pitstopPlanner.formatDuration(buffer.fixedSafetyBufferMs)}`,
+      `Decision lead: ${pitstopPlanner.formatDuration(buffer.decisionLeadMs)}`,
+      `Timing uncertainty: ${pitstopPlanner.formatDuration(buffer.timingUncertaintyMs)}`
+    ].join('\n');
+  }
 
   if (pitWindow) {
     pitWindow.classList.remove('open', 'soon', 'closed', 'urgent', 'complete');
@@ -944,6 +1154,18 @@ function renderDetails(state) {
 function render(state) {
   currentState = state || {};
   const rows = currentState.rows || [], history = currentState.lapHistory || [];
+  const summaryCondition = currentState.analyticsSummary?.trackCondition;
+  const summaryFilter = currentState.analyticsSummary?.analysisConditionFilter;
+  if ($('track-condition')) $('track-condition').value = trackConditions.normalizeTrackCondition(
+    summaryCondition || currentSettings?.trackCondition,
+    'dry'
+  );
+  if ($('analysis-condition')) $('analysis-condition').value = trackConditions.normalizeAnalysisFilter(
+    summaryFilter || currentSettings?.analysisConditionFilter,
+    'combined'
+  );
+  if ($('analysis-condition')) $('analysis-condition').value = normalizeAnalysisSelectValue($('analysis-condition').value);
+  syncConditionControlTitles();
   setStatus(currentState.status, currentState.message);
   updateSession(currentState.session || {}, rows.length > 0);
   $('row-count').textContent = String(rows.length);
@@ -994,10 +1216,13 @@ async function saveSettingsFromInputs(setupComplete = false) {
     followedCar: primaryCar,
     followedCars,
     sessionMode,
+    trackCondition: $('track-condition')?.value || currentSettings?.trackCondition || 'dry',
+    analysisConditionFilter: $('analysis-condition')?.value || currentSettings?.analysisConditionFilter || 'combined',
     comparisonCar: $('comparison-car')?.value.trim() || '',
     referenceTimes: activeReferenceTimes,
     referenceTimesByMode,
     pitCircuitId: $('pit-circuit')?.value || currentSettings?.pitCircuitId || 'zolder',
+    tyreStrategy: tyreStrategyFromInputs(),
     storageFolder: $('storage-folder').value.trim(),
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     pitRules: pitRulesFromInputs()
@@ -1147,11 +1372,35 @@ async function init() {
   if ($('comparison-xic-car')) $('comparison-xic-car').value = currentSettings.comparisonCar || '';
   syncReferenceInputs(currentSettings);
   syncSessionMode(currentSettings.sessionMode || 'race');
+  if ($('track-condition')) $('track-condition').value = currentSettings.trackCondition || 'dry';
+  if ($('analysis-condition')) $('analysis-condition').value = normalizeAnalysisSelectValue(currentSettings.analysisConditionFilter);
+  syncConditionControlTitles();
   populatePitstopCircuits();
   if ($('pit-circuit')) $('pit-circuit').value = currentSettings.pitCircuitId || currentSettings.pitRules?.circuitId || 'zolder';
   if ($('pit-duration')) $('pit-duration').value = String(Math.round((currentSettings.pitRules?.pitStopDurationMs || 75000) / 1000));
   if ($('pit-required-input')) $('pit-required-input').value = String(currentSettings.pitRules?.requiredPitStops ?? 2);
   if ($('pit-race-hours')) $('pit-race-hours').value = String((currentSettings.pitRules?.raceDurationMs || 86400000) / 3600000);
+  if ($('pit-closed-start-minutes')) $('pit-closed-start-minutes').value = String((currentSettings.pitRules?.pitClosedStartMs ?? 1500000) / 60000);
+  if ($('pit-closed-end-minutes')) $('pit-closed-end-minutes').value = String((currentSettings.pitRules?.pitClosedEndMs ?? 1500000) / 60000);
+  if ($('pit-cooldown-minutes')) $('pit-cooldown-minutes').value = String((currentSettings.pitRules?.pitCooldownMs ?? 1500000) / 60000);
+  const initialPitCircuit = pitstopCircuits?.pitstopCircuitById($('pit-circuit')?.value);
+  if ($('pit-distance-meters')) $('pit-distance-meters').value = String(currentSettings.pitRules?.regularTrackDistanceMeters ?? initialPitCircuit?.regularTrackDistanceMeters ?? '');
+  if ($('pit-fcy-speed')) $('pit-fcy-speed').value = String(currentSettings.pitRules?.fcySpeedKph ?? initialPitCircuit?.fcySpeedKph ?? 60);
+  if ($('pit-safety-laps')) $('pit-safety-laps').value = String(currentSettings.pitRules?.safetyBufferLaps ?? 2);
+  if ($('pit-safety-seconds')) $('pit-safety-seconds').value = String((currentSettings.pitRules?.fixedSafetyBufferMs ?? 30000) / 1000);
+  if ($('pit-decision-seconds')) $('pit-decision-seconds').value = String((currentSettings.pitRules?.decisionLeadMs ?? 15000) / 1000);
+  if ($('pit-uncertainty-seconds')) $('pit-uncertainty-seconds').value = String((currentSettings.pitRules?.timingUncertaintyMs ?? 10000) / 1000);
+  if ($('pit-rule-reference')) $('pit-rule-reference').value = currentSettings.pitRules?.ruleTimingReference === 'pit-exit' ? 'pit-exit' : 'pit-entry';
+  if ($('pit-fcy-consider-seconds')) $('pit-fcy-consider-seconds').value = String((currentSettings.pitRules?.fcyConsiderSavingsMs ?? 5000) / 1000);
+  if ($('pit-fcy-strong-seconds')) $('pit-fcy-strong-seconds').value = String((currentSettings.pitRules?.fcyStrongSavingsMs ?? 15000) / 1000);
+  if ($('pit-tyre-enabled')) $('pit-tyre-enabled').checked = currentSettings.tyreStrategy?.enabled === true;
+  if ($('pit-current-tyre')) $('pit-current-tyre').value = currentSettings.tyreStrategy?.currentTyre || 'unknown';
+  if ($('pit-candidate-tyre')) $('pit-candidate-tyre').value = currentSettings.tyreStrategy?.candidateTyre || 'unknown';
+  if ($('pit-tyre-gain-min')) $('pit-tyre-gain-min').value = String((currentSettings.tyreStrategy?.gainMinMsPerLap || 0) / 1000);
+  if ($('pit-tyre-gain-max')) $('pit-tyre-gain-max').value = String((currentSettings.tyreStrategy?.gainMaxMsPerLap || 0) / 1000);
+  if ($('pit-tyre-expected-laps')) $('pit-tyre-expected-laps').value = String(currentSettings.tyreStrategy?.expectedLaps || 0);
+  if ($('pit-tyre-extra-seconds')) $('pit-tyre-extra-seconds').value = String((currentSettings.tyreStrategy?.additionalPitTimeMs || 0) / 1000);
+  if ($('pit-tyre-combined')) $('pit-tyre-combined').checked = currentSettings.tyreStrategy?.combinedWithPlannedStop !== false;
   $('poll-interval').value = String(currentSettings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS);
   syncSetupFromMain();
   setupDetailTabs();
@@ -1163,6 +1412,24 @@ async function init() {
   $('show-live')?.addEventListener('click', () => window.liveTiming.openLiveWindow());
   $('open-graphs')?.addEventListener('click', () => window.liveTiming.openGraphsWindow(activeCarNumber()));
   $('theme-toggle')?.addEventListener('click', toggleTheme);
+  $('track-condition')?.addEventListener('change', async () => {
+    currentSettings = await window.liveTiming.setSettings({ trackCondition: $('track-condition').value });
+    currentState = {
+      ...(currentState || {}),
+      analyticsSummary: { ...(currentState?.analyticsSummary || {}), trackCondition: currentSettings.trackCondition }
+    };
+    syncConditionControlTitles();
+    render(currentState);
+  });
+  $('analysis-condition')?.addEventListener('change', async () => {
+    currentSettings = await window.liveTiming.setSettings({ analysisConditionFilter: $('analysis-condition').value });
+    currentState = {
+      ...(currentState || {}),
+      analyticsSummary: { ...(currentState?.analyticsSummary || {}), analysisConditionFilter: currentSettings.analysisConditionFilter }
+    };
+    syncConditionControlTitles();
+    render(currentState);
+  });
   $('choose-folder')?.addEventListener('click', async () => { await chooseAndSetFolder('storage-folder'); await saveSettingsFromInputs(); });
   $('setup-choose-folder')?.addEventListener('click', async () => { await chooseAndSetFolder('setup-folder'); });
   $('setup-add-car')?.addEventListener('click', () => {
@@ -1179,18 +1446,13 @@ async function init() {
   $('pit-circuit')?.addEventListener('change', applyPitCircuitDefaults);
   ['pit-distance-meters', 'pit-fcy-speed'].forEach((id) => $(id)?.addEventListener('input', updatePitDistanceNote));
   $('pit-setup-save')?.addEventListener('click', async () => {
-    if (pitSetupLocked()) return;
     await saveSettingsFromInputs();
     showPitSetup(false);
     render(currentState);
   });
   $('open-setup')?.addEventListener('click', () => showSetup(true));
-  $('comparison-xic-car')?.addEventListener('change', async () => {
-    const comparisonCar = String($('comparison-xic-car').value || '').trim();
-    if ($('comparison-car')) $('comparison-car').value = comparisonCar;
-    currentSettings = await window.liveTiming.setSettings({ comparisonCar });
-    render(currentState);
-  });
+  $('comparison-prev-tab')?.addEventListener('click', () => setComparisonTab(currentComparisonTab - 1));
+  $('comparison-next-tab')?.addEventListener('click', () => setComparisonTab(currentComparisonTab + 1));
   $('export')?.addEventListener('click', async () => { const result = await window.liveTiming.exportCurrent(); alert(`Exported:\n${result.csvPath}\n${result.jsonPath}\n${result.historyPath || ''}`); });
 
   // Persist settings immediately when hidden inputs change. If new settings are

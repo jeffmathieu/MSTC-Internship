@@ -1,6 +1,7 @@
 // Renderer for the detachable graphs window. Dataset calculations live in
 // shared/graphData.js; this file only draws those prepared datasets on canvas.
 const graphApi = window.graphData;
+const conditionApi = window.trackConditions;
 const GRAPH_COLORS = ['#315fc7', '#d94c62', '#1e9f67', '#e2a11a', '#7a56b3', '#168a91', '#9c4f2c', '#525b66'];
 const DEFAULT_GRAPHS = ['driver-laps', 'driver-pace', 'driver-sectors', 'class-pace'];
 
@@ -49,6 +50,12 @@ function chartHasData(chart) {
 function colorForSeries(series, index) {
   if (series.highlight) return themeColor('--ink', '#171717');
   return GRAPH_COLORS[index % GRAPH_COLORS.length];
+}
+
+function conditionColor(condition) {
+  if (condition === 'wet') return '#2389c9';
+  if (condition === 'transition') return '#e2a11a';
+  return '';
 }
 
 function setCanvasSize(canvas) {
@@ -134,10 +141,20 @@ function drawLineChart(context, width, height, chart, viewport = { start: 0, end
       context.beginPath();
       context.arc(x, y, series.highlight ? 4 : 3, 0, Math.PI * 2);
       context.fill();
+      const ringColor = conditionColor(point.condition);
+      if (ringColor) {
+        context.strokeStyle = ringColor;
+        context.lineWidth = 2;
+        context.beginPath();
+        context.arc(x, y, series.highlight ? 6 : 5, 0, Math.PI * 2);
+        context.stroke();
+      }
       const delta = Number.isFinite(point.deltaToOurCarMs)
-        ? ` · Δ to our car ${formatDelta(point.deltaToOurCarMs)}`
+        ? ` · Δ ${formatDelta(point.deltaToOurCarMs)}`
         : '';
-      hitPoints.push({ x, y, text: `${formatTime(point.y)}${delta}${neutralized ? ' · FCY/SC' : ''}` });
+      const lapLabel = delta && point.label ? `${point.label} · ` : '';
+      const condition = ['wet', 'transition'].includes(point.condition) ? ` · ${point.condition.toUpperCase()}` : '';
+      hitPoints.push({ x, y, text: `${lapLabel}${formatTime(point.y)}${delta}${condition}${neutralized ? ' · FCY/SC' : ''}` });
     });
   });
 
@@ -205,6 +222,13 @@ function renderLegend(panel, chart) {
     item.innerHTML = '<i class="legend-swatch" style="--swatch:#9a9a94"></i>FCY / SC';
     legend.appendChild(item);
   }
+  [['wet', '#2389c9'], ['transition', '#e2a11a']].forEach(([condition, color]) => {
+    if (!chart.series.some((series) => series.points?.some((point) => point.condition === condition))) return;
+    const item = document.createElement('span');
+    item.className = 'legend-item';
+    item.innerHTML = `<i class="legend-swatch" style="--swatch:${color}"></i>${condition === 'wet' ? 'Wet marker' : 'Transition marker'}`;
+    legend.appendChild(item);
+  });
 }
 
 function wireTooltip(panel, canvas, hitPoints) {
@@ -231,7 +255,10 @@ function wireTooltip(panel, canvas, hitPoints) {
 
 function renderPanel(panel) {
   const type = panel.querySelector('select').value;
-  const chart = graphApi.buildGraph(type, currentState.lapHistory || [], followedCarNumber, { mode: sessionMode });
+  const resolvedCondition = currentState.analyticsSummary?.resolvedConditionFilter
+    || conditionApi.resolveAnalysisCondition(currentState.analyticsSummary?.analysisConditionFilter, currentState.analyticsSummary?.trackCondition);
+  const history = conditionApi.conditionFilteredHistory(currentState.lapHistory || [], resolvedCondition || 'combined');
+  const chart = graphApi.buildGraph(type, history, followedCarNumber, { mode: sessionMode });
   panel.querySelector('h1').textContent = chart.title;
   panel.querySelector('p').textContent = chart.subtitle;
   const canvas = panel.querySelector('canvas');

@@ -70,10 +70,17 @@ assert.strictEqual(risRow.sessionName, 'Demo Race');
 assert.strictEqual(risRow.sessionFlag, 'Full Course Yellow');
 const annotatedAnalysisRows = analysisRowsFromParsedRows([
   { carNumber: 33, sector1Ms: 50000, sector1: '50.000' }
-], [{ carNumber: '33', sessionFlag: 'FCY', sector1Flag: 'FCY', sector1Eligible: 'false' }]);
+], [{
+  carNumber: '33', sessionFlag: 'FCY', sector1Flag: 'FCY', sector1Eligible: 'false',
+  trackCondition: 'wet', conditionPhaseId: 'wet-2', sector1Condition: 'transition',
+  sector1ConditionPhaseId: 'dry-1>wet-2'
+}]);
 assert.strictEqual(annotatedAnalysisRows[0].sector1Ms, 50000);
 assert.strictEqual(annotatedAnalysisRows[0].sector1Flag, 'FCY');
 assert.strictEqual(annotatedAnalysisRows[0].sector1Eligible, 'false');
+assert.strictEqual(annotatedAnalysisRows[0].trackCondition, 'wet');
+assert.strictEqual(annotatedAnalysisRows[0].sector1Condition, 'transition');
+assert.strictEqual(annotatedAnalysisRows[0].sector1ConditionPhaseId, 'dry-1>wet-2');
 
 const risScreenshotStorageRow = normalizeForStorage({
   position: 12,
@@ -210,6 +217,9 @@ assert.strictEqual(risLap.sector1Ms, '32100');
 assert.strictEqual(getRaceResultsLap.sessionFlag, 'Full Course Yellow');
 assert.ok(LAP_HISTORY_COLUMNS.includes('sessionFlag'));
 assert.ok(LAP_HISTORY_COLUMNS.includes('sector1Eligible'));
+assert.ok(LAP_HISTORY_COLUMNS.includes('lapCondition'));
+assert.ok(LAP_HISTORY_COLUMNS.includes('sector1Condition'));
+assert.ok(LAP_HISTORY_COLUMNS.includes('pitTargetDurationMs'));
 assert.strictEqual(lapIdentity(getRaceResultsLap), lapIdentity(lapRecordFromNormalizedRow(getRaceResultsRow)));
 
 const invalidLap = lapRecordFromNormalizedRow({ lastLap: 'IN PIT', bestLap: '--', sector1: '?', sessionFlag: 'Safety car' });

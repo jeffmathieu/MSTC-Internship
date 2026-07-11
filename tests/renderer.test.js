@@ -228,10 +228,20 @@ const updatedState = {
     canPitNow: true,
     waitMs: 0,
     completedPitStops: 1,
+    lastPitDurationMs: 78000,
+    lastPitTargetDurationMs: 75000,
+    lastPitRawDuration: '1:18',
     lastPitElapsedMs: 3600000,
     validPitElapsedHistoryMs: [3600000, 7200000],
     remainingRequiredStops: 1,
     mustPitSoonMs: 1800000,
+    latestPossiblePitElapsedMs: 5300000,
+    schedule: {
+      ruleTimingReference: 'pit-entry',
+      buffer: { totalMs: 300000, lapBufferMs: 250000, fixedSafetyBufferMs: 30000, decisionLeadMs: 10000, timingUncertaintyMs: 10000 },
+      next: { latestSafeEntryElapsedMs: 5000000, latestPossibleEntryElapsedMs: 5300000 }
+    },
+    recommendation: { action: 'PLAN PIT', reason: 'Keep this stop before the safe deadline.', level: 'normal' },
     clock: { elapsedMs: 3600000, remainingMs: 3600000, progress: 0.5 },
     rules: { requiredPitStops: 2, pitStopDurationMs: 75000, raceDurationMs: 14400000, pitClosedStartMs: 1500000, pitClosedEndMs: 1500000, pitCooldownMs: 1500000 },
     projection: {
@@ -327,7 +337,7 @@ const liveTiming = {
 };
 
 const context = {
-  window: { location: { search: '' }, liveTiming, classBattle: {}, lapAnalytics: require('../src/shared/lapAnalytics'), timingHighlights: require('../src/shared/timingHighlights'), pitstopCircuits: require('../src/shared/pitstopCircuits'), pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
+  window: { location: { search: '' }, liveTiming, classBattle: {}, trackConditions: require('../src/shared/trackConditions'), lapAnalytics: require('../src/shared/lapAnalytics'), timingHighlights: require('../src/shared/timingHighlights'), pitstopCircuits: require('../src/shared/pitstopCircuits'), pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
   document,
   URLSearchParams,
   console,
@@ -454,7 +464,10 @@ module.exports = (async () => {
   assert.ok(document.getElementById('comparison-placeholder'), 'the redesigned comparison area remains intentionally empty');
   assert.strictEqual(document.getElementById('pit-status').textContent, 'Pit window open');
   assert.strictEqual(document.getElementById('pit-stops-summary').textContent, '1/2');
-  assert.strictEqual(document.getElementById('pit-next').textContent, 'Now');
+  assert.strictEqual(document.getElementById('pit-next').textContent, 'PLAN PIT');
+  assert.ok(document.getElementById('pit-detail').textContent.includes('safe by 1:23:20'));
+  assert.ok(document.getElementById('pit-detail').textContent.includes('legal limit 1:28:20'));
+  assert.ok(document.getElementById('pit-detail').textContent.includes('buffer 5:00'));
   assert.ok(document.getElementById('pit-projection').textContent.includes('PIC 2'));
   assert.ok(document.getElementById('pit-projection').textContent.includes('0:05.000 behind #2'));
   assert.ok(document.getElementById('pit-projection').textContent.includes('0:10.000 ahead #56'));
@@ -502,6 +515,9 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('pit-circuit').children.length, 5, 'all supported pit formations appear in the dropdown');
   document.getElementById('pit-race-hours').value = '6';
   document.getElementById('pit-required-input').value = '3';
+  document.getElementById('pit-closed-start-minutes').value = '20';
+  document.getElementById('pit-closed-end-minutes').value = '30';
+  document.getElementById('pit-cooldown-minutes').value = '24';
   document.getElementById('pit-circuit').value = 'spa-f1';
   await document.getElementById('pit-circuit').trigger('change');
   assert.strictEqual(document.getElementById('pit-distance-meters').value, '650');
@@ -509,6 +525,21 @@ module.exports = (async () => {
   assert.ok(document.getElementById('pit-distance-note').textContent.includes('39.0s'));
   document.getElementById('pit-distance-meters').value = '700';
   document.getElementById('pit-fcy-speed').value = '70';
+  document.getElementById('pit-safety-laps').value = '1.5';
+  document.getElementById('pit-safety-seconds').value = '45';
+  document.getElementById('pit-decision-seconds').value = '20';
+  document.getElementById('pit-uncertainty-seconds').value = '15';
+  document.getElementById('pit-rule-reference').value = 'pit-exit';
+  document.getElementById('pit-fcy-consider-seconds').value = '8';
+  document.getElementById('pit-fcy-strong-seconds').value = '18';
+  document.getElementById('pit-tyre-enabled').checked = true;
+  document.getElementById('pit-current-tyre').value = 'dry';
+  document.getElementById('pit-candidate-tyre').value = 'wet';
+  document.getElementById('pit-tyre-gain-min').value = '2.5';
+  document.getElementById('pit-tyre-gain-max').value = '4.0';
+  document.getElementById('pit-tyre-expected-laps').value = '12';
+  document.getElementById('pit-tyre-extra-seconds').value = '10';
+  document.getElementById('pit-tyre-combined').checked = true;
   await document.getElementById('pit-fcy-speed').trigger('input');
   assert.ok(document.getElementById('pit-distance-note').textContent.includes('36.0s'));
   await document.getElementById('pit-setup-save').trigger('click');
@@ -516,17 +547,44 @@ module.exports = (async () => {
   assert.strictEqual(lastSettingsPatch.pitCircuitId, 'spa-f1');
   assert.strictEqual(lastSettingsPatch.pitRules.raceDurationMs, 6 * 60 * 60 * 1000);
   assert.strictEqual(lastSettingsPatch.pitRules.requiredPitStops, 3);
+  assert.strictEqual(lastSettingsPatch.pitRules.pitClosedStartMs, 20 * 60 * 1000);
+  assert.strictEqual(lastSettingsPatch.pitRules.pitClosedEndMs, 30 * 60 * 1000);
+  assert.strictEqual(lastSettingsPatch.pitRules.pitCooldownMs, 24 * 60 * 1000);
   assert.strictEqual(lastSettingsPatch.pitRules.regularTrackDistanceMeters, 700);
   assert.strictEqual(lastSettingsPatch.pitRules.fcySpeedKph, 70);
+  assert.strictEqual(lastSettingsPatch.pitRules.safetyBufferLaps, 1.5);
+  assert.strictEqual(lastSettingsPatch.pitRules.fixedSafetyBufferMs, 45000);
+  assert.strictEqual(lastSettingsPatch.pitRules.decisionLeadMs, 20000);
+  assert.strictEqual(lastSettingsPatch.pitRules.timingUncertaintyMs, 15000);
+  assert.strictEqual(lastSettingsPatch.pitRules.ruleTimingReference, 'pit-exit');
+  assert.strictEqual(lastSettingsPatch.pitRules.fcyConsiderSavingsMs, 8000);
+  assert.strictEqual(lastSettingsPatch.pitRules.fcyStrongSavingsMs, 18000);
+  assert.deepStrictEqual({ ...lastSettingsPatch.tyreStrategy }, {
+    enabled: true,
+    currentTyre: 'dry',
+    candidateTyre: 'wet',
+    gainMinMsPerLap: 2500,
+    gainMaxMsPerLap: 4000,
+    expectedLaps: 12,
+    additionalPitTimeMs: 10000,
+    combinedWithPlannedStop: true
+  });
   assert.strictEqual(document.getElementById('pit-setup-modal').classList.contains('hidden'), true);
 
   collectorUpdate({ ...updatedState, mode: 'live', status: 'collecting' });
   await flushAsync();
-  assert.strictEqual(document.getElementById('open-pit-setup').disabled, true, 'fixed pit setup locks during live collection');
+  assert.strictEqual(document.getElementById('open-pit-setup').disabled, false, 'pit strategy remains adjustable during live collection');
   await document.getElementById('open-pit-setup').trigger('click');
+  assert.strictEqual(document.getElementById('pit-setup-modal').classList.contains('hidden'), false);
+  document.getElementById('pit-safety-laps').value = '3';
+  await document.getElementById('pit-setup-save').trigger('click');
+  await flushAsync();
+  assert.strictEqual(lastSettingsPatch.pitRules.safetyBufferLaps, 3, 'live pit strategy changes are persisted immediately');
   assert.strictEqual(document.getElementById('pit-setup-modal').classList.contains('hidden'), true);
   collectorUpdate(updatedState);
   await flushAsync();
+  assert.strictEqual(document.getElementById('pit-last').textContent, '1:18');
+  assert.strictEqual(document.getElementById('pit-last-delta').textContent, '+0:03');
 
   await document.getElementById('setup-add-car').trigger('click');
   const extraCars = document.getElementById('setup-extra-cars');
@@ -571,11 +629,17 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('battle-ahead-trend').textContent, 'Our best 2:03.500');
   assert.strictEqual(document.getElementById('battle-ahead-prediction').textContent, 'Qualifying comparison');
 
-  document.getElementById('comparison-xic-car').value = '9';
-  await document.getElementById('comparison-xic-car').trigger('change');
+  assert.strictEqual(document.getElementById('comparison-xic-car'), null, 'inline XIC selector is removed because class tabs show every car');
+  assert.strictEqual(document.getElementById('comparison-tab-title').textContent, 'Best / Last / Last 10');
+  await document.getElementById('comparison-next-tab').trigger('click');
   await flushAsync();
-  assert.strictEqual(lastSettingsPatch.comparisonCar, '9', 'inline XIC selector persists the shared comparison-car setting');
-  assert.strictEqual(document.getElementById('comparison-car').value, '9', 'inline and setup XIC inputs stay synchronized');
+  assert.strictEqual(document.getElementById('comparison-tab-title').textContent, 'Averages');
+  await document.getElementById('comparison-next-tab').trigger('click');
+  await flushAsync();
+  assert.strictEqual(document.getElementById('comparison-tab-title').textContent, 'Sectors');
+  await document.getElementById('comparison-prev-tab').trigger('click');
+  await flushAsync();
+  assert.strictEqual(document.getElementById('comparison-tab-title').textContent, 'Averages');
 
   document.getElementById('mode-race').checked = false;
   document.getElementById('mode-qualifying').checked = true;

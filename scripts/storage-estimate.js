@@ -23,13 +23,13 @@ const CONFIG = {
 
   // Approximate bytes per completed lap in each append-only format. These are
   // intentionally conservative and easy to tune after checking real files.
-  csvBytesPerLap: 360,
-  jsonlBytesPerLap: 1100,
+  csvBytesPerLap: 480,
+  jsonlBytesPerLap: 1350,
   latestJsonBytesPerCar: 1200,
   parserDebugBytesPerCar: 450,
   sessionMetadataBytes: 600,
   analyticsSummaryBaseBytes: 2500,
-  analyticsSummaryBytesPerCar: 850,
+  analyticsSummaryBytesPerCar: 1400,
   analyticsSummaryBytesPerDriver: 700,
   lapPredictionBytes: 3500,
   pitPlanBytes: 5000,
@@ -38,6 +38,9 @@ const CONFIG = {
   gapViewBytesPerFollowedCar: 1200,
   gapSampleBytes: 300,
   gapSamplesPerFollowedLap: 2,
+  estimatedConditionChanges: 12,
+  conditionEventBytes: 500,
+  trackConditionStateBytes: 1000,
   averageDriversPerCar: 4,
   estimatedStintsPerFollowedCar: 4,
   stintStateBaseBytes: 1500,
@@ -94,6 +97,7 @@ function latestSnapshotBytes(carCount, config = CONFIG) {
   const stintCount = followedCars * (config.estimatedStintsPerFollowedCar || 0);
   const stintStateBytes = (config.stintStateBaseBytes || 0)
     + stintCount * (config.stintStateBytesPerStint || 0);
+  const trackConditionStateBytes = config.trackConditionStateBytes || 0;
   return {
     latestCsvBytes,
     latestJsonBytes,
@@ -104,7 +108,16 @@ function latestSnapshotBytes(carCount, config = CONFIG) {
     pitPlanBytes,
     gapStateBytes,
     stintStateBytes,
-    totalBytes: latestCsvBytes + latestJsonBytes + parserDebugBytes + sessionMetadataBytes + analyticsSummaryBytes + lapPredictionBytes + pitPlanBytes + gapStateBytes + stintStateBytes
+    trackConditionStateBytes,
+    totalBytes: latestCsvBytes + latestJsonBytes + parserDebugBytes + sessionMetadataBytes + analyticsSummaryBytes + lapPredictionBytes + pitPlanBytes + gapStateBytes + stintStateBytes + trackConditionStateBytes
+  };
+}
+
+function conditionHistorySizeBytes(config = CONFIG) {
+  const eventCount = Math.max(0, Number(config.estimatedConditionChanges) || 0);
+  return {
+    eventCount,
+    totalBytes: config.overheadBytesPerFile + eventCount * (config.conditionEventBytes || 0)
   };
 }
 
@@ -188,7 +201,7 @@ function printScenario(label, result) {
 // Prints one overwritten/latest-files scenario line.
 function printLatestScenario(label, carCount, config) {
   const result = latestSnapshotBytes(carCount, config);
-  console.log(`${label.padEnd(24)} cars=${String(carCount).padStart(2)} latestCSV=${formatBytes(result.latestCsvBytes).padStart(9)} latestJSON=${formatBytes(result.latestJsonBytes).padStart(9)} debug=${formatBytes(result.parserDebugBytes).padStart(9)} analytics=${formatBytes(result.analyticsSummaryBytes).padStart(9)} predictions=${formatBytes(result.lapPredictionBytes).padStart(9)} pitPlans=${formatBytes(result.pitPlanBytes).padStart(9)} gapState=${formatBytes(result.gapStateBytes).padStart(9)} stintState=${formatBytes(result.stintStateBytes).padStart(9)} total=${formatBytes(result.totalBytes).padStart(9)}`);
+  console.log(`${label.padEnd(24)} cars=${String(carCount).padStart(2)} latestCSV=${formatBytes(result.latestCsvBytes).padStart(9)} latestJSON=${formatBytes(result.latestJsonBytes).padStart(9)} debug=${formatBytes(result.parserDebugBytes).padStart(9)} analytics=${formatBytes(result.analyticsSummaryBytes).padStart(9)} predictions=${formatBytes(result.lapPredictionBytes).padStart(9)} pitPlans=${formatBytes(result.pitPlanBytes).padStart(9)} gapState=${formatBytes(result.gapStateBytes).padStart(9)} stintState=${formatBytes(result.stintStateBytes).padStart(9)} conditionState=${formatBytes(result.trackConditionStateBytes).padStart(9)} total=${formatBytes(result.totalBytes).padStart(9)}`);
 }
 
 // Prints analytics-summary details so driver-count assumptions are visible.
@@ -205,8 +218,9 @@ function main(config = CONFIG) {
   const history = bytesForScenario(config.storedCars, lapsEach, config);
   const overwritten = latestSnapshotBytes(config.storedCars, config);
   const gapHistory = gapHistorySizeBytes(lapsEach, config);
+  const conditionHistory = conditionHistorySizeBytes(config);
   const stintReports = stintReportSizeBytes(config);
-  const totalStoredBytes = history.totalBytes + overwritten.totalBytes + gapHistory.totalBytes + stintReports.totalBytes;
+  const totalStoredBytes = history.totalBytes + overwritten.totalBytes + gapHistory.totalBytes + conditionHistory.totalBytes + stintReports.totalBytes;
 
   console.log('Storage estimate');
   console.log('----------------');
@@ -227,6 +241,7 @@ function main(config = CONFIG) {
   console.log('-----------------------');
   printScenario('All stored cars', history);
   console.log(`Confirmed gap history    samples=${String(gapHistory.sampleCount).padStart(6)} JSONL=${formatBytes(gapHistory.totalBytes).padStart(9)}`);
+  console.log(`Track-condition history  changes=${String(conditionHistory.eventCount).padStart(6)} JSONL=${formatBytes(conditionHistory.totalBytes).padStart(9)}`);
   console.log(`Closed stint reports     reports=${String(stintReports.reportCount).padStart(6)} JSON=${formatBytes(stintReports.jsonBytes).padStart(9)} PDF=${formatBytes(stintReports.pdfBytes).padStart(9)}`);
   console.log(`Race/driver summaries    reports=${String(stintReports.summaryCount).padStart(6)} JSON=${formatBytes(stintReports.summaryJsonBytes).padStart(9)} PDF=${formatBytes(stintReports.summaryPdfBytes).padStart(9)} combined=${formatBytes(stintReports.totalBytes).padStart(9)}`);
   console.log('');
@@ -256,6 +271,7 @@ module.exports = {
   analyticsSummarySizeBytes,
   analyticsSummaryBreakdown,
   gapHistorySizeBytes,
+  conditionHistorySizeBytes,
   stintReportSizeBytes,
   formatBytes,
   main

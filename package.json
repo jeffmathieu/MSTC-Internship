@@ -20,6 +20,9 @@
   ],
   "author": "Jeff Mathieu",
   "license": "MIT",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "devDependencies": {
     "electron": "^41.7.0",
     "electron-builder": "^26.8.1"
@@ -37,6 +40,8 @@
     },
     "files": [
       "src/**/*",
+      "!**/__pycache__/**",
+      "!**/*.pyc",
       "package.json"
     ],
     "publish": {

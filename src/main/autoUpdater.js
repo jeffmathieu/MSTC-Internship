@@ -2,7 +2,14 @@
 //
 // Keeping this separate from main.js makes the production-only guard and user
 // prompt testable without disturbing window creation, polling, or IPC code.
-function setupAutoUpdates({ app, dialog, autoUpdater, getParentWindow = () => null, logger = console }) {
+function setupAutoUpdates({
+  app,
+  dialog,
+  autoUpdater,
+  getParentWindow = () => null,
+  logger = console,
+  onBeforeQuitAndInstall = () => {}
+}) {
   if (!app?.isPackaged) {
     logger.info('[auto-update] Disabled during local development.');
     return false;
@@ -65,7 +72,10 @@ function setupAutoUpdates({ app, dialog, autoUpdater, getParentWindow = () => nu
       const result = parent
         ? await dialog.showMessageBox(parent, options)
         : await dialog.showMessageBox(options);
-      if (result.response === 0) autoUpdater.quitAndInstall();
+      if (result.response === 0) {
+        onBeforeQuitAndInstall();
+        setImmediate(() => autoUpdater.quitAndInstall(false, true));
+      }
     } catch (error) {
       logger.error('[auto-update] Update install prompt failed:', error);
     }

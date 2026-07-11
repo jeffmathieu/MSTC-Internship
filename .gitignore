@@ -6,3 +6,5 @@ out/
 report/
 tmp/
 output/
+__pycache__/
+*.pyc

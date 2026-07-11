@@ -3,10 +3,13 @@
 function setupAppLifecycle({ app, onBeforeQuit }) {
   let isQuitting = false;
 
-  app.on('before-quit', () => {
+  function beginQuit() {
+    if (isQuitting) return;
     isQuitting = true;
     onBeforeQuit();
-  });
+  }
+
+  app.on('before-quit', beginQuit);
 
   // Closing the main dashboard means the user is finished with the app. This
   // intentionally differs from the usual macOS behavior of staying in the Dock.
@@ -23,6 +26,7 @@ function setupAppLifecycle({ app, onBeforeQuit }) {
 
   return {
     attachMainWindow,
+    beginQuit,
     isQuitting: () => isQuitting
   };
 }

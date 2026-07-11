@@ -216,19 +216,22 @@ assert.ok(missingDistancePlan.projection.reason.includes('assen'));
 // the app cannot know when that stop happened before it started.
 const baselinePitState = nextPitStateFromRow({
   previous: {},
-  row: { pit: 'P1' },
+  row: { pit: 'P1', lastPit: '1:18' },
   session: { timeToGo: '1:20:00' },
   rules,
   collectedAt: '2026-06-26T08:00:00.000Z'
 });
 assert.strictEqual(baselinePitState.completedPitStops, 1);
 assert.strictEqual(baselinePitState.validCompletedPitStops, 1);
+assert.strictEqual(baselinePitState.lastPitDurationMs, 78000);
+assert.strictEqual(baselinePitState.lastPitRawDuration, '1:18');
+assert.strictEqual(baselinePitState.lastPitTargetDurationMs, 75000);
 
 // A later PIT-counter increase inside the green window counts toward required
 // pitstops.
 const validPitIncrease = nextPitStateFromRow({
   previous: baselinePitState,
-  row: { pit: 'P2' },
+  row: { pit: 'P2', lastPit: '1:16' },
   session: { timeToGo: '1:20:00' },
   rules,
   collectedAt: '2026-06-26T08:05:00.000Z'
@@ -236,6 +239,8 @@ const validPitIncrease = nextPitStateFromRow({
 assert.strictEqual(validPitIncrease.completedPitStops, 2);
 assert.strictEqual(validPitIncrease.validCompletedPitStops, 2);
 assert.strictEqual(validPitIncrease.lastPitCountedAsValid, true);
+assert.strictEqual(validPitIncrease.lastPitDurationMs, 76000);
+assert.strictEqual(validPitIncrease.lastPitTargetDurationMs, 75000);
 assert.deepStrictEqual(validPitIncrease.validPitElapsedHistoryMs, [40 * 60 * 1000]);
 
 const secondValidPitIncrease = nextPitStateFromRow({

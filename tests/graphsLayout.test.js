@@ -13,5 +13,7 @@ assert.match(css, /grid-template-rows:\s*repeat\(2, minmax\(0, 1fr\)\)/);
 assert.match(css, /\.graphs-page\s*\{[\s\S]*height:\s*100vh;/);
 assert.ok(js.includes('Race Analysis Graphs - Car #'), 'window title identifies the followed car');
 assert.strictEqual(js.includes("getElementById('graphs-session')"), false, 'renderer no longer expects the removed graph header');
+assert.ok(js.includes('point.label'), 'class-pace hover tooltip includes the stored race-lap label');
+assert.strictEqual(js.includes('Δ to our car'), false, 'class-pace tooltip keeps the delta label compact');
 
 console.log('Graph single-screen layout tests passed.');

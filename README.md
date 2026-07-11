@@ -125,13 +125,43 @@ Examples:
 - current lap prediction
 - car-specific analysis summaries
 
+### Dry, wet, and transition conditions
+
+The sun/umbrella control in the top bar records the **current track
+condition**. This is a manual engineering input because the timing providers do
+not reliably expose rain intensity, surface water, tyre type, or grip. Changing
+it starts a new condition phase and writes an append-only event to
+`track_condition_events.jsonl`.
+
+Each completed lap stores a condition for the whole lap and for S1, S2, and S3.
+If the condition changes halfway through a sector, that sector is marked
+`transition`. A dry S1 followed by a wet S3 can therefore still contribute S1
+to dry sector statistics and S3 to wet sector statistics, while the mixed lap
+does not contaminate either full-lap average.
+
+The second compact condition control selects the **analysis filter**:
+
+- current condition
+- dry only
+- wet only
+- transition only
+- combined
+
+This filter controls dashboard comparisons and graphs. Live lap prediction is
+always based on the current track condition, independent of the display filter.
+It uses up to the latest ten same-condition sectors from the current driver and
+falls back to same-car, same-condition sectors only when that driver has no
+sample yet. Existing race folders created before this feature remain
+`unknown`; they are available in Combined mode and are never silently relabeled
+as dry.
+
 ### Neutralized-lap handling
 
-The **Pitstop setup** button contains fixed pre-race information: total race
-duration, mandatory pitstop count, and the circuit/pit formation. These values
-are locked while live collection is active. The pit-in to pit-out duration stays
-on the dashboard because service type and driver changes can alter it during a
-race.
+The **Pitstop setup** button contains race duration, mandatory pitstop count,
+circuit/pit formation, rule timing point, and safety-margin settings. The setup
+remains editable while live collection is active; saved changes are included in
+the next live poll. The pit-in to pit-out duration stays on the dashboard because
+service type and driver changes can alter it during a race.
 
 FCY pit loss uses the selected layout's regular-track distance between pit-in
 and pit-out. Circuit distances and FCY speeds are maintained centrally in
@@ -141,6 +171,37 @@ rules without modifying the central profile. If a future layout has no distance 
 shows that configuration is missing instead of calculating a false rejoin
 position. After FCY starts, predictions remain marked as provisional until a
 fresh timing passage and stable gaps have been observed.
+
+The planner distinguishes the hard legal deadline from the operationally safe
+deadline. For the next required stop:
+
+```text
+latest possible = race end - final closed period
+                  - cooldowns needed between remaining stops
+                  - pit duration when rules are measured at pit exit
+
+latest safe = latest possible - safety buffer
+
+safety buffer = configured laps * current representative lap time
+                + fixed margin + decision lead + timing uncertainty
+```
+
+The generated schedule contains earliest legal, latest possible, and latest
+safe pit-entry times for every remaining mandatory stop. It also exposes a
+stable recommendation contract (`PIT NOW`, `CONSIDER PIT`, `PLAN PIT`,
+`PREPARE PIT`, `MUST PIT SOON`, `PIT WHEN OPEN`, or `STAY OUT`). Fuel, tyre,
+and driver limits
+can later move the operational deadline earlier through the existing
+`strategyInputs` extension without changing the legal scheduling functions.
+
+The pitstop setup also contains an optional tyre-change scenario. Enter the
+current/candidate tyre, an expected minimum and maximum gain per lap, the
+expected number of laps in those conditions, and any additional service time.
+The planner reports the break-even lap range and pessimistic/optimistic net
+gain. When combined with a mandatory stop, only extra tyre-service time is paid
+back; for a standalone tyre stop, the complete estimated pit loss is included.
+This output is advisory and never overrides pit-window legality because the app
+cannot infer weather severity or real tyre performance from live timing alone.
 
 ## Light and dark themes
 
@@ -182,6 +243,12 @@ For race sessions, the app can generate pitstop-related analysis for followed ca
 
 The generated pitstop plan is stored separately per car, so each followed-car dashboard can update independently while still using the same shared lap-history source.
 
+During FCY, the planner subtracts the regular-track travel time from the entered
+pit-in to pit-out duration. It compares this net loss with the green estimate and
+uses configurable thresholds for `CONSIDER PIT` and `PIT NOW`. An FCY recommendation
+never overrides a closed pit window. Until fresh timing movement and stable gaps
+have been observed, the recommendation stays explicitly provisional.
+
 ### Data export
 
 The app writes readable data files to the selected storage folder. This makes it possible to inspect or reuse the data outside the app.
@@ -200,6 +267,8 @@ Generated files can include:
 - `stint_state.json`
 - `lap_prediction_car-<number>.json`
 - `pitstop_plan_car-<number>.json`
+- `track_condition_events.jsonl`
+- `track_condition_state.json`
 - `stints/car-<number>/STINT_<driver-stint-number>_<driver>/STINT_<driver-stint-number>_<driver>.json`
 - `stints/car-<number>/STINT_<driver-stint-number>_<driver>/STINT_<driver-stint-number>_<driver>.pdf`
 
@@ -228,6 +297,11 @@ timing provider explicitly reports that the session has finished, the final
 open stint is closed and the app also creates rolling race and per-driver JSON/
 PDF summaries. Pressing Stop or closing the app does not finalize a stint, so an
 interrupted session can safely continue from the same folder.
+
+Stint PDF reports remain one combined race document, but their payload and
+summary distinguish dry and wet pace. Wet and transition chart samples receive
+separate visual rings. Combined values are explicitly labeled as such so dry
+and wet theoretical or average pace is not mistaken for one homogeneous run.
 
 The dashboard lap strip shows all completed laps for the active car, newest
 first. Pit in-laps and out-laps are red, only an in-lap carries the `P` marker,
@@ -387,7 +461,7 @@ analytics_summary.json, lap predictions, and pitstop plans are derived files tha
 
 Development
 Requirements
-Node.js
+Node.js 20.19 or newer (Node.js 24 is recommended and matches GitHub Actions)
 npm
 Install dependencies
 npm install

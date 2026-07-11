@@ -41,9 +41,9 @@
 
     <div id="pit-setup-modal" class="setup-modal hidden">
       <div class="setup-card pit-setup-card">
-        <p class="eyebrow">Fixed race information</p>
+        <p class="eyebrow">Pitstop strategy</p>
         <h1>Pitstop setup</h1>
-        <p class="subtitle">Configure these values before starting collection. Pit time remains adjustable on the dashboard.</p>
+        <p class="subtitle">These strategy values can also be adjusted while live collection is running. Pit time remains available on the dashboard.</p>
         <div class="pit-setup-grid">
           <label>
             Total race time (hours)
@@ -52,6 +52,18 @@
           <label>
             Mandatory pitstops
             <input id="pit-required-input" type="number" min="0" step="1" value="2" />
+          </label>
+          <label>
+            Closed after race start (minutes)
+            <input id="pit-closed-start-minutes" type="number" min="0" step="1" value="25" />
+          </label>
+          <label>
+            Closed before race finish (minutes)
+            <input id="pit-closed-end-minutes" type="number" min="0" step="1" value="25" />
+          </label>
+          <label>
+            Minimum between stops (minutes)
+            <input id="pit-cooldown-minutes" type="number" min="0" step="1" value="25" />
           </label>
           <label class="pit-circuit-field">
             Circuit and pit formation
@@ -64,6 +76,77 @@
           <label>
             FCY speed (km/h)
             <input id="pit-fcy-speed" type="number" min="1" step="1" />
+          </label>
+          <label>
+            Safety buffer (laps)
+            <input id="pit-safety-laps" type="number" min="0" step="0.5" value="2" />
+          </label>
+          <label>
+            Extra safety buffer (seconds)
+            <input id="pit-safety-seconds" type="number" min="0" step="5" value="30" />
+          </label>
+          <label>
+            Decision lead time (seconds)
+            <input id="pit-decision-seconds" type="number" min="0" step="5" value="15" />
+          </label>
+          <label>
+            Timing uncertainty (seconds)
+            <input id="pit-uncertainty-seconds" type="number" min="0" step="5" value="10" />
+          </label>
+          <label>
+            Rule timing point
+            <select id="pit-rule-reference">
+              <option value="pit-entry">Pit entry</option>
+              <option value="pit-exit">Pit exit</option>
+            </select>
+          </label>
+          <label>
+            FCY consider saving (seconds)
+            <input id="pit-fcy-consider-seconds" type="number" min="0" step="1" value="5" />
+          </label>
+          <label>
+            FCY pit-now saving (seconds)
+            <input id="pit-fcy-strong-seconds" type="number" min="0" step="1" value="15" />
+          </label>
+          <label class="pit-tyre-toggle">
+            <span>Evaluate tyre-change scenario</span>
+            <input id="pit-tyre-enabled" type="checkbox" />
+          </label>
+          <label>
+            Current tyres
+            <select id="pit-current-tyre">
+              <option value="unknown">Unknown</option>
+              <option value="dry">Dry</option>
+              <option value="wet">Wet</option>
+            </select>
+          </label>
+          <label>
+            Candidate tyres
+            <select id="pit-candidate-tyre">
+              <option value="unknown">Choose tyres</option>
+              <option value="dry">Dry</option>
+              <option value="wet">Wet</option>
+            </select>
+          </label>
+          <label>
+            Expected gain min (s/lap)
+            <input id="pit-tyre-gain-min" type="number" min="0" step="0.1" value="0" />
+          </label>
+          <label>
+            Expected gain max (s/lap)
+            <input id="pit-tyre-gain-max" type="number" min="0" step="0.1" value="0" />
+          </label>
+          <label>
+            Expected laps in condition
+            <input id="pit-tyre-expected-laps" type="number" min="0" step="1" value="0" />
+          </label>
+          <label>
+            Extra tyre service time (seconds)
+            <input id="pit-tyre-extra-seconds" type="number" min="0" step="1" value="0" />
+          </label>
+          <label class="pit-tyre-toggle">
+            <span>Combine with planned stop</span>
+            <input id="pit-tyre-combined" type="checkbox" checked />
           </label>
         </div>
         <p id="pit-distance-note" class="subtitle"></p>
@@ -103,6 +186,22 @@
           <strong id="status-text">—</strong>
         </div>
         <div class="controls">
+          <label class="condition-control">
+            <span>mode</span>
+            <select id="track-condition" class="condition-select" title="Current track condition: dry, wet or transition" aria-label="Current track condition">
+              <option value="dry" title="Dry">dry</option>
+              <option value="wet" title="Wet">wet</option>
+              <option value="transition" title="Transition">inter</option>
+            </select>
+          </label>
+          <label class="condition-control">
+            <span>view</span>
+            <select id="analysis-condition" class="condition-select" title="Pace view: full, dry or wet" aria-label="Pace analysis condition">
+              <option value="combined" title="Full view">full</option>
+              <option value="dry" title="Dry only">dry</option>
+              <option value="wet" title="Wet only">wet</option>
+            </select>
+          </label>
           <button id="open-graphs" class="secondary icon-button" title="Open graphs" aria-label="Open graphs">
             <svg class="graph-icon" aria-hidden="true" viewBox="0 0 24 24">
               <path d="M3 3v18h18"></path>
@@ -177,28 +276,17 @@
       </section>
 
       <section id="comparison-placeholder" class="comparison-placeholder board-box" aria-label="Comparison area">
-        <article class="comparison-column" id="comparison-team">
-          <header><strong id="comparison-team-title">D2 vs. D1</strong></header>
-          <div class="comparison-metrics" id="comparison-team-metrics"></div>
-          <div class="comparison-averages" id="comparison-team-averages"></div>
-          <div class="comparison-sectors" id="comparison-team-sectors"></div>
-        </article>
-        <article class="comparison-column" id="comparison-bic">
-          <header><strong id="comparison-bic-title">Our car vs. BIC</strong></header>
-          <div class="comparison-metrics" id="comparison-bic-metrics"></div>
-          <div class="comparison-averages" id="comparison-bic-averages"></div>
-          <div class="comparison-sectors" id="comparison-bic-sectors"></div>
-        </article>
-        <article class="comparison-column" id="comparison-xic">
-          <header class="xic-title">
-            <strong id="comparison-xic-title">Our car vs.</strong>
-            <span class="xic-number-prefix">#</span>
-            <input id="comparison-xic-car" inputmode="numeric" aria-label="Choose XIC car number" placeholder="—">
-          </header>
-          <div class="comparison-metrics" id="comparison-xic-metrics"></div>
-          <div class="comparison-averages" id="comparison-xic-averages"></div>
-          <div class="comparison-sectors" id="comparison-xic-sectors"></div>
-        </article>
+        <header class="comparison-board-header">
+          <strong>Comparisons</strong>
+          <span id="comparison-tab-title">Laps</span>
+        </header>
+        <div class="comparison-tab comparison-tab-active" id="comparison-tab-laps" aria-label="Lap comparison"></div>
+        <div class="comparison-tab" id="comparison-tab-averages" aria-label="Average comparison"></div>
+        <div class="comparison-tab" id="comparison-tab-sectors" aria-label="Sector comparison"></div>
+        <nav class="comparison-tab-controls" aria-label="Comparison tabs">
+          <button id="comparison-prev-tab" type="button" aria-label="Previous comparison tab">←</button>
+          <button id="comparison-next-tab" type="button" aria-label="Next comparison tab">→</button>
+        </nav>
       </section>
 
       <section class="battle-strip">
@@ -227,6 +315,11 @@
           <div>
             <span>Pitstop window</span>
             <strong id="pit-status">—</strong>
+          </div>
+          <div>
+            <span>Last pit</span>
+            <strong id="pit-last">—</strong>
+            <small id="pit-last-delta">—</small>
           </div>
           <div>
             <span>Required stops</span>
@@ -299,6 +392,7 @@
       </div>
     </main>
 
+    <script src="../shared/trackConditions.js"></script>
     <script src="../shared/lapAnalytics.js"></script>
     <script src="../shared/classBattle.js"></script>
     <script src="../shared/pitstopCircuits.js"></script>
