@@ -36,7 +36,8 @@
     ],
     "electronUpdaterCompatibility": ">=2.16",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "docs/mstc_app_icons/electron-builder/build"
     },
     "files": [
       "src/**/*",
@@ -52,18 +53,22 @@
     },
     "win": {
       "target": "nsis",
+      "icon": "docs/mstc_app_icons/electron-builder/build/icon.ico",
       "artifactName": "MSTC-Race-Engineer-Dashboard-Setup-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "docs/mstc_app_icons/electron-builder/build/icon.ico",
+      "uninstallerIcon": "docs/mstc_app_icons/electron-builder/build/icon.ico"
     },
     "mac": {
       "target": [
         "dmg",
         "zip"
       ],
+      "icon": "docs/mstc_app_icons/electron-builder/build/icon.icns",
       "category": "public.app-category.sports",
       "artifactName": "MSTC-Race-Engineer-Dashboard-${version}-${arch}.${ext}"
     }
