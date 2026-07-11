@@ -6,10 +6,14 @@ function fakeUpdater() {
   const updater = new EventEmitter();
   updater.checkCount = 0;
   updater.installCount = 0;
+  updater.installArgs = [];
   updater.downloadCount = 0;
   updater.checkForUpdates = async () => { updater.checkCount += 1; };
   updater.downloadUpdate = async () => { updater.downloadCount += 1; };
-  updater.quitAndInstall = () => { updater.installCount += 1; };
+  updater.quitAndInstall = (...args) => {
+    updater.installCount += 1;
+    updater.installArgs.push(args);
+  };
   return updater;
 }
 
@@ -39,12 +43,14 @@ const dialog = {
 };
 const parentWindow = { name: 'main-window' };
 const updater = fakeUpdater();
+let beforeInstallCalls = 0;
 assert.strictEqual(setupAutoUpdates({
   app: { isPackaged: true, getVersion: () => '1.0.0' },
   dialog,
   autoUpdater: updater,
   getParentWindow: () => parentWindow,
-  logger
+  logger,
+  onBeforeQuitAndInstall: () => { beforeInstallCalls += 1; }
 }), true);
 
 async function flushAsyncEvents() {
@@ -78,7 +84,10 @@ module.exports = (async () => {
 
   updater.emit('update-downloaded', { version: '1.1.1' });
   await flushAsyncEvents();
+  await flushAsyncEvents();
+  assert.strictEqual(beforeInstallCalls, 1, 'Restart now prepares app lifecycle before installing');
   assert.strictEqual(updater.installCount, 1, 'Restart now installs the downloaded update');
+  assert.deepStrictEqual(updater.installArgs[0], [false, true], 'update install should force reopening after install');
 
   const noParentUpdater = fakeUpdater();
   setupAutoUpdates({

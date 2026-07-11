@@ -1271,7 +1271,13 @@ ipcMain.handle('export:current', async () => {
 app.whenReady().then(() => {
   createMainWindow();
   syncAdditionalDashboardWindows(loadSettings());
-  setupAutoUpdates({ app, dialog, autoUpdater, getParentWindow: () => mainWindow });
+  setupAutoUpdates({
+    app,
+    dialog,
+    autoUpdater,
+    getParentWindow: () => mainWindow,
+    onBeforeQuitAndInstall: () => appLifecycle.beginQuit()
+  });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createMainWindow();

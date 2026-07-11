@@ -42,6 +42,23 @@ function createFakeApp() {
   assert.strictEqual(app.quitCalls, 0);
 }
 
+// The updater needs to mark the app as really quitting before quitAndInstall
+// closes hidden windows. Calling it twice must stay idempotent.
+{
+  const app = createFakeApp();
+  let cleanupCalls = 0;
+  const lifecycle = setupAppLifecycle({
+    app,
+    onBeforeQuit: () => { cleanupCalls += 1; }
+  });
+
+  lifecycle.beginQuit();
+  lifecycle.beginQuit();
+
+  assert.strictEqual(cleanupCalls, 1);
+  assert.strictEqual(lifecycle.isQuitting(), true);
+}
+
 // Keep a fallback for unusual paths where all windows close without the main
 // window's closed event being observed first.
 {
