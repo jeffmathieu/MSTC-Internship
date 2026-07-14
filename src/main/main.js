@@ -158,7 +158,6 @@ function normalizeSettings(settings) {
     ? requestedAnalysisFilter
     : 'combined';
   const conditionPhaseCounter = Math.max(1, Math.floor(Number(settings?.conditionPhaseCounter) || 1));
-  const tyreStrategy = settings?.tyreStrategy || {};
   const legacyReferenceTimes = { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimes || {}) };
   const referenceTimesByMode = {
     race: { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimesByMode?.race || legacyReferenceTimes) },
@@ -175,16 +174,6 @@ function normalizeSettings(settings) {
     analysisConditionFilter,
     conditionPhaseCounter,
     conditionPhaseId: String(settings?.conditionPhaseId || `${trackCondition}-${conditionPhaseCounter}`),
-    tyreStrategy: {
-      enabled: tyreStrategy.enabled === true,
-      currentTyre: ['dry', 'wet', 'unknown'].includes(tyreStrategy.currentTyre) ? tyreStrategy.currentTyre : 'unknown',
-      candidateTyre: ['dry', 'wet', 'unknown'].includes(tyreStrategy.candidateTyre) ? tyreStrategy.candidateTyre : 'unknown',
-      gainMinMsPerLap: Math.max(0, Number(tyreStrategy.gainMinMsPerLap) || 0),
-      gainMaxMsPerLap: Math.max(0, Number(tyreStrategy.gainMaxMsPerLap) || 0),
-      additionalPitTimeMs: Math.max(0, Number(tyreStrategy.additionalPitTimeMs) || 0),
-      expectedLaps: Math.max(0, Math.floor(Number(tyreStrategy.expectedLaps) || 0)),
-      combinedWithPlannedStop: tyreStrategy.combinedWithPlannedStop !== false
-    },
     pitCircuitId,
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     referenceTimesByMode,
@@ -222,16 +211,6 @@ function loadSettings() {
     analysisConditionFilter: 'combined',
     conditionPhaseCounter: 1,
     conditionPhaseId: 'dry-1',
-    tyreStrategy: {
-      enabled: false,
-      currentTyre: 'unknown',
-      candidateTyre: 'unknown',
-      gainMinMsPerLap: 0,
-      gainMaxMsPerLap: 0,
-      additionalPitTimeMs: 0,
-      expectedLaps: 0,
-      combinedWithPlannedStop: true
-    },
     comparisonCar: '',
     referenceTimes: DEFAULT_REFERENCE_TIMES,
     storageFolder: defaultStorageFolder(),
@@ -593,10 +572,6 @@ function buildAndWritePitstopPlan(settings, context, rows, carNumber) {
     rules: {
       ...settings.pitRules,
       averageLapMs: averageLapForPitPlan(settings, followedCarNumber)
-    },
-    strategyInputs: {
-      currentCondition: settings.trackCondition,
-      tyreScenario: settings.tyreStrategy
     }
   });
   const payload = { ...plan, pitState };

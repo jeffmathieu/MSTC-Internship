@@ -1026,15 +1026,6 @@ pre {
   gap: 0 14px;
 }
 .pit-setup-grid .pit-circuit-field { grid-column: 1 / -1; }
-.pit-setup-grid .pit-tyre-toggle {
-  align-items: center;
-  grid-template-columns: 1fr auto;
-  min-height: 52px;
-}
-.pit-setup-grid .pit-tyre-toggle input {
-  width: 22px;
-  height: 22px;
-}
 .pit-setup-grid select {
   width: 100%;
   min-height: 39px;

@@ -20,11 +20,7 @@ const rules = normalizeRules({
   averageLapMs: 125 * 1000,
   safetyBufferLaps: 2,
   fixedSafetyBufferMs: 30 * 1000,
-  decisionLeadMs: 15 * 1000,
-  timingUncertaintyMs: 10 * 1000,
-  nearWindowLaps: 2,
-  fcyConsiderSavingsMs: 5 * 1000,
-  fcyStrongSavingsMs: 15 * 1000
+  nearWindowLaps: 2
 });
 
 const clockAt = (elapsedMs) => ({
@@ -39,9 +35,7 @@ const buffer = strategySafetyBuffer({ rules, averageLapMs: 125 * 1000 });
 assert.deepStrictEqual(buffer, {
   lapBufferMs: 250000,
   fixedSafetyBufferMs: 30000,
-  decisionLeadMs: 15000,
-  timingUncertaintyMs: 10000,
-  totalMs: 305000,
+  totalMs: 280000,
   averageLapMs: 125000,
   laps: 2
 });
@@ -50,7 +44,7 @@ assert.deepStrictEqual(buffer, {
 // 4:00 race - 0:25 final closure - 0:25 spacing for the final stop.
 const oneStopCompleted = { completedPitStops: 1, validCompletedPitStops: 1, lastPitElapsedMs: 40 * minute };
 assert.strictEqual(latestPossiblePitElapsedMsForRemainingStops({ clock: clockAt(60 * minute), rules, pitState: oneStopCompleted }), 190 * minute);
-assert.strictEqual(latestSafePitElapsedMsForRemainingStops({ clock: clockAt(60 * minute), rules, pitState: oneStopCompleted, averageLapMs: 125000 }), (190 * minute) - 305000);
+assert.strictEqual(latestSafePitElapsedMsForRemainingStops({ clock: clockAt(60 * minute), rules, pitState: oneStopCompleted, averageLapMs: 125000 }), (190 * minute) - 280000);
 
 const schedule = buildRequiredStopSchedule({ clock: clockAt(60 * minute), rules, pitState: oneStopCompleted, averageLapMs: 125000 });
 assert.strictEqual(schedule.feasible, true);
@@ -58,26 +52,7 @@ assert.strictEqual(schedule.safeFeasible, true);
 assert.strictEqual(schedule.next.earliestEntryElapsedMs, 65 * minute);
 assert.strictEqual(schedule.stops[0].latestPossibleEntryElapsedMs, 190 * minute);
 assert.strictEqual(schedule.stops[1].latestPossibleEntryElapsedMs, 215 * minute);
-assert.strictEqual(schedule.stops[0].latestSafeEntryElapsedMs, (190 * minute) - 305000);
-
-// Pit-exit regulations shift every entry deadline earlier by the full pit time.
-const pitExitRules = normalizeRules({ ...rules, ruleTimingReference: 'pit-exit' });
-const pitExitSchedule = buildRequiredStopSchedule({ clock: clockAt(20 * minute), rules: pitExitRules, pitState: {}, averageLapMs: 125000 });
-assert.strictEqual(pitExitSchedule.next.earliestEntryElapsedMs, (25 * minute) - 75000);
-assert.strictEqual(pitExitSchedule.next.latestPossibleEntryElapsedMs, (165 * minute) - 75000);
-assert.strictEqual(pitExitSchedule.ruleTimingReference, 'pit-exit');
-
-// Future strategy modules can safely bring the deadline forward without
-// changing the mandatory-stop calculation itself.
-const fuelLimited = buildRequiredStopSchedule({
-  clock: clockAt(60 * minute),
-  rules,
-  pitState: oneStopCompleted,
-  averageLapMs: 125000,
-  strategyInputs: { fuelDeadlineElapsedMs: 100 * minute, driverDeadlineElapsedMs: 120 * minute }
-});
-assert.strictEqual(fuelLimited.next.latestSafeEntryElapsedMs, 100 * minute);
-assert.strictEqual(fuelLimited.next.limitedBy, 'fuel');
+assert.strictEqual(schedule.stops[0].latestSafeEntryElapsedMs, (190 * minute) - 280000);
 
 const rows = [
   { position: 1, classPosition: 1, carNumber: 33, className: 'CC', lapNumber: 50, interval: '--', lastLapMs: 125000 },
@@ -97,10 +72,11 @@ const normalPlan = buildPitstopPlan({
 });
 assert.strictEqual(normalPlan.recommendation.action, 'PLAN PIT');
 assert.strictEqual(normalPlan.latestPossiblePitElapsedMs, 190 * minute);
-assert.strictEqual(normalPlan.latestSafePitElapsedMs, (190 * minute) - 305000);
+assert.strictEqual(normalPlan.latestSafePitElapsedMs, (190 * minute) - 280000);
 assert.strictEqual(normalPlan.canPitNow, true);
 
-// A stable FCY with a meaningful saving is a strong pit opportunity.
+// FCY pit loss is still calculated, but the dashboard no longer makes a
+// threshold-based strategy recommendation.
 const fcyPlan = buildPitstopPlan({
   rows,
   session: sessionAt(70, 'FCY'),
@@ -111,8 +87,8 @@ const fcyPlan = buildPitstopPlan({
 });
 assert.strictEqual(fcyPlan.pitLoss.pitLossMs, 39000);
 assert.strictEqual(fcyPlan.recommendation.fcySavingsMs, 36000);
-assert.strictEqual(fcyPlan.recommendation.action, 'PIT NOW');
-assert.strictEqual(fcyPlan.recommendation.level, 'advantage');
+assert.strictEqual(fcyPlan.recommendation.action, 'PLAN PIT');
+assert.strictEqual(fcyPlan.recommendation.level, 'normal');
 
 const stabilizingFcy = buildPitstopPlan({
   rows,
@@ -122,8 +98,8 @@ const stabilizingFcy = buildPitstopPlan({
   fcyGapState: { ready: false },
   rules: { ...rules, regularTrackDistanceMeters: 600, fcySpeedKph: 60 }
 });
-assert.strictEqual(stabilizingFcy.recommendation.action, 'CONSIDER PIT');
-assert.strictEqual(stabilizingFcy.recommendation.level, 'provisional');
+assert.strictEqual(stabilizingFcy.recommendation.action, 'PLAN PIT');
+assert.strictEqual(stabilizingFcy.recommendation.level, 'normal');
 
 const moderateFcy = buildPitstopPlan({
   rows,
@@ -133,8 +109,8 @@ const moderateFcy = buildPitstopPlan({
   fcyGapState: { ready: true },
   rules: { ...rules, regularTrackDistanceMeters: 167, fcySpeedKph: 60 }
 });
-assert.strictEqual(moderateFcy.recommendation.action, 'CONSIDER PIT');
-assert.strictEqual(moderateFcy.recommendation.level, 'opportunity');
+assert.strictEqual(moderateFcy.recommendation.action, 'PLAN PIT');
+assert.strictEqual(moderateFcy.recommendation.level, 'normal');
 
 const weakFcy = buildPitstopPlan({
   rows,
@@ -144,7 +120,7 @@ const weakFcy = buildPitstopPlan({
   fcyGapState: { ready: true },
   rules: { ...rules, regularTrackDistanceMeters: 50, fcySpeedKph: 60 }
 });
-assert.strictEqual(weakFcy.recommendation.action, 'STAY OUT');
+assert.strictEqual(weakFcy.recommendation.action, 'PLAN PIT');
 
 // Closed windows are never overridden by strategy urgency or an FCY.
 const closedFcy = buildPitstopPlan({
@@ -212,11 +188,5 @@ const completePlan = buildPitstopPlan({
 });
 assert.strictEqual(completePlan.recommendation.action, 'STAY OUT');
 assert.strictEqual(completePlan.recommendation.level, 'complete');
-
-// Thresholds are sanitized so "pit now" can never be easier to trigger than
-// the lower "consider pit" threshold.
-const sanitized = normalizeRules({ fcyConsiderSavingsMs: 20000, fcyStrongSavingsMs: 5000 });
-assert.strictEqual(sanitized.fcyConsiderSavingsMs, 20000);
-assert.strictEqual(sanitized.fcyStrongSavingsMs, 20000);
 
 console.log('Pitstop strategy tests passed.');

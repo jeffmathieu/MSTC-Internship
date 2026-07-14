@@ -259,11 +259,6 @@ function pitRulesFromInputs() {
     nearWindowLaps: 2,
     safetyBufferLaps: Number.isFinite(configuredSafetyLaps) && configuredSafetyLaps >= 0 ? configuredSafetyLaps : 2,
     fixedSafetyBufferMs: secondsFromInput('pit-safety-seconds', 30) * 1000,
-    decisionLeadMs: secondsFromInput('pit-decision-seconds', 15) * 1000,
-    timingUncertaintyMs: secondsFromInput('pit-uncertainty-seconds', 10) * 1000,
-    ruleTimingReference: $('pit-rule-reference')?.value === 'pit-exit' ? 'pit-exit' : 'pit-entry',
-    fcyConsiderSavingsMs: secondsFromInput('pit-fcy-consider-seconds', 5) * 1000,
-    fcyStrongSavingsMs: secondsFromInput('pit-fcy-strong-seconds', 15) * 1000,
     circuitId: selectedCircuit?.id || currentSettings?.pitCircuitId || 'zolder',
     regularTrackDistanceMeters: Number.isFinite(configuredDistance) && configuredDistance > 0
       ? configuredDistance
@@ -271,22 +266,6 @@ function pitRulesFromInputs() {
     fcySpeedKph: Number.isFinite(configuredFcySpeed) && configuredFcySpeed > 0
       ? configuredFcySpeed
       : selectedCircuit?.fcySpeedKph ?? 60
-  };
-}
-
-// Tyre performance is not present in either timing provider. These fields are
-// therefore an explicit engineer-entered scenario, kept separate from legal
-// pit rules so an uncertain tyre estimate can never force a pit recommendation.
-function tyreStrategyFromInputs() {
-  return {
-    enabled: $('pit-tyre-enabled')?.checked === true,
-    currentTyre: $('pit-current-tyre')?.value || 'unknown',
-    candidateTyre: $('pit-candidate-tyre')?.value || 'unknown',
-    gainMinMsPerLap: secondsFromInput('pit-tyre-gain-min', 0) * 1000,
-    gainMaxMsPerLap: secondsFromInput('pit-tyre-gain-max', 0) * 1000,
-    expectedLaps: Math.max(0, Math.floor(secondsFromInput('pit-tyre-expected-laps', 0))),
-    additionalPitTimeMs: secondsFromInput('pit-tyre-extra-seconds', 0) * 1000,
-    combinedWithPlannedStop: $('pit-tyre-combined')?.checked === true
   };
 }
 
@@ -335,19 +314,6 @@ function showPitSetup(show = true) {
     $('pit-fcy-speed').value = String(currentSettings?.pitRules?.fcySpeedKph ?? selectedCircuit?.fcySpeedKph ?? 60);
     $('pit-safety-laps').value = String(currentSettings?.pitRules?.safetyBufferLaps ?? 2);
     $('pit-safety-seconds').value = String((currentSettings?.pitRules?.fixedSafetyBufferMs ?? 30000) / 1000);
-    $('pit-decision-seconds').value = String((currentSettings?.pitRules?.decisionLeadMs ?? 15000) / 1000);
-    $('pit-uncertainty-seconds').value = String((currentSettings?.pitRules?.timingUncertaintyMs ?? 10000) / 1000);
-    $('pit-rule-reference').value = currentSettings?.pitRules?.ruleTimingReference === 'pit-exit' ? 'pit-exit' : 'pit-entry';
-    $('pit-fcy-consider-seconds').value = String((currentSettings?.pitRules?.fcyConsiderSavingsMs ?? 5000) / 1000);
-    $('pit-fcy-strong-seconds').value = String((currentSettings?.pitRules?.fcyStrongSavingsMs ?? 15000) / 1000);
-    $('pit-tyre-enabled').checked = currentSettings?.tyreStrategy?.enabled === true;
-    $('pit-current-tyre').value = currentSettings?.tyreStrategy?.currentTyre || 'unknown';
-    $('pit-candidate-tyre').value = currentSettings?.tyreStrategy?.candidateTyre || 'unknown';
-    $('pit-tyre-gain-min').value = String((currentSettings?.tyreStrategy?.gainMinMsPerLap || 0) / 1000);
-    $('pit-tyre-gain-max').value = String((currentSettings?.tyreStrategy?.gainMaxMsPerLap || 0) / 1000);
-    $('pit-tyre-expected-laps').value = String(currentSettings?.tyreStrategy?.expectedLaps || 0);
-    $('pit-tyre-extra-seconds').value = String((currentSettings?.tyreStrategy?.additionalPitTimeMs || 0) / 1000);
-    $('pit-tyre-combined').checked = currentSettings?.tyreStrategy?.combinedWithPlannedStop !== false;
     updatePitDistanceNote();
   }
   $('pit-setup-modal')?.classList.toggle('hidden', !show);
@@ -1033,20 +999,14 @@ function renderPitstopPlan(plan) {
     Number.isFinite(plan.pitLoss?.pitLossMs)
       ? `${plan.pitLoss?.active ? 'FCY net pit loss' : 'pit loss'} ${pitstopPlanner.formatDuration(plan.pitLoss.pitLossMs)}`
       : plan.pitLoss?.reason || '',
-    plan.tyreScenario?.available
-      ? `tyres ${plan.tyreScenario.status}: break-even ${plan.tyreScenario.breakEvenBestCaseLaps.toFixed(1)}${Number.isFinite(plan.tyreScenario.breakEvenWorstCaseLaps) ? `-${plan.tyreScenario.breakEvenWorstCaseLaps.toFixed(1)}` : '+'} laps, net ${formatSignedDelta(plan.tyreScenario.netGainMinMs)} to ${formatSignedDelta(plan.tyreScenario.netGainMaxMs)}`
-      : plan.tyreScenario?.enabled ? `tyres: ${plan.tyreScenario.reason}` : '',
     plan.recommendation?.reason || ''
   ].filter(Boolean);
   setText('pit-detail', detailParts.join(' · '));
   if ($('pit-detail')) {
     const buffer = plan.schedule?.buffer || {};
     $('pit-detail').title = [
-      `Rule timing point: ${plan.schedule?.ruleTimingReference || plan.rules?.ruleTimingReference || 'pit-entry'}`,
       `Lap buffer: ${pitstopPlanner.formatDuration(buffer.lapBufferMs)}`,
-      `Fixed buffer: ${pitstopPlanner.formatDuration(buffer.fixedSafetyBufferMs)}`,
-      `Decision lead: ${pitstopPlanner.formatDuration(buffer.decisionLeadMs)}`,
-      `Timing uncertainty: ${pitstopPlanner.formatDuration(buffer.timingUncertaintyMs)}`
+      `Fixed buffer: ${pitstopPlanner.formatDuration(buffer.fixedSafetyBufferMs)}`
     ].join('\n');
   }
 
@@ -1222,7 +1182,6 @@ async function saveSettingsFromInputs(setupComplete = false) {
     referenceTimes: activeReferenceTimes,
     referenceTimesByMode,
     pitCircuitId: $('pit-circuit')?.value || currentSettings?.pitCircuitId || 'zolder',
-    tyreStrategy: tyreStrategyFromInputs(),
     storageFolder: $('storage-folder').value.trim(),
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     pitRules: pitRulesFromInputs()
@@ -1388,19 +1347,6 @@ async function init() {
   if ($('pit-fcy-speed')) $('pit-fcy-speed').value = String(currentSettings.pitRules?.fcySpeedKph ?? initialPitCircuit?.fcySpeedKph ?? 60);
   if ($('pit-safety-laps')) $('pit-safety-laps').value = String(currentSettings.pitRules?.safetyBufferLaps ?? 2);
   if ($('pit-safety-seconds')) $('pit-safety-seconds').value = String((currentSettings.pitRules?.fixedSafetyBufferMs ?? 30000) / 1000);
-  if ($('pit-decision-seconds')) $('pit-decision-seconds').value = String((currentSettings.pitRules?.decisionLeadMs ?? 15000) / 1000);
-  if ($('pit-uncertainty-seconds')) $('pit-uncertainty-seconds').value = String((currentSettings.pitRules?.timingUncertaintyMs ?? 10000) / 1000);
-  if ($('pit-rule-reference')) $('pit-rule-reference').value = currentSettings.pitRules?.ruleTimingReference === 'pit-exit' ? 'pit-exit' : 'pit-entry';
-  if ($('pit-fcy-consider-seconds')) $('pit-fcy-consider-seconds').value = String((currentSettings.pitRules?.fcyConsiderSavingsMs ?? 5000) / 1000);
-  if ($('pit-fcy-strong-seconds')) $('pit-fcy-strong-seconds').value = String((currentSettings.pitRules?.fcyStrongSavingsMs ?? 15000) / 1000);
-  if ($('pit-tyre-enabled')) $('pit-tyre-enabled').checked = currentSettings.tyreStrategy?.enabled === true;
-  if ($('pit-current-tyre')) $('pit-current-tyre').value = currentSettings.tyreStrategy?.currentTyre || 'unknown';
-  if ($('pit-candidate-tyre')) $('pit-candidate-tyre').value = currentSettings.tyreStrategy?.candidateTyre || 'unknown';
-  if ($('pit-tyre-gain-min')) $('pit-tyre-gain-min').value = String((currentSettings.tyreStrategy?.gainMinMsPerLap || 0) / 1000);
-  if ($('pit-tyre-gain-max')) $('pit-tyre-gain-max').value = String((currentSettings.tyreStrategy?.gainMaxMsPerLap || 0) / 1000);
-  if ($('pit-tyre-expected-laps')) $('pit-tyre-expected-laps').value = String(currentSettings.tyreStrategy?.expectedLaps || 0);
-  if ($('pit-tyre-extra-seconds')) $('pit-tyre-extra-seconds').value = String((currentSettings.tyreStrategy?.additionalPitTimeMs || 0) / 1000);
-  if ($('pit-tyre-combined')) $('pit-tyre-combined').checked = currentSettings.tyreStrategy?.combinedWithPlannedStop !== false;
   $('poll-interval').value = String(currentSettings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS);
   syncSetupFromMain();
   setupDetailTabs();

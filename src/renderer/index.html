@@ -85,69 +85,6 @@
             Extra safety buffer (seconds)
             <input id="pit-safety-seconds" type="number" min="0" step="5" value="30" />
           </label>
-          <label>
-            Decision lead time (seconds)
-            <input id="pit-decision-seconds" type="number" min="0" step="5" value="15" />
-          </label>
-          <label>
-            Timing uncertainty (seconds)
-            <input id="pit-uncertainty-seconds" type="number" min="0" step="5" value="10" />
-          </label>
-          <label>
-            Rule timing point
-            <select id="pit-rule-reference">
-              <option value="pit-entry">Pit entry</option>
-              <option value="pit-exit">Pit exit</option>
-            </select>
-          </label>
-          <label>
-            FCY consider saving (seconds)
-            <input id="pit-fcy-consider-seconds" type="number" min="0" step="1" value="5" />
-          </label>
-          <label>
-            FCY pit-now saving (seconds)
-            <input id="pit-fcy-strong-seconds" type="number" min="0" step="1" value="15" />
-          </label>
-          <label class="pit-tyre-toggle">
-            <span>Evaluate tyre-change scenario</span>
-            <input id="pit-tyre-enabled" type="checkbox" />
-          </label>
-          <label>
-            Current tyres
-            <select id="pit-current-tyre">
-              <option value="unknown">Unknown</option>
-              <option value="dry">Dry</option>
-              <option value="wet">Wet</option>
-            </select>
-          </label>
-          <label>
-            Candidate tyres
-            <select id="pit-candidate-tyre">
-              <option value="unknown">Choose tyres</option>
-              <option value="dry">Dry</option>
-              <option value="wet">Wet</option>
-            </select>
-          </label>
-          <label>
-            Expected gain min (s/lap)
-            <input id="pit-tyre-gain-min" type="number" min="0" step="0.1" value="0" />
-          </label>
-          <label>
-            Expected gain max (s/lap)
-            <input id="pit-tyre-gain-max" type="number" min="0" step="0.1" value="0" />
-          </label>
-          <label>
-            Expected laps in condition
-            <input id="pit-tyre-expected-laps" type="number" min="0" step="1" value="0" />
-          </label>
-          <label>
-            Extra tyre service time (seconds)
-            <input id="pit-tyre-extra-seconds" type="number" min="0" step="1" value="0" />
-          </label>
-          <label class="pit-tyre-toggle">
-            <span>Combine with planned stop</span>
-            <input id="pit-tyre-combined" type="checkbox" checked />
-          </label>
         </div>
         <p id="pit-distance-note" class="subtitle"></p>
         <div class="button-row end">
