@@ -141,6 +141,19 @@ assert.strictEqual(sectorPaceEligible(explicitFalseLap, 1), false);
 assert.strictEqual(sectorPaceEligible(explicitFalseLap, 2), false);
 assert.strictEqual(sectorPaceEligible(explicitFalseLap, 3), true);
 
+const manualTrackLimitsHistory = completedLaps([
+  lap({ carNumber: 33, teamName: 'Our Team', driverName: 'Driver A', lapNumber: 1, lapTimeMs: 100000, sector1Ms: 30000, sector2Ms: 40000, sector3Ms: 30000 }),
+  lap({ carNumber: 33, teamName: 'Our Team', driverName: 'Driver A', lapNumber: 2, lapTimeMs: 90000, sector1Ms: 25000, sector2Ms: 35000, sector3Ms: 30000, manualLapStatus: 'track-limits' }),
+  lap({ carNumber: 33, teamName: 'Our Team', driverName: 'Driver A', lapNumber: 3, lapTimeMs: 102000, sector1Ms: 31000, sector2Ms: 41000, sector3Ms: 30000 })
+]);
+const manualTrackLimitsStats = statsForLaps(manualTrackLimitsHistory);
+assert.strictEqual(lapPaceEligible(manualTrackLimitsHistory[1]), false);
+assert.strictEqual(sectorPaceEligible(manualTrackLimitsHistory[1], 1), false);
+assert.strictEqual(manualTrackLimitsStats.paceLapCount, 2);
+assert.strictEqual(manualTrackLimitsStats.averageLapMs, 101000);
+assert.strictEqual(manualTrackLimitsStats.bestLapMs, 100000);
+assert.deepStrictEqual(manualTrackLimitsStats.selection.lap.excludedLaps[0].reasons, ['track-limits']);
+
 const noisyHistory = [
   { carNumber: '', lapTimeMs: '100000', lapNumber: '1' },
   { carNumber: '33', lapTimeMs: '--', lapNumber: '2' },
@@ -280,6 +293,16 @@ assert.strictEqual(driverChangePitSequence[2].lapPhase, 'outlap', 'new driver fi
 assert.strictEqual(driverChangePitSequence[3].lapPhase, '', 'the lap after the outlap returns to normal');
 assert.deepStrictEqual(baseLapExclusionReasons(driverChangePitSequence[1]), ['pit-in']);
 assert.deepStrictEqual(baseLapExclusionReasons(driverChangePitSequence[2]), ['pit-out']);
+
+const lateNumericPitCounterSequence = annotatePitPhases([
+  normalizeLap({ carNumber: 12, driverName: 'Same Driver', lapNumber: 13, lapTimeMs: 126000, pitInfo: '2', state: 'RUN' }),
+  normalizeLap({ carNumber: 12, driverName: 'Same Driver', lapNumber: 14, lapTimeMs: 129503, pitInfo: '2', state: 'RUN' }),
+  normalizeLap({ carNumber: 12, driverName: 'Same Driver', lapNumber: 15, lapTimeMs: 210502, pitInfo: '3', state: 'RUN' }),
+  normalizeLap({ carNumber: 12, driverName: 'Same Driver', lapNumber: 16, lapTimeMs: 386671, pitInfo: '3', state: 'RUN' })
+]);
+assert.strictEqual(lateNumericPitCounterSequence[1].lapPhase, 'inlap', 'late numeric PIT counter increase moves the P marker to the previous lap');
+assert.strictEqual(lateNumericPitCounterSequence[2].lapPhase, 'outlap', 'late numeric PIT counter increase marks the current lap as outlap');
+assert.strictEqual(lateNumericPitCounterSequence[3].lapPhase, '', 'only one outlap is highlighted after a PIT counter increase');
 
 const auditableStats = statsForLaps(spaPitSequence);
 assert.strictEqual(auditableStats.selection.lap.includedCount, 2);

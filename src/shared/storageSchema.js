@@ -55,6 +55,7 @@ const LAP_HISTORY_COLUMNS = [
   'sector1Flag',
   'sector2Flag',
   'sector3Flag',
+  'manualLapStatus',
   'paceEligible',
   'sector1Eligible',
   'sector2Eligible',
@@ -163,6 +164,7 @@ function normalizeForStorage(row, context = {}) {
   normalized.sector1Flag = normalizeStorageField(valueAt(row, 'sector1Flag'));
   normalized.sector2Flag = normalizeStorageField(valueAt(row, 'sector2Flag'));
   normalized.sector3Flag = normalizeStorageField(valueAt(row, 'sector3Flag'));
+  normalized.manualLapStatus = normalizeStorageField(valueAt(row, 'manualLapStatus'));
   normalized.paceEligible = normalizeStorageField(valueAt(row, 'paceEligible'));
   normalized.sector1Eligible = normalizeStorageField(valueAt(row, 'sector1Eligible'));
   normalized.sector2Eligible = normalizeStorageField(valueAt(row, 'sector2Eligible'));
@@ -217,6 +219,7 @@ function lapRecordFromNormalizedRow(row) {
     sector1Flag: normalizeStorageField(row.sector1Flag),
     sector2Flag: normalizeStorageField(row.sector2Flag),
     sector3Flag: normalizeStorageField(row.sector3Flag),
+    manualLapStatus: normalizeStorageField(row.manualLapStatus),
     paceEligible: normalizeStorageField(row.paceEligible),
     sector1Eligible: normalizeStorageField(row.sector1Eligible),
     sector2Eligible: normalizeStorageField(row.sector2Eligible),

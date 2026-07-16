@@ -263,7 +263,7 @@ const updatedState = {
         },
         lapStrip: [
           { lapNumber: 1, lapTimeMs: 123500, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'normal', highlight: 'class-best', marker: '', tooltip: 'Nigel Moore · Green flag' },
-          { lapNumber: 2, lapTimeMs: 180000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'neutralized', highlight: 'none', marker: '', tooltip: 'Nigel Moore · FCY' },
+          { lapNumber: 2, lapTimeMs: 180000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'neutralized', highlight: 'none', marker: '', manualLapStatus: 'invalid', tooltip: 'Nigel Moore · FCY' },
           { lapNumber: 3, lapTimeMs: 140000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'pit-in', highlight: 'none', marker: 'P', tooltip: 'Nigel Moore · pit-in' },
           { lapNumber: 4, lapTimeMs: 135000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'pit-out', highlight: 'none', marker: '', tooltip: 'Nigel Moore · pit-out' }
         ]
@@ -317,6 +317,7 @@ let lastSettingsPatch = null;
 let graphsOpenCount = 0;
 let lastGraphsCar = null;
 let themeUpdate = null;
+let lastLapStatusPayload = null;
 const liveTiming = {
   getSettings: async () => settings,
   setSettings: async (patch) => {
@@ -330,6 +331,7 @@ const liveTiming = {
   getCollectorState: async () => initialState,
   openLiveWindow: async () => true,
   openGraphsWindow: async (carNumber) => { graphsOpenCount += 1; lastGraphsCar = carNumber; return true; },
+  updateLapStatus: async (payload) => { lastLapStatusPayload = payload; return { ok: true, state: updatedState }; },
   onThemeUpdate: (callback) => { themeUpdate = callback; return () => {}; },
   exportCurrent: async () => ({ csvPath: 'rows.csv', jsonPath: 'rows.json', historyPath: 'history.json' }),
   onCollectorUpdate: (callback) => { collectorUpdate = callback; return () => {}; }
@@ -402,7 +404,22 @@ module.exports = (async () => {
   assert.strictEqual(lapRows[1].classList.contains('pit-in'), true);
   assert.strictEqual(lapRows[1].children[3].textContent, 'P');
   assert.strictEqual(lapRows[2].classList.contains('neutralized'), true);
+  assert.strictEqual(lapRows[2].classList.contains('manual-invalid'), true);
+  assert.strictEqual(lapRows[2].children[3].textContent, 'INV', 'manual invalid laps show why they are excluded from averages');
   assert.strictEqual(lapRows[3].classList.contains('class-best'), true);
+  await document.getElementById('lap-edit-toggle').trigger('click');
+  await flushAsync();
+  const editableRows = document.getElementById('lap-strip-list').children;
+  assert.strictEqual(document.getElementById('lap-strip').classList.contains('editing'), true, 'lap strip enters manual status edit mode');
+  const statusSelect = editableRows[0].children[4];
+  assert.strictEqual(statusSelect.className, 'lap-status-select');
+  statusSelect.value = 'track-limits';
+  await statusSelect.trigger('change');
+  await flushAsync();
+  assert.strictEqual(lastLapStatusPayload.carNumber, '13');
+  assert.strictEqual(lastLapStatusPayload.lapNumber, 4);
+  assert.strictEqual(lastLapStatusPayload.lapTimeMs, 135000);
+  assert.strictEqual(lastLapStatusPayload.status, 'track-limits', 'manual lap status edits are sent to the main process');
   document.getElementById('lap-strip-list').scrollTop = 84;
   collectorUpdate(updatedState);
   await flushAsync();

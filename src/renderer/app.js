@@ -11,6 +11,7 @@ const DEFAULT_POLL_INTERVAL_MS = 5000;
 const MAX_FOLLOWED_CARS = 3;
 const COMPARISON_TABS = ['laps', 'averages', 'sectors'];
 let currentComparisonTab = 0;
+let lapEditMode = false;
 const dashboardQuery = new URLSearchParams(window.location?.search || '');
 const fixedDashboardCar = String(dashboardQuery.get('car') || '').trim();
 const isSecondaryDashboard = dashboardQuery.get('secondary') === '1';
@@ -403,12 +404,41 @@ function lapsForCar(history, carNumber) {
     });
 }
 
+function manualStatusForLap(lap = {}) {
+  const manual = String(lap.manualLapStatus || '').trim().toLowerCase();
+  if (['fcy', 'sc', 'track-limits', 'invalid'].includes(manual)) return manual;
+  if (lap.status === 'neutralized') return 'fcy';
+  if (lapAnalytics?.isNeutralizedFlag?.(lap.lapFlag) || lapAnalytics?.isNeutralizedFlag?.(lap.sessionFlag)) {
+    return /safety/i.test(`${lap.lapFlag || ''} ${lap.sessionFlag || ''}`) ? 'sc' : 'fcy';
+  }
+  if (lap.paceEligible === false || lap.paceEligible === 'false') return 'invalid';
+  return 'normal';
+}
+
+function manualStatusBadge(status) {
+  if (status === 'track-limits') return 'TL';
+  if (status === 'invalid') return 'INV';
+  return '';
+}
+
+function lapStatusPayload(lap = {}, status = 'normal') {
+  return {
+    carNumber: activeCarNumber(),
+    lapNumber: lap.lapNumber,
+    lapTimeMs: lap.lapTimeMs,
+    collectedAt: lap.collectedAt || '',
+    status
+  };
+}
+
 // Shows every completed lap for the active dashboard car, newest first. The
 // list remains vertically scrollable for a complete 24-hour history. Status,
 // initials and best-lap highlights are precomputed by timingHighlights.js.
 function renderLapStrip(state, precomputedHighlights = null) {
   const list = $('lap-strip-list');
   if (!list) return;
+  $('lap-strip')?.classList.toggle('editing', lapEditMode);
+  $('lap-edit-toggle')?.classList.toggle('active', lapEditMode);
   const previousScrollTop = Number(list.scrollTop || 0);
   const wasAtTop = previousScrollTop <= 2;
   const carNumber = activeCarNumber();
@@ -440,9 +470,14 @@ function renderLapStrip(state, precomputedHighlights = null) {
     return;
   }
   laps.forEach((lap, index) => {
+    const manualStatus = manualStatusForLap(lap);
+    const badge = manualStatusBadge(manualStatus);
     const row = document.createElement('div');
-    row.className = `lap-strip-row ${lap.status || 'normal'} ${lap.highlight || 'none'} condition-${lap.lapCondition || 'unknown'}`;
-    row.setAttribute('title', lap.tooltip || lap.driverName || 'Unknown driver');
+    row.className = `lap-strip-row ${lap.status || 'normal'} ${lap.highlight || 'none'} condition-${lap.lapCondition || 'unknown'} manual-${manualStatus}`;
+    row.setAttribute('title', [
+      lap.tooltip || lap.driverName || 'Unknown driver',
+      badge ? `${badge}: excluded from averages` : ''
+    ].filter(Boolean).join(' · '));
     const number = document.createElement('span');
     number.className = 'lap-number';
     number.textContent = lapDisplayLabel(lap, laps.length - index - 1);
@@ -454,12 +489,37 @@ function renderLapStrip(state, precomputedHighlights = null) {
     driver.textContent = lap.driverInitials || '';
     driver.setAttribute('title', lap.driverName || 'Unknown driver');
     const marker = document.createElement('span');
-    marker.className = 'lap-marker';
-    marker.textContent = lap.marker || '';
+    marker.className = `lap-marker${badge ? ' manual-status-badge' : ''}`;
+    marker.textContent = badge || lap.marker || '';
     row.appendChild(number);
     row.appendChild(time);
     row.appendChild(driver);
     row.appendChild(marker);
+    if (lapEditMode && index < 20) {
+      const select = document.createElement('select');
+      select.className = 'lap-status-select';
+      select.setAttribute('aria-label', `Lap ${lap.lapNumber || index + 1} status`);
+      [
+        ['normal', 'OK'],
+        ['fcy', 'FCY'],
+        ['sc', 'SC'],
+        ['track-limits', 'TL'],
+        ['invalid', 'INV']
+      ].forEach(([value, label]) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        select.appendChild(option);
+      });
+      select.value = manualStatusForLap(lap);
+      select.addEventListener('change', async () => {
+        select.disabled = true;
+        const result = await window.liveTiming.updateLapStatus(lapStatusPayload(lap, select.value));
+        if (result?.state) render(result.state);
+        select.disabled = false;
+      });
+      row.appendChild(select);
+    }
     list.appendChild(row);
   });
   // Polls rebuild the list. Keep the user's position while they inspect older
@@ -1357,6 +1417,10 @@ async function init() {
   $('stop')?.addEventListener('click', () => window.liveTiming.stopCollector());
   $('show-live')?.addEventListener('click', () => window.liveTiming.openLiveWindow());
   $('open-graphs')?.addEventListener('click', () => window.liveTiming.openGraphsWindow(activeCarNumber()));
+  $('lap-edit-toggle')?.addEventListener('click', () => {
+    lapEditMode = !lapEditMode;
+    render(currentState);
+  });
   $('theme-toggle')?.addEventListener('click', toggleTheme);
   $('track-condition')?.addEventListener('change', async () => {
     currentSettings = await window.liveTiming.setSettings({ trackCondition: $('track-condition').value });
