@@ -495,7 +495,7 @@ function renderLapStrip(state, precomputedHighlights = null) {
     row.appendChild(time);
     row.appendChild(driver);
     row.appendChild(marker);
-    if (lapEditMode && index < 20) {
+    if (lapEditMode) {
       const select = document.createElement('select');
       select.className = 'lap-status-select';
       select.setAttribute('aria-label', `Lap ${lap.lapNumber || index + 1} status`);

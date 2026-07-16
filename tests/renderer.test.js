@@ -420,6 +420,25 @@ module.exports = (async () => {
   assert.strictEqual(lastLapStatusPayload.lapNumber, 4);
   assert.strictEqual(lastLapStatusPayload.lapTimeMs, 135000);
   assert.strictEqual(lastLapStatusPayload.status, 'track-limits', 'manual lap status edits are sent to the main process');
+  const manyLapState = {
+    ...updatedState,
+    lapHistory: Array.from({ length: 25 }, (_, index) => ({
+      carNumber: '13',
+      driverName: 'Nigel Moore',
+      lapNumber: index + 1,
+      lapTimeMs: 125000 + index,
+      pitInfo: '0',
+      sessionFlag: 'Green flag',
+      collectedAt: `2026-06-25T10:${String(index).padStart(2, '0')}:00.000Z`
+    }))
+  };
+  collectorUpdate(manyLapState);
+  await flushAsync();
+  assert.strictEqual(
+    [...document.getElementById('lap-strip-list').children].filter((row) => row.children[4]?.className === 'lap-status-select').length,
+    25,
+    'manual status edit mode exposes every stored lap, not only the latest 20'
+  );
   document.getElementById('lap-strip-list').scrollTop = 84;
   collectorUpdate(updatedState);
   await flushAsync();
