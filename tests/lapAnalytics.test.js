@@ -282,6 +282,17 @@ assert.strictEqual(spaPitSequence[2].lapPhase, 'outlap');
 assert.strictEqual(spaPitSequence[3].lapPhase, '');
 assert.deepStrictEqual(baseLapExclusionReasons(spaPitSequence[1]), ['pit-in']);
 
+const etaPitSequence = annotatePitPhases([
+  normalizeLap({ carNumber: 33, lapNumber: 18, lapTimeMs: 122796, pitInfo: '2', state: 'RUN', eta: '00:04' }),
+  normalizeLap({ carNumber: 33, lapNumber: 19, lapTimeMs: 133944, pitInfo: '2', state: 'RUN', eta: 'In Pit' }),
+  normalizeLap({ carNumber: 33, lapNumber: 20, lapTimeMs: 192335, pitInfo: '2', state: 'RUN', eta: '00:30' })
+]);
+assert.strictEqual(rowShowsInPit(etaPitSequence[1]), true, 'ETA In Pit is direct pit-in evidence');
+assert.strictEqual(etaPitSequence[1].lapPhase, 'inlap');
+assert.strictEqual(etaPitSequence[2].lapPhase, 'outlap', 'the first completed lap after ETA In Pit is pit-out');
+assert.deepStrictEqual(baseLapExclusionReasons(etaPitSequence[1]), ['pit-in']);
+assert.deepStrictEqual(baseLapExclusionReasons(etaPitSequence[2]), ['pit-out']);
+
 const driverChangePitSequence = annotatePitPhases([
   normalizeLap({ carNumber: 12, driverName: 'Alessandro Bressan', lapNumber: 55, lapTimeMs: 126375, pitInfo: '2', state: 'RUN' }),
   normalizeLap({ carNumber: 12, driverName: 'Alessandro Bressan', lapNumber: 56, lapTimeMs: 126398, pitInfo: '2', state: 'RUN' }),
@@ -300,9 +311,9 @@ const lateNumericPitCounterSequence = annotatePitPhases([
   normalizeLap({ carNumber: 12, driverName: 'Same Driver', lapNumber: 15, lapTimeMs: 210502, pitInfo: '3', state: 'RUN' }),
   normalizeLap({ carNumber: 12, driverName: 'Same Driver', lapNumber: 16, lapTimeMs: 386671, pitInfo: '3', state: 'RUN' })
 ]);
-assert.strictEqual(lateNumericPitCounterSequence[1].lapPhase, 'inlap', 'late numeric PIT counter increase moves the P marker to the previous lap');
-assert.strictEqual(lateNumericPitCounterSequence[2].lapPhase, 'outlap', 'late numeric PIT counter increase marks the current lap as outlap');
-assert.strictEqual(lateNumericPitCounterSequence[3].lapPhase, '', 'only one outlap is highlighted after a PIT counter increase');
+assert.strictEqual(lateNumericPitCounterSequence[1].lapPhase, '', 'the lap before a numeric PIT counter increase stays normal');
+assert.strictEqual(lateNumericPitCounterSequence[2].lapPhase, 'inlap', 'numeric PIT counter increase marks that completed lap as pit-in');
+assert.strictEqual(lateNumericPitCounterSequence[3].lapPhase, 'outlap', 'the lap after a numeric PIT counter increase is the outlap');
 
 const auditableStats = statsForLaps(spaPitSequence);
 assert.strictEqual(auditableStats.selection.lap.includedCount, 2);

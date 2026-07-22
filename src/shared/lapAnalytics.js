@@ -182,12 +182,19 @@ function pitAffectedLap(lap) {
   return lap?.isPitLap === true || /^(inlap|outlap)$/i.test(String(lap?.lapPhase || ''));
 }
 
-function rowShowsInPit(lap) {
-  return /^(in|in pit|pit)$/i.test(String(lap?.state || '').trim());
+function pitStatusText(lap) {
+  return [lap?.state, lap?.eta, lap?.pitStatus, lap?.pitInfoText]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(' ');
 }
 
-function pitInfoShowsInPit(lap) {
-  return /^p\d*$/i.test(String(lap?.pitInfo ?? lap?.pit ?? '').trim());
+function rowShowsInPit(lap) {
+  return /(?:^|\b)(?:in\s*pit|in-pit|pit|in)(?:\b|$)/i.test(pitStatusText(lap));
+}
+
+function rowShowsOutlap(lap) {
+  return /(?:^|\b)(?:out\s*lap|outlap)(?:\b|$)/i.test(pitStatusText(lap));
 }
 
 function normalizedManualLapStatus(value) {
@@ -200,10 +207,10 @@ function normalizedManualLapStatus(value) {
 }
 
 // Annotates old and new history without requiring a storage migration. Explicit
-// in-pit rows queue the next completed lap as the outlap. Some providers update
-// only the numeric PIT counter after the car has already left again; for that
-// late signal, the previous completed lap is the inlap and the current completed
-// lap is the outlap. Both remain stored but are excluded from pace.
+// in-pit rows queue the next completed lap as the outlap. If the provider only
+// exposes a cumulative PIT counter, the lap where that counter increases is the
+// pit-in lap and the next completed lap is the outlap. Both remain stored but
+// are excluded from pace.
 function annotatePitPhases(laps) {
   const stateByCar = new Map();
   const annotated = [];
@@ -216,7 +223,8 @@ function annotatePitPhases(laps) {
     const driverChanged = Boolean(driverName && state.previousDriver && driverName !== state.previousDriver);
 
     const pitCountIncreased = pitCount !== null && state.previousPitCount !== null && pitCount > state.previousPitCount;
-    const explicitlyInPit = rowShowsInPit(lap) || (pitInfoShowsInPit(lap) && pitCountIncreased);
+    const explicitlyInPit = rowShowsInPit(lap);
+    const explicitlyOutlap = rowShowsOutlap(lap);
     const driverChangedAtPit = driverChanged && (pitCountIncreased || state.previousWasInPit);
     if (driverChangedAtPit && state.previousIndex !== null) {
       // A completed lap attributed to a new driver can only follow a stop. The
@@ -231,6 +239,13 @@ function annotatePitPhases(laps) {
       lapPhase = 'outlap';
       isPitLap = true;
       state.nextIsOutlap = false;
+    } else if (!lapPhase && explicitlyOutlap) {
+      // RIS and some other providers expose "OUTLAP" in the ETA/status area
+      // while the car has just left pit lane. If that text is attached to a
+      // stored completed lap, it is direct evidence that this lap is pit-out.
+      lapPhase = 'outlap';
+      isPitLap = true;
+      state.nextIsOutlap = false;
     } else if (!lapPhase && state.nextIsOutlap && !explicitlyInPit) {
       lapPhase = 'outlap';
       isPitLap = true;
@@ -242,20 +257,11 @@ function annotatePitPhases(laps) {
       state.nextIsOutlap = true;
     }
     if (!driverChangedAtPit && pitCountIncreased && !isPitLap) {
-      // Most providers increment PIT after the car has completed the outlap.
-      // In that case the previous completed lap is the inlap and the current
-      // completed lap is the outlap. If an explicit IN state was seen earlier,
-      // the previous branch already marked that row and queued this lap.
-      if (state.previousIndex !== null) {
-        annotated[state.previousIndex] = {
-          ...annotated[state.previousIndex],
-          lapPhase: 'inlap',
-          isPitLap: true
-        };
-      }
-      lapPhase = 'outlap';
+      // Providers differ on when PIT increments. Without an explicit IN state,
+      // conservatively exclude this lap and the next one.
+      lapPhase = 'inlap';
       isPitLap = true;
-      state.nextIsOutlap = false;
+      state.nextIsOutlap = true;
     }
     if (pitCount !== null) state.previousPitCount = pitCount;
     state.previousIndex = annotated.length;
@@ -599,6 +605,7 @@ return {
   pitCountFromLap,
   pitAffectedLap,
   rowShowsInPit,
+  rowShowsOutlap,
   annotatePitPhases,
   baseLapExclusionReasons,
   completedLaps,

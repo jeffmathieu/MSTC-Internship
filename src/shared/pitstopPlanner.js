@@ -189,6 +189,26 @@ function parseTimeToMs(value) {
   return null;
 }
 
+function pitStatusText(row) {
+  return [row?.eta, row?.state, row?.pitStatus, row?.pitInfoText]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
+function rowShowsInPit(row = {}) {
+  return /(?:^|\b)(?:in\s*pit|in-pit|pit|in)(?:\b|$)/i.test(pitStatusText(row));
+}
+
+function rowShowsOutlap(row = {}) {
+  return /(?:^|\b)(?:out\s*lap|outlap)(?:\b|$)/i.test(pitStatusText(row));
+}
+
+function collectedAtMs(value) {
+  const ms = Date.parse(value || '');
+  return Number.isFinite(ms) ? ms : null;
+}
+
 // Formats milliseconds for compact dashboard labels. It intentionally omits
 // milliseconds because pit window/cooldown information is strategic timing, not
 // lap timing precision.
@@ -266,8 +286,24 @@ function nextPitStateFromRow({ previous = {}, row = {}, session = {}, rules = {}
   const windowAtPit = timeUntilNextAllowedPit({ clock, rules: normalizedRules, pitState: previousState });
   const isFirstPitSample = previousState.rawPitCount === null || previousState.rawPitCount === undefined;
   const pitCountIncreased = !isFirstPitSample && nextCount > (previousState.rawPitCount || 0);
-  const measuredPitDurationMs = parseTimeToMs(row.lastPit || row.lastPitDuration || row.lPit);
   const measuredPitRawDuration = row.lastPit || row.lastPitDuration || row.lPit || '';
+  const hasProviderPitDuration = String(measuredPitRawDuration || '').trim() !== '';
+  const measuredPitDurationMs = parseTimeToMs(measuredPitRawDuration);
+  const nowMs = collectedAtMs(collectedAt);
+  const fallbackPitTimingActive = !hasProviderPitDuration;
+  const fallbackPitStartedAtMs = numberOrNull(previousState.fallbackPitStartedAtMs);
+  const fallbackPitStartedElapsedMs = numberOrNull(previousState.fallbackPitStartedElapsedMs);
+  let fallbackPitDurationMs = null;
+  let fallbackPitRawDuration = '';
+
+  if (fallbackPitTimingActive && rowShowsOutlap(row)) {
+    if (Number.isFinite(clock.elapsedMs) && Number.isFinite(fallbackPitStartedElapsedMs)) {
+      fallbackPitDurationMs = Math.max(0, clock.elapsedMs - fallbackPitStartedElapsedMs);
+    } else if (Number.isFinite(nowMs) && Number.isFinite(fallbackPitStartedAtMs)) {
+      fallbackPitDurationMs = Math.max(0, nowMs - fallbackPitStartedAtMs);
+    }
+    if (Number.isFinite(fallbackPitDurationMs)) fallbackPitRawDuration = formatDuration(fallbackPitDurationMs);
+  }
   // Existing stops that are already present on the first sample are accepted as
   // baseline stops because the app cannot reconstruct when they happened. Every
   // new increase after that must happen in a green/open window to count.
@@ -278,19 +314,50 @@ function nextPitStateFromRow({ previous = {}, row = {}, session = {}, rules = {}
     completedPitStops,
     validCompletedPitStops: Math.min(completedPitStops, baselineValidPitStops + validIncrement),
     rawPitCount: nextCount,
-    averageLapMs: numberOrNull(averageLapMs)
+    averageLapMs: numberOrNull(averageLapMs),
+    fallbackPitStartedAtMs: fallbackPitTimingActive ? previousState.fallbackPitStartedAtMs : null,
+    fallbackPitStartedElapsedMs: fallbackPitTimingActive ? previousState.fallbackPitStartedElapsedMs : null
   };
+  if (fallbackPitTimingActive && rowShowsInPit(row) && !Number.isFinite(fallbackPitStartedAtMs)) {
+    next.fallbackPitStartedAtMs = Number.isFinite(nowMs) ? nowMs : null;
+    next.fallbackPitStartedElapsedMs = Number.isFinite(clock.elapsedMs) ? clock.elapsedMs : null;
+  }
+  if (hasProviderPitDuration) {
+    // Provider LAST PIT/L. PIT is the authoritative measured duration when it
+    // exists. Self timing is only a fallback for timing pages without that
+    // column, so any pending fallback timer is discarded as soon as provider
+    // data is available.
+    next.fallbackPitStartedAtMs = null;
+    next.fallbackPitStartedElapsedMs = null;
+    if (Number.isFinite(measuredPitDurationMs) || measuredPitRawDuration) {
+      next.lastPitDurationMs = measuredPitDurationMs;
+      next.lastPitRawDuration = measuredPitRawDuration;
+      next.lastPitTargetDurationMs = normalizedRules.pitStopDurationMs;
+    }
+  }
   if (pitCountIncreased) {
     next.lastPitAt = collectedAt || new Date().toISOString();
     next.lastPitElapsedMs = clock.elapsedMs;
-    next.lastPitDurationMs = measuredPitDurationMs;
-    next.lastPitRawDuration = measuredPitRawDuration;
+    next.lastPitDurationMs = hasProviderPitDuration ? measuredPitDurationMs : fallbackPitDurationMs;
+    next.lastPitRawDuration = hasProviderPitDuration ? measuredPitRawDuration : fallbackPitRawDuration;
     next.lastPitTargetDurationMs = normalizedRules.pitStopDurationMs;
     next.lastPitCountedAsValid = windowAtPit.allowed;
     next.lastPitValidityReason = windowAtPit.allowed ? 'Pitstop counted: pit window was open.' : `Pitstop not counted: ${windowAtPit.reason}.`;
+    if (!hasProviderPitDuration && Number.isFinite(fallbackPitDurationMs)) {
+      next.fallbackPitStartedAtMs = null;
+      next.fallbackPitStartedElapsedMs = null;
+    }
     if (windowAtPit.allowed && Number.isFinite(clock.elapsedMs)) {
       next.validPitElapsedHistoryMs = [...(previousState.validPitElapsedHistoryMs || []), clock.elapsedMs];
     }
+  } else if (!hasProviderPitDuration && Number.isFinite(fallbackPitDurationMs)) {
+    next.lastPitAt = collectedAt || new Date().toISOString();
+    next.lastPitElapsedMs = clock.elapsedMs;
+    next.lastPitDurationMs = fallbackPitDurationMs;
+    next.lastPitRawDuration = fallbackPitRawDuration;
+    next.lastPitTargetDurationMs = normalizedRules.pitStopDurationMs;
+    next.fallbackPitStartedAtMs = null;
+    next.fallbackPitStartedElapsedMs = null;
   } else if (isFirstPitSample && nextCount > 0 && (Number.isFinite(measuredPitDurationMs) || measuredPitRawDuration)) {
     // If the app is opened mid-race, L. PIT still tells us the most recent
     // measured stop. Show it without pretending a new pitstop just happened.
@@ -918,6 +985,8 @@ return {
   normalizeRules,
   parseTimeToMs,
   formatDuration,
+  rowShowsInPit,
+  rowShowsOutlap,
   pitCountFromRow,
   nextPitStateFromRow,
   estimateAverageLapMs,
