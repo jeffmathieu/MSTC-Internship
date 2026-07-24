@@ -22,8 +22,8 @@ assert.ok(Math.abs(standardDeviation([180000, 179000, 178000]) - 816.49658092772
 assert.strictEqual(paceSlope([180000, 179000, 178000]), -1000);
 assert.strictEqual(insights.paceTrendMsPerLap, -1000, 'neutralized lap stays out of pace trend');
 assert.strictEqual(insights.bestTheoreticalLapMs, 178000);
-assert.strictEqual(insights.averageTheoreticalLapMs, 179000);
-assert.strictEqual(insights.personalBestProgression.length, 3);
+assert.strictEqual(insights.averageTheoreticalLapMs, 178500);
+assert.strictEqual(insights.personalBestProgression.length, 2);
 assert.strictEqual(insights.compliance.lap.violationCount, 2);
 assert.strictEqual(insights.compliance.sector1.label, 'OK - reference not set');
 assert.strictEqual(insights.compliance.sector2.violationCount, 0);
@@ -45,9 +45,9 @@ assert.strictEqual(comparisons.length, 1);
 assert.strictEqual(comparisons[0].carNumber, '2');
 assert.strictEqual(comparisons[0].lapCount, 2, 'only rival laps completed inside the analyzed stint window are compared');
 assert.strictEqual(comparisons[0].averageLapMs, 178500);
-assert.strictEqual(comparisons[0].averageDeltaMs, 500);
+assert.strictEqual(comparisons[0].averageDeltaMs, 0);
 const ranking = classRankingForStint(ourLaps.slice(0, 3), comparisons);
-assert.deepStrictEqual(ranking.average, { rank: 2, total: 2, leaderCarNumber: '2', deltaToLeaderMs: 500 });
+assert.deepStrictEqual(ranking.average, { rank: 1, total: 2, leaderCarNumber: 'our car', deltaToLeaderMs: 0 });
 assert.deepStrictEqual(ranking.best, { rank: 1, total: 2, leaderCarNumber: 'our car', deltaToLeaderMs: 0 });
 
 console.log('Stint insight tests passed.');

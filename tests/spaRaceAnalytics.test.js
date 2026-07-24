@@ -31,6 +31,7 @@ const stats = statsForLaps(laps);
 assert.strictEqual(stats.paceLapCount, 46);
 assert.strictEqual(stats.selection.lap.excludedCount, 16);
 assert.deepStrictEqual(stats.selection.lap.excludedByReason, {
+  'first-lap': 1,
   neutralized: 12,
   'pit-in': 3,
   'pit-out': 3

@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('liveTiming', {
   getCollectorState: () => ipcRenderer.invoke('collector:getState'),
   openLiveWindow: () => ipcRenderer.invoke('collector:openLiveWindow'),
   openGraphsWindow: (carNumber) => ipcRenderer.invoke('graphs:open', carNumber),
+  updateLapStatus: (payload) => ipcRenderer.invoke('laps:updateStatus', payload),
 
   // Keeps every open dashboard and graph window on the same saved theme.
   onThemeUpdate: (callback) => {

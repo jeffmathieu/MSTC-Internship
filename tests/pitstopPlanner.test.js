@@ -3,6 +3,8 @@ const {
   normalizeRules,
   parseTimeToMs,
   formatDuration,
+  rowShowsInPit,
+  rowShowsOutlap,
   pitCountFromRow,
   nextPitStateFromRow,
   estimateAverageLapMs,
@@ -80,6 +82,8 @@ assert.strictEqual(parseTimeToMs('bad data'), null);
 assert.strictEqual(formatDuration(3661000), '1:01:01');
 assert.strictEqual(formatDuration(-61000), '-1:01');
 assert.strictEqual(formatDuration(NaN), '—');
+assert.strictEqual(rowShowsInPit({ eta: 'In Pit' }), true);
+assert.strictEqual(rowShowsOutlap({ eta: 'Outlap' }), true);
 assert.strictEqual(pitCountFromRow({ pit: 'P2' }), 2);
 assert.strictEqual(pitCountFromRow({ pitInfo: 'stops 3' }), 3);
 assert.strictEqual(pitCountFromRow({ pit: '--' }), 0);
@@ -242,6 +246,46 @@ assert.strictEqual(validPitIncrease.lastPitCountedAsValid, true);
 assert.strictEqual(validPitIncrease.lastPitDurationMs, 76000);
 assert.strictEqual(validPitIncrease.lastPitTargetDurationMs, 75000);
 assert.deepStrictEqual(validPitIncrease.validPitElapsedHistoryMs, [40 * 60 * 1000]);
+
+// Provider LAST PIT/L. PIT is authoritative. Even if a fallback timer was
+// started while the car was seen "In Pit", a real provider duration wins as
+// soon as it appears.
+const providerLastPitWins = nextPitStateFromRow({
+  previous: {
+    ...validPitIncrease,
+    fallbackPitStartedAtMs: Date.parse('2026-06-26T08:05:00.000Z'),
+    fallbackPitStartedElapsedMs: 40 * 60 * 1000
+  },
+  row: { pit: 'P3', eta: 'Outlap', lastPit: '1:51' },
+  session: { timeToGo: '1:18:00' },
+  rules,
+  collectedAt: '2026-06-26T08:07:00.000Z'
+});
+assert.strictEqual(providerLastPitWins.lastPitDurationMs, 111000);
+assert.strictEqual(providerLastPitWins.lastPitRawDuration, '1:51');
+assert.strictEqual(providerLastPitWins.fallbackPitStartedAtMs, null);
+
+// Timing pages without LAST PIT can still measure the stop from ETA changing
+// from In Pit to Outlap. This path is only used when provider duration is empty.
+const fallbackPitStarted = nextPitStateFromRow({
+  previous: { completedPitStops: 0, validCompletedPitStops: 0, rawPitCount: 0 },
+  row: { pit: 'P0', eta: 'In Pit' },
+  session: { timeToGo: '1:20:00' },
+  rules,
+  collectedAt: '2026-06-26T08:00:00.000Z'
+});
+assert.strictEqual(fallbackPitStarted.lastPitDurationMs, undefined);
+assert.strictEqual(Number.isFinite(fallbackPitStarted.fallbackPitStartedAtMs), true);
+const fallbackPitCompleted = nextPitStateFromRow({
+  previous: fallbackPitStarted,
+  row: { pit: 'P1', eta: 'Outlap' },
+  session: { timeToGo: '1:18:09' },
+  rules,
+  collectedAt: '2026-06-26T08:01:51.000Z'
+});
+assert.strictEqual(fallbackPitCompleted.lastPitDurationMs, 111000);
+assert.strictEqual(fallbackPitCompleted.lastPitRawDuration, '1:51');
+assert.strictEqual(fallbackPitCompleted.fallbackPitStartedAtMs, null);
 
 const secondValidPitIncrease = nextPitStateFromRow({
   previous: validPitIncrease,

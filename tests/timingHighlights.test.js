@@ -18,7 +18,7 @@ const personalBestHistory = [
   lap({ carNumber: 13, className: 'C.CHA', driverName: 'Nigel Moore', lapNumber: 1, lapTimeMs: 125000, sector1Ms: 41000, sector2Ms: 47000, sector3Ms: 37000 }),
   lap({ carNumber: 13, className: 'C.CHA', driverName: 'Nigel Moore', lapNumber: 2, lapTimeMs: 123000, sector1Ms: 40000, sector2Ms: 46000, sector3Ms: 37000 }),
   lap({ carNumber: 13, className: 'C.CHA', driverName: 'Nigel Moore', lapNumber: 3, lapTimeMs: 120000, sector1Ms: 39000, sector2Ms: 45000, sector3Ms: 36000, sessionFlag: 'FCY' }),
-  lap({ carNumber: 2, className: 'C.CHA', driverName: 'Fast Driver', lapNumber: 1, lapTimeMs: 122500, sector1Ms: 39500, sector2Ms: 47000, sector3Ms: 36000 })
+  lap({ carNumber: 2, className: 'C.CHA', driverName: 'Fast Driver', lapNumber: 2, lapTimeMs: 122500, sector1Ms: 39500, sector2Ms: 47000, sector3Ms: 36000 })
 ];
 const personal = buildTimingHighlights(personalBestHistory, '13');
 assert.strictEqual(personal.bestLap.valueMs, 123000);
@@ -71,7 +71,7 @@ const conditionHistory = [
     carNumber: 12,
     className: 'LMP3',
     driverName: 'Dry Driver',
-    lapNumber: 1,
+    lapNumber: 3,
     lapTimeMs: 122659,
     sector1Ms: 42124,
     sector2Ms: 43907,
@@ -85,7 +85,7 @@ const conditionHistory = [
     carNumber: 12,
     className: 'LMP3',
     driverName: 'Wet Driver',
-    lapNumber: 2,
+    lapNumber: 4,
     lapTimeMs: 132000,
     sector1Ms: 46000,
     sector2Ms: 48000,
@@ -99,7 +99,7 @@ const conditionHistory = [
     carNumber: 9,
     className: 'LMP3',
     driverName: 'Dry Rival',
-    lapNumber: 1,
+    lapNumber: 3,
     lapTimeMs: 121000,
     sector1Ms: 41000,
     sector2Ms: 43000,
@@ -113,7 +113,7 @@ const conditionHistory = [
     carNumber: 9,
     className: 'LMP3',
     driverName: 'Wet Rival',
-    lapNumber: 2,
+    lapNumber: 4,
     lapTimeMs: 131000,
     sector1Ms: 45500,
     sector2Ms: 47500,

@@ -17,9 +17,9 @@ const {
 } = require('../src/main/stintReports');
 
 const history = [
-  lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver / One', lapNumber: 1, lapTimeMs: 180000, sector1Ms: 55000, sector2Ms: 79000, sector3Ms: 46000, lapCondition: 'dry', sector1Condition: 'dry', sector2Condition: 'dry', sector3Condition: 'dry' }),
-  lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver / One', lapNumber: 2, lapTimeMs: 240000, sector1Ms: 70000, sector2Ms: 100000, sector3Ms: 70000, sessionFlag: 'FCY', lapCondition: 'transition', sector1Condition: 'dry', sector2Condition: 'transition', sector3Condition: 'wet' }),
-  lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver Two', lapNumber: 3, lapTimeMs: 181000, sector1Ms: 55000, sector2Ms: 79500, sector3Ms: 46500, pitInfo: '1', lastPit: '1:18', pitTargetDurationMs: '70000', position: 7, classPosition: 3 })
+  lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver / One', lapNumber: 2, lapTimeMs: 180000, sector1Ms: 55000, sector2Ms: 79000, sector3Ms: 46000, lapCondition: 'dry', sector1Condition: 'dry', sector2Condition: 'dry', sector3Condition: 'dry' }),
+  lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver / One', lapNumber: 3, lapTimeMs: 240000, sector1Ms: 70000, sector2Ms: 100000, sector3Ms: 70000, sessionFlag: 'FCY', lapCondition: 'transition', sector1Condition: 'dry', sector2Condition: 'transition', sector3Condition: 'wet' }),
+  lap({ carNumber: 33, teamName: 'MSTC & Team', driverName: 'Driver Two', lapNumber: 4, lapTimeMs: 181000, sector1Ms: 55000, sector2Ms: 79500, sector3Ms: 46500, pitInfo: '1', lastPit: '1:18', pitTargetDurationMs: '70000', position: 7, classPosition: 3 })
 ];
 const closedStint = stintsForCar(history, 33)[0];
 const reportGapSamples = [

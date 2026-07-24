@@ -82,6 +82,8 @@
         return {
           lapNumber: lap.lapNumber,
           lapTimeMs: finiteMs(lap.lapTimeMs),
+          collectedAt: lap.collectedAt || lap.recordedAt || '',
+          manualLapStatus: lap.manualLapStatus || '',
           lapCondition: trackConditions.deriveLapCondition(lap),
           driverName: lap.driverName || '',
           driverInitials: driverInitials(lap.driverName),

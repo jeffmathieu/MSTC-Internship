@@ -1,5 +1,5 @@
 {
-  "name": "mstc-race-engineer-dashboard",
+  "name": "mstc-dashboard",
   "version": "1.3.1",
   "description": "Electron race-engineering dashboard for live timing, pace analysis and pit strategy.",
   "main": "src/main/main.js",
@@ -29,7 +29,7 @@
   },
   "build": {
     "appId": "com.jeffmathieu.mstcraceengineerdashboard",
-    "productName": "MSTC Race Engineer Dashboard",
+    "productName": "MSTC Dashboard",
     "asar": true,
     "asarUnpack": [
       "src/main/reports/*.py"
@@ -54,7 +54,7 @@
     "win": {
       "target": "nsis",
       "icon": "docs/mstc_app_icons/electron-builder/build/icon.ico",
-      "artifactName": "MSTC-Race-Engineer-Dashboard-Setup-${version}-${arch}.${ext}"
+      "artifactName": "MSTC-Dashboard-Setup-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -70,7 +70,7 @@
       ],
       "icon": "docs/mstc_app_icons/electron-builder/build/icon.icns",
       "category": "public.app-category.sports",
-      "artifactName": "MSTC-Race-Engineer-Dashboard-${version}-${arch}.${ext}"
+      "artifactName": "MSTC-Dashboard-${version}-${arch}.${ext}"
     }
   },
   "dependencies": {

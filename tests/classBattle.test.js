@@ -140,11 +140,11 @@ assert.strictEqual(relativeClassGap(sameClassRows, classRows, sameClassRows[0], 
 assert.strictEqual(relativeClassGap(sameClassRows, classRows, sameClassRows[0], { carNumber: 999 }), null);
 assert.strictEqual(recentAverageForCar(history, 2), 125000);
 assert.strictEqual(recentAverageForCar([
-  { carNumber: 2, lapNumber: 1, lapTimeMs: 125000, pitInfo: '0' },
-  { carNumber: 2, lapNumber: 2, lapTimeMs: 180000, pitInfo: 'P1' },
-  { carNumber: 2, lapNumber: 3, lapTimeMs: 150000, pitInfo: 'P1' },
-  { carNumber: 2, lapNumber: 4, lapTimeMs: 126000, pitInfo: 'P1' },
-  { carNumber: 2, lapNumber: 5, lapTimeMs: 200000, sessionFlag: 'Safety car', pitInfo: 'P1' }
+  { carNumber: 2, lapNumber: 10, lapTimeMs: 125000, pitInfo: '0' },
+  { carNumber: 2, lapNumber: 11, lapTimeMs: 180000, pitInfo: 'P1' },
+  { carNumber: 2, lapNumber: 12, lapTimeMs: 150000, pitInfo: 'P1' },
+  { carNumber: 2, lapNumber: 13, lapTimeMs: 126000, pitInfo: 'P1' },
+  { carNumber: 2, lapNumber: 14, lapTimeMs: 200000, sessionFlag: 'Safety car', pitInfo: 'P1' }
 ], 2, 10), 125500, 'recent battle pace excludes pit, outlap and Safety Car laps');
 assert.deepStrictEqual(lapsForCar([
   { carNumber: 5, lapNumber: '', lapTimeMs: 102000, collectedAt: '2026-06-23T12:02:00.000Z' },
@@ -171,8 +171,8 @@ assert.ok(leaderItem.battle.catchInfo.includes('we catch #13'));
 assert.ok(leaderItem.battle.catchInfo.includes('we gain 1.000s/l'));
 
 const slowerBehindSummary = buildClassBattleSummary(sameClassRows, [
-  { carNumber: 13, lapNumber: 1, lastLapMs: 125000 },
-  { carNumber: 2, lapNumber: 1, lastLapMs: 126000 }
+  { carNumber: 13, lapNumber: 2, lastLapMs: 125000 },
+  { carNumber: 2, lapNumber: 2, lastLapMs: 126000 }
 ], 2);
 const slowerLeaderItem = slowerBehindSummary.items.find((item) => String(item.row.carNumber) === '13');
 assert.strictEqual(slowerLeaderItem.battle.estimate, 'we are not catching');
@@ -180,8 +180,8 @@ assert.ok(slowerLeaderItem.battle.catchInfo.includes('we lose 1.000s/l'));
 assert.strictEqual(slowerLeaderItem.battle.predictionLabel, 'No catch predicted at current pace');
 
 const slowerTrailingCar = buildAdjacentClassBattles(sameClassRows, [
-  { carNumber: 13, lapNumber: 1, lastLapMs: 125000 },
-  { carNumber: 2, lapNumber: 1, lastLapMs: 126000 }
+  { carNumber: 13, lapNumber: 2, lastLapMs: 125000 },
+  { carNumber: 2, lapNumber: 2, lastLapMs: 126000 }
 ], 13).behind;
 assert.strictEqual(slowerTrailingCar.estimate, 'they are not catching');
 assert.ok(slowerTrailingCar.catchInfo.includes('they lose 1.000s/l'));

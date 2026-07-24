@@ -56,37 +56,41 @@ assert.strictEqual(mstcStats.carNumber, '33');
 assert.strictEqual(mstcStats.teamName, 'MSTC');
 assert.strictEqual(mstcStats.className, 'Club Challenge');
 assert.strictEqual(mstcStats.lapCount, 83);
-assert.strictEqual(mstcStats.paceLapCount, 83);
-closeTo(mstcStats.averageLapMs, 131502.48192771085);
+assert.strictEqual(mstcStats.paceLapCount, 82);
+closeTo(mstcStats.averageLapMs, 131593.25609756098);
 assert.strictEqual(mstcStats.bestLapMs, 119551);
 assert.strictEqual(mstcStats.lastLapMs, 132155);
-closeTo(mstcStats.averageSector1Ms, 44710.843373493975);
-closeTo(mstcStats.averageSector2Ms, 48655.98795180723);
-closeTo(mstcStats.averageSector3Ms, 38135.73493975904);
+closeTo(mstcStats.averageSector1Ms, 44741.70731707317);
+closeTo(mstcStats.averageSector2Ms, 48689.57317073171);
+closeTo(mstcStats.averageSector3Ms, 38162.060975609755);
 assert.strictEqual(mstcStats.bestSector1Ms, 40647);
 assert.strictEqual(mstcStats.bestSector2Ms, 44234);
 assert.strictEqual(mstcStats.bestSector3Ms, 34670);
 
 const car38Stats = carStats(history, '38');
 assert.strictEqual(car38Stats.lapCount, 84);
-closeTo(car38Stats.averageLapMs, 128832.40476190476);
+assert.strictEqual(car38Stats.paceLapCount, 83);
+closeTo(car38Stats.averageLapMs, 128870.14457831325);
 assert.strictEqual(car38Stats.bestLapMs, 121340);
 assert.strictEqual(car38Stats.lastLapMs, 125330);
 
 const car56Stats = carStats(history, '56');
 assert.strictEqual(car56Stats.lapCount, 80);
-closeTo(car56Stats.averageLapMs, 136298.25);
+assert.strictEqual(car56Stats.paceLapCount, 79);
+closeTo(car56Stats.averageLapMs, 136414.54430379748);
 assert.strictEqual(car56Stats.bestLapMs, 121411);
 
 const bestClassCar = bestCarInClassByAverage(history, 'Club Challenge');
 assert.strictEqual(bestClassCar.carNumber, '38');
-closeTo(bestClassCar.averageLapMs, 128832.40476190476);
+closeTo(bestClassCar.averageLapMs, 128870.14457831325);
 
 const mstcDriverStats = driverStats(history, '33');
 assert.deepStrictEqual(mstcDriverStats.map((stats) => stats.driverName), ['De Jong', 'Janssens']);
 assert.strictEqual(mstcDriverStats[0].lapCount, 42);
 assert.strictEqual(mstcDriverStats[1].lapCount, 41);
-closeTo(mstcDriverStats[0].averageLapMs, 123796.16666666667);
+assert.strictEqual(mstcDriverStats[0].paceLapCount, 41);
+assert.strictEqual(mstcDriverStats[1].paceLapCount, 41);
+closeTo(mstcDriverStats[0].averageLapMs, 123789.75609756098);
 closeTo(mstcDriverStats[1].averageLapMs, 139396.75609756098);
 assert.strictEqual(mstcDriverStats[0].bestLapMs, 119551);
 assert.strictEqual(mstcDriverStats[1].bestLapMs, 120311);
@@ -96,14 +100,14 @@ assert.strictEqual(driverComparison.bestDriver.driverName, 'De Jong');
 assert.strictEqual(driverComparison.currentDriver.driverName, 'Janssens');
 assert.strictEqual(driverComparison.deltas.bestDriverBestLapToCurrentLastLapMs, 12604);
 assert.strictEqual(driverComparison.deltas.bestDriverBestLapToCurrentBestLapMs, 760);
-closeTo(driverComparison.deltas.bestDriverAverageToCurrentAverageMs, 15600.58943089431);
+closeTo(driverComparison.deltas.bestDriverAverageToCurrentAverageMs, 15607);
 
 const classComparison = compareCarToClassTargets(history, '33', '56');
 assert.strictEqual(classComparison.bestClassCar.carNumber, '38');
 assert.strictEqual(classComparison.selectedCar.carNumber, '56');
 assert.strictEqual(classComparison.ourCurrentStint.driverName, 'Janssens');
-closeTo(classComparison.deltas.currentStintAverageToBestClassCarAverageMs, 10564.351335656218);
-closeTo(classComparison.deltas.currentStintAverageToSelectedCarAverageMs, 3098.5060975609813);
+closeTo(classComparison.deltas.currentStintAverageToBestClassCarAverageMs, 10526.61151924773);
+closeTo(classComparison.deltas.currentStintAverageToSelectedCarAverageMs, 2982.211793763505);
 
 const dashboardAnalysis = buildDashboardAnalysis(history, { ourCarNumber: '33', selectedCarNumber: '56' });
 assert.strictEqual(dashboardAnalysis.currentDriverName, 'Janssens');
@@ -112,15 +116,15 @@ assert.strictEqual(dashboardAnalysis.classComparison.bestClassCar.carNumber, '38
 
 const neutralizedMstcStats = carStats(neutralizedHistory, '33');
 assert.strictEqual(neutralizedMstcStats.lapCount, 83);
-assert.strictEqual(neutralizedMstcStats.paceLapCount, 82);
-closeTo(neutralizedMstcStats.averageLapMs, 129328.56097560975);
+assert.strictEqual(neutralizedMstcStats.paceLapCount, 81);
+closeTo(neutralizedMstcStats.averageLapMs, 129393.61728395062);
 assert.strictEqual(neutralizedMstcStats.bestLapMs, 119551);
 assert.strictEqual(neutralizedMstcStats.lastLapMs, 132155);
 
 // Lap 48 is marked FCY for the full lap but sector 1 is still explicitly green.
 // That means the lap must be excluded from lap averages while sector 1 remains
 // eligible for sector averages.
-closeTo(neutralizedMstcStats.averageSector1Ms, 44710.843373493975);
+closeTo(neutralizedMstcStats.averageSector1Ms, 44741.70731707317);
 assert.ok(neutralizedMstcStats.averageSector2Ms < mstcStats.averageSector2Ms);
 assert.ok(neutralizedMstcStats.averageSector3Ms < mstcStats.averageSector3Ms);
 
@@ -130,7 +134,7 @@ assert.strictEqual(neutralizedCurrentStint.paceLapCount, 40);
 closeTo(neutralizedCurrentStint.averageLapMs, 135137.575);
 
 const neutralizedClassComparison = compareCarToClassTargets(neutralizedHistory, '33', '56');
-closeTo(neutralizedClassComparison.deltas.currentStintAverageToBestClassCarAverageMs, 6305.170238095248);
-closeTo(neutralizedClassComparison.deltas.currentStintAverageToSelectedCarAverageMs, -1160.6749999999884);
+closeTo(neutralizedClassComparison.deltas.currentStintAverageToBestClassCarAverageMs, 6267.43042168676);
+closeTo(neutralizedClassComparison.deltas.currentStintAverageToSelectedCarAverageMs, -1276.9693037974648);
 
 console.log('Assen race analytics tests passed.');

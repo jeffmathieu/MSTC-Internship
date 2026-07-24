@@ -6,7 +6,7 @@ const { verifyReleaseAssets } = require('./verify-release-assets');
 
 const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'mstc-release-assets-'));
 const manifest = path.join(folder, 'latest.yml');
-const installer = 'MSTC-Race-Engineer-Dashboard-Setup-1.1.2-x64.exe';
+const installer = 'MSTC-Dashboard-Setup-1.1.2-x64.exe';
 fs.writeFileSync(path.join(folder, installer), 'test installer');
 fs.writeFileSync(manifest, `version: 1.1.2\nfiles:\n  - url: ${installer}\n`);
 assert.deepStrictEqual(verifyReleaseAssets(manifest), [installer]);

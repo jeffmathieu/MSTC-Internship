@@ -237,8 +237,7 @@ const updatedState = {
     mustPitSoonMs: 1800000,
     latestPossiblePitElapsedMs: 5300000,
     schedule: {
-      ruleTimingReference: 'pit-entry',
-      buffer: { totalMs: 300000, lapBufferMs: 250000, fixedSafetyBufferMs: 30000, decisionLeadMs: 10000, timingUncertaintyMs: 10000 },
+      buffer: { totalMs: 280000, lapBufferMs: 250000, fixedSafetyBufferMs: 30000 },
       next: { latestSafeEntryElapsedMs: 5000000, latestPossibleEntryElapsedMs: 5300000 }
     },
     recommendation: { action: 'PLAN PIT', reason: 'Keep this stop before the safe deadline.', level: 'normal' },
@@ -264,7 +263,7 @@ const updatedState = {
         },
         lapStrip: [
           { lapNumber: 1, lapTimeMs: 123500, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'normal', highlight: 'class-best', marker: '', tooltip: 'Nigel Moore · Green flag' },
-          { lapNumber: 2, lapTimeMs: 180000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'neutralized', highlight: 'none', marker: '', tooltip: 'Nigel Moore · FCY' },
+          { lapNumber: 2, lapTimeMs: 180000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'neutralized', highlight: 'none', marker: '', manualLapStatus: 'invalid', tooltip: 'Nigel Moore · FCY' },
           { lapNumber: 3, lapTimeMs: 140000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'pit-in', highlight: 'none', marker: 'P', tooltip: 'Nigel Moore · pit-in' },
           { lapNumber: 4, lapTimeMs: 135000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'pit-out', highlight: 'none', marker: '', tooltip: 'Nigel Moore · pit-out' }
         ]
@@ -318,6 +317,7 @@ let lastSettingsPatch = null;
 let graphsOpenCount = 0;
 let lastGraphsCar = null;
 let themeUpdate = null;
+let lastLapStatusPayload = null;
 const liveTiming = {
   getSettings: async () => settings,
   setSettings: async (patch) => {
@@ -331,6 +331,7 @@ const liveTiming = {
   getCollectorState: async () => initialState,
   openLiveWindow: async () => true,
   openGraphsWindow: async (carNumber) => { graphsOpenCount += 1; lastGraphsCar = carNumber; return true; },
+  updateLapStatus: async (payload) => { lastLapStatusPayload = payload; return { ok: true, state: updatedState }; },
   onThemeUpdate: (callback) => { themeUpdate = callback; return () => {}; },
   exportCurrent: async () => ({ csvPath: 'rows.csv', jsonPath: 'rows.json', historyPath: 'history.json' }),
   onCollectorUpdate: (callback) => { collectorUpdate = callback; return () => {}; }
@@ -403,7 +404,41 @@ module.exports = (async () => {
   assert.strictEqual(lapRows[1].classList.contains('pit-in'), true);
   assert.strictEqual(lapRows[1].children[3].textContent, 'P');
   assert.strictEqual(lapRows[2].classList.contains('neutralized'), true);
+  assert.strictEqual(lapRows[2].classList.contains('manual-invalid'), true);
+  assert.strictEqual(lapRows[2].children[3].textContent, 'INV', 'manual invalid laps show why they are excluded from averages');
   assert.strictEqual(lapRows[3].classList.contains('class-best'), true);
+  await document.getElementById('lap-edit-toggle').trigger('click');
+  await flushAsync();
+  const editableRows = document.getElementById('lap-strip-list').children;
+  assert.strictEqual(document.getElementById('lap-strip').classList.contains('editing'), true, 'lap strip enters manual status edit mode');
+  const statusSelect = editableRows[0].children[4];
+  assert.strictEqual(statusSelect.className, 'lap-status-select');
+  statusSelect.value = 'track-limits';
+  await statusSelect.trigger('change');
+  await flushAsync();
+  assert.strictEqual(lastLapStatusPayload.carNumber, '13');
+  assert.strictEqual(lastLapStatusPayload.lapNumber, 4);
+  assert.strictEqual(lastLapStatusPayload.lapTimeMs, 135000);
+  assert.strictEqual(lastLapStatusPayload.status, 'track-limits', 'manual lap status edits are sent to the main process');
+  const manyLapState = {
+    ...updatedState,
+    lapHistory: Array.from({ length: 25 }, (_, index) => ({
+      carNumber: '13',
+      driverName: 'Nigel Moore',
+      lapNumber: index + 1,
+      lapTimeMs: 125000 + index,
+      pitInfo: '0',
+      sessionFlag: 'Green flag',
+      collectedAt: `2026-06-25T10:${String(index).padStart(2, '0')}:00.000Z`
+    }))
+  };
+  collectorUpdate(manyLapState);
+  await flushAsync();
+  assert.strictEqual(
+    [...document.getElementById('lap-strip-list').children].filter((row) => row.children[4]?.className === 'lap-status-select').length,
+    25,
+    'manual status edit mode exposes every stored lap, not only the latest 20'
+  );
   document.getElementById('lap-strip-list').scrollTop = 84;
   collectorUpdate(updatedState);
   await flushAsync();
@@ -467,7 +502,7 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('pit-next').textContent, 'PLAN PIT');
   assert.ok(document.getElementById('pit-detail').textContent.includes('safe by 1:23:20'));
   assert.ok(document.getElementById('pit-detail').textContent.includes('legal limit 1:28:20'));
-  assert.ok(document.getElementById('pit-detail').textContent.includes('buffer 5:00'));
+  assert.ok(document.getElementById('pit-detail').textContent.includes('buffer 4:40'));
   assert.ok(document.getElementById('pit-projection').textContent.includes('PIC 2'));
   assert.ok(document.getElementById('pit-projection').textContent.includes('0:05.000 behind #2'));
   assert.ok(document.getElementById('pit-projection').textContent.includes('0:10.000 ahead #56'));
@@ -527,19 +562,6 @@ module.exports = (async () => {
   document.getElementById('pit-fcy-speed').value = '70';
   document.getElementById('pit-safety-laps').value = '1.5';
   document.getElementById('pit-safety-seconds').value = '45';
-  document.getElementById('pit-decision-seconds').value = '20';
-  document.getElementById('pit-uncertainty-seconds').value = '15';
-  document.getElementById('pit-rule-reference').value = 'pit-exit';
-  document.getElementById('pit-fcy-consider-seconds').value = '8';
-  document.getElementById('pit-fcy-strong-seconds').value = '18';
-  document.getElementById('pit-tyre-enabled').checked = true;
-  document.getElementById('pit-current-tyre').value = 'dry';
-  document.getElementById('pit-candidate-tyre').value = 'wet';
-  document.getElementById('pit-tyre-gain-min').value = '2.5';
-  document.getElementById('pit-tyre-gain-max').value = '4.0';
-  document.getElementById('pit-tyre-expected-laps').value = '12';
-  document.getElementById('pit-tyre-extra-seconds').value = '10';
-  document.getElementById('pit-tyre-combined').checked = true;
   await document.getElementById('pit-fcy-speed').trigger('input');
   assert.ok(document.getElementById('pit-distance-note').textContent.includes('36.0s'));
   await document.getElementById('pit-setup-save').trigger('click');
@@ -554,21 +576,7 @@ module.exports = (async () => {
   assert.strictEqual(lastSettingsPatch.pitRules.fcySpeedKph, 70);
   assert.strictEqual(lastSettingsPatch.pitRules.safetyBufferLaps, 1.5);
   assert.strictEqual(lastSettingsPatch.pitRules.fixedSafetyBufferMs, 45000);
-  assert.strictEqual(lastSettingsPatch.pitRules.decisionLeadMs, 20000);
-  assert.strictEqual(lastSettingsPatch.pitRules.timingUncertaintyMs, 15000);
-  assert.strictEqual(lastSettingsPatch.pitRules.ruleTimingReference, 'pit-exit');
-  assert.strictEqual(lastSettingsPatch.pitRules.fcyConsiderSavingsMs, 8000);
-  assert.strictEqual(lastSettingsPatch.pitRules.fcyStrongSavingsMs, 18000);
-  assert.deepStrictEqual({ ...lastSettingsPatch.tyreStrategy }, {
-    enabled: true,
-    currentTyre: 'dry',
-    candidateTyre: 'wet',
-    gainMinMsPerLap: 2500,
-    gainMaxMsPerLap: 4000,
-    expectedLaps: 12,
-    additionalPitTimeMs: 10000,
-    combinedWithPlannedStop: true
-  });
+  assert.strictEqual('tyreStrategy' in lastSettingsPatch, false);
   assert.strictEqual(document.getElementById('pit-setup-modal').classList.contains('hidden'), true);
 
   collectorUpdate({ ...updatedState, mode: 'live', status: 'collecting' });

@@ -14,15 +14,15 @@ const history = stintComparisonHistory();
 const driverLaps = graphData.driverLapTimes(history, 33);
 assert.strictEqual(driverLaps.type, 'line');
 assert.deepStrictEqual(driverLaps.series.map((series) => series.name), ['Driver 1', 'Driver 2', 'Driver 3']);
-assert.strictEqual(driverLaps.series[0].points.length, 20);
+assert.strictEqual(driverLaps.series[0].points.length, 19);
 assert.strictEqual(driverLaps.series[2].points.at(-1).x, 10);
 assert.strictEqual(driverLaps.series[0].points[2].x, 3);
 assert.strictEqual(driverLaps.series[1].points[2].x, 3, 'third valid lap of every driver shares the same x-position');
 assert.strictEqual(driverLaps.series[1].points[2].raceLapNumber, 23, 'tooltip data retains the real race lap');
 const driverLapsWithScGap = graphData.driverLapTimes([
-  lap({ carNumber: 44, teamName: 'Gap Team', driverName: 'Gap Driver', lapNumber: 1, lapTimeMs: 100000, sector1Ms: 30000, sector2Ms: 40000, sector3Ms: 30000 }),
-  lap({ carNumber: 44, teamName: 'Gap Team', driverName: 'Gap Driver', lapNumber: 2, lapTimeMs: 160000, sector1Ms: 50000, sector2Ms: 60000, sector3Ms: 50000, sessionFlag: 'Safety car' }),
-  lap({ carNumber: 44, teamName: 'Gap Team', driverName: 'Gap Driver', lapNumber: 3, lapTimeMs: 101000, sector1Ms: 30000, sector2Ms: 40000, sector3Ms: 31000 })
+  lap({ carNumber: 44, teamName: 'Gap Team', driverName: 'Gap Driver', lapNumber: 10, lapTimeMs: 100000, sector1Ms: 30000, sector2Ms: 40000, sector3Ms: 30000 }),
+  lap({ carNumber: 44, teamName: 'Gap Team', driverName: 'Gap Driver', lapNumber: 11, lapTimeMs: 160000, sector1Ms: 50000, sector2Ms: 60000, sector3Ms: 50000, sessionFlag: 'Safety car' }),
+  lap({ carNumber: 44, teamName: 'Gap Team', driverName: 'Gap Driver', lapNumber: 12, lapTimeMs: 101000, sector1Ms: 30000, sector2Ms: 40000, sector3Ms: 31000 })
 ], 44);
 assert.deepStrictEqual(driverLapsWithScGap.series[0].points.map((point) => point.x), [1, 2], 'excluded laps leave no gap in valid-lap comparison numbering');
 
@@ -41,7 +41,7 @@ assert.deepStrictEqual(
 const driverPace = graphData.driverPaceComparison(history, 33, 10);
 assert.strictEqual(driverPace.type, 'bar');
 assert.deepStrictEqual(driverPace.categories, ['Driver 1', 'Driver 2', 'Driver 3']);
-assert.strictEqual(driverPace.series[0].values[0], 100000);
+assert.strictEqual(driverPace.series[0].values[0], 100010);
 assert.strictEqual(driverPace.series[2].values[0], 100145);
 assert.strictEqual(driverPace.series[2].values[2], 102045);
 const qualifyingDriverPace = graphData.driverPaceComparison(history, 33, 10, 'qualifying');
@@ -58,7 +58,7 @@ const rollingInput = [100000, 101000, 102000, 103000, 104000, 105000].map((lapTi
   carNumber: 8,
   teamName: 'Rolling Team',
   driverName: 'Rolling Driver',
-  lapNumber: index + 1,
+  lapNumber: index + 2,
   lapTimeMs,
   sector1Ms: 30000,
   sector2Ms: 40000,
@@ -76,21 +76,21 @@ const neutralizedHistory = [
 ];
 const combined = [...history, ...neutralizedHistory];
 const combinedLaps = graphData.driverLapTimes(combined, 33);
-assert.strictEqual(combinedLaps.series[0].points.length, 20, 'FCY laps are omitted from the graph entirely');
-assert.strictEqual(combinedLaps.series[0].points.at(-1).x, 20);
+assert.strictEqual(combinedLaps.series[0].points.length, 19, 'FCY laps and the opening race lap are omitted from the graph entirely');
+assert.strictEqual(combinedLaps.series[0].points.at(-1).x, 19);
 const combinedPace = graphData.driverPaceComparison(combined, 33);
-assert.strictEqual(combinedPace.series[1].values[0], 100095, 'FCY laps do not affect driver lap averages');
+assert.strictEqual(combinedPace.series[1].values[0], 100100, 'FCY laps and the opening race lap do not affect driver lap averages');
 const combinedSectors = graphData.driverSectorComparison(combined, 33);
 assert.ok(combinedSectors.series[0].values[0] > 30000, 'eligible pre-FCY sectors still affect sector averages');
-assert.strictEqual(combinedSectors.series[4].values[0], 30095, 'ineligible FCY S3 values are excluded');
+assert.strictEqual(combinedSectors.series[4].values[0], 30100, 'ineligible FCY and opening-lap S3 values are excluded');
 
 const classGraph = graphData.classPaceComparison(history, 33, 5);
 assert.strictEqual(classGraph.type, 'line');
 assert.deepStrictEqual(classGraph.series.map((series) => series.carNumber), ['33', '2', '9']);
 assert.strictEqual(classGraph.series.find((series) => series.carNumber === '33').highlight, true);
 assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').highlight, false);
-assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').points.length, 20);
-assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').points[0].y, 99000);
+assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').points.length, 19);
+assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').points[0].y, 99010);
 assert.strictEqual(classGraph.series.find((series) => series.carNumber === '33').points[0].deltaToOurCarMs, 0);
 assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').points[0].deltaToOurCarMs, -1000);
 

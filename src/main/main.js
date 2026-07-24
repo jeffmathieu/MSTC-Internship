@@ -158,7 +158,6 @@ function normalizeSettings(settings) {
     ? requestedAnalysisFilter
     : 'combined';
   const conditionPhaseCounter = Math.max(1, Math.floor(Number(settings?.conditionPhaseCounter) || 1));
-  const tyreStrategy = settings?.tyreStrategy || {};
   const legacyReferenceTimes = { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimes || {}) };
   const referenceTimesByMode = {
     race: { ...DEFAULT_REFERENCE_TIMES, ...(settings?.referenceTimesByMode?.race || legacyReferenceTimes) },
@@ -175,16 +174,6 @@ function normalizeSettings(settings) {
     analysisConditionFilter,
     conditionPhaseCounter,
     conditionPhaseId: String(settings?.conditionPhaseId || `${trackCondition}-${conditionPhaseCounter}`),
-    tyreStrategy: {
-      enabled: tyreStrategy.enabled === true,
-      currentTyre: ['dry', 'wet', 'unknown'].includes(tyreStrategy.currentTyre) ? tyreStrategy.currentTyre : 'unknown',
-      candidateTyre: ['dry', 'wet', 'unknown'].includes(tyreStrategy.candidateTyre) ? tyreStrategy.candidateTyre : 'unknown',
-      gainMinMsPerLap: Math.max(0, Number(tyreStrategy.gainMinMsPerLap) || 0),
-      gainMaxMsPerLap: Math.max(0, Number(tyreStrategy.gainMaxMsPerLap) || 0),
-      additionalPitTimeMs: Math.max(0, Number(tyreStrategy.additionalPitTimeMs) || 0),
-      expectedLaps: Math.max(0, Math.floor(Number(tyreStrategy.expectedLaps) || 0)),
-      combinedWithPlannedStop: tyreStrategy.combinedWithPlannedStop !== false
-    },
     pitCircuitId,
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     referenceTimesByMode,
@@ -222,16 +211,6 @@ function loadSettings() {
     analysisConditionFilter: 'combined',
     conditionPhaseCounter: 1,
     conditionPhaseId: 'dry-1',
-    tyreStrategy: {
-      enabled: false,
-      currentTyre: 'unknown',
-      candidateTyre: 'unknown',
-      gainMinMsPerLap: 0,
-      gainMaxMsPerLap: 0,
-      additionalPitTimeMs: 0,
-      expectedLaps: 0,
-      combinedWithPlannedStop: true
-    },
     comparisonCar: '',
     referenceTimes: DEFAULT_REFERENCE_TIMES,
     storageFolder: defaultStorageFolder(),
@@ -593,10 +572,6 @@ function buildAndWritePitstopPlan(settings, context, rows, carNumber) {
     rules: {
       ...settings.pitRules,
       averageLapMs: averageLapForPitPlan(settings, followedCarNumber)
-    },
-    strategyInputs: {
-      currentCondition: settings.trackCondition,
-      tyreScenario: settings.tyreStrategy
     }
   });
   const payload = { ...plan, pitState };
@@ -1054,6 +1029,113 @@ function updateLapHistory(settings, storageRows) {
   return newEntries.length;
 }
 
+function normalizeManualLapStatusInput(value) {
+  const status = String(value || '').trim().toLowerCase();
+  if (['fcy', 'full-course-yellow', 'full course yellow'].includes(status)) return 'fcy';
+  if (['sc', 'safety-car', 'safety car'].includes(status)) return 'sc';
+  if (['track-limits', 'track limits', 'tracklimits'].includes(status)) return 'track-limits';
+  if (['invalid', 'ongeldig', 'excluded', 'exclude'].includes(status)) return 'invalid';
+  return 'normal';
+}
+
+function manualLapPatch(status) {
+  const normalized = normalizeManualLapStatusInput(status);
+  if (normalized === 'fcy' || normalized === 'sc') {
+    const flag = normalized === 'fcy' ? 'Full Course Yellow' : 'Safety car';
+    return {
+      manualLapStatus: normalized,
+      sessionFlag: flag,
+      lapFlag: flag,
+      sector1Flag: flag,
+      sector2Flag: flag,
+      sector3Flag: flag,
+      paceEligible: 'false',
+      sector1Eligible: 'false',
+      sector2Eligible: 'false',
+      sector3Eligible: 'false'
+    };
+  }
+  if (normalized === 'track-limits' || normalized === 'invalid') {
+    return {
+      manualLapStatus: normalized,
+      paceEligible: 'false',
+      sector1Eligible: 'false',
+      sector2Eligible: 'false',
+      sector3Eligible: 'false'
+    };
+  }
+  return {
+    manualLapStatus: '',
+    sessionFlag: 'Green flag',
+    lapFlag: 'Green flag',
+    sector1Flag: 'Green flag',
+    sector2Flag: 'Green flag',
+    sector3Flag: 'Green flag',
+    paceEligible: 'true',
+    sector1Eligible: 'true',
+    sector2Eligible: 'true',
+    sector3Eligible: 'true'
+  };
+}
+
+function manualLapTargetMatches(entry, target = {}) {
+  if (String(entry.carNumber || '') !== String(target.carNumber || '')) return false;
+  const entryLap = String(entry.lapNumber || '');
+  const targetLap = String(target.lapNumber || '');
+  if (entryLap && targetLap && entryLap !== targetLap) return false;
+  if (target.collectedAt && entry.collectedAt) return String(entry.collectedAt) === String(target.collectedAt);
+  if (target.lapTimeMs !== undefined && String(entry.lapTimeMs || '') !== String(target.lapTimeMs || '')) return false;
+  return Boolean(entryLap || targetLap || target.lapTimeMs !== undefined);
+}
+
+function rewriteLapHistoryFiles(settings, history) {
+  const folder = ensureStorage(settings);
+  fs.writeFileSync(
+    path.join(folder, 'lap_history.jsonl'),
+    history.map((entry) => JSON.stringify(entry)).join('\n') + (history.length ? '\n' : '')
+  );
+  fs.writeFileSync(path.join(folder, 'lap_history.csv'), toCsvRows(history, LAP_HISTORY_COLUMNS));
+}
+
+function rebuildCollectorDerivedState(settings, context = null, rows = collectorState.rows || []) {
+  const generatedAt = context?.collectedAt || new Date().toISOString();
+  const followedCars = normalizeFollowedCars(settings);
+  collectorState.stintState = buildStintState(collectorState.lapHistory || [], followedCars, generatedAt, {
+    generatedAt,
+    liveRows: rows,
+    previousState: collectorState.stintState
+  });
+  fs.writeFileSync(path.join(ensureStorage(settings), 'stint_state.json'), JSON.stringify(collectorState.stintState, null, 2));
+  collectorState.analyticsSummary = writeAnalyticsSummary(settings, context || { collectedAt: generatedAt, session: collectorState.session || {} }, rows);
+  collectorState.lapPredictionsByCar = writeLapPredictions(settings, context || { collectedAt: generatedAt }, rows);
+  if (normalizeMode(settings.sessionMode) === 'race') {
+    collectorState.pitstopPlansByCar = writePitstopPlans(settings, context || { collectedAt: generatedAt, session: collectorState.session || {} }, rows);
+  }
+  const primaryCar = String(settings.followedCar || '');
+  collectorState.lapPrediction = collectorState.lapPredictionsByCar?.[primaryCar] || null;
+  collectorState.pitstopPlan = collectorState.pitstopPlansByCar?.[primaryCar] || null;
+  collectorState.storage = storageInfo(settings);
+  return collectorState;
+}
+
+function updateStoredLapManualStatus(payload = {}) {
+  const settings = loadSettings();
+  const patch = manualLapPatch(payload.status);
+  let changed = false;
+  const nextHistory = (collectorState.lapHistory || []).map((entry) => {
+    if (!manualLapTargetMatches(entry, payload)) return entry;
+    changed = true;
+    return { ...entry, ...patch };
+  });
+  if (!changed) return { ok: false, message: 'Lap not found', state: collectorState };
+  collectorState.lapHistory = nextHistory;
+  rewriteLapHistoryFiles(settings, nextHistory);
+  rebuildCollectorDerivedState(settings);
+  collectorState.message = `Lap ${payload.lapNumber || ''} marked as ${normalizeManualLapStatusInput(payload.status)}.`;
+  broadcastState();
+  return { ok: true, state: collectorState };
+}
+
 // Writes the latest table/session snapshot to predictable filenames. These files
 // are overwritten on every successful poll/tick so external tools can read the
 // current state without searching for timestamps.
@@ -1248,6 +1330,7 @@ ipcMain.handle('collector:stop', () => stopCollector(true));
 ipcMain.handle('collector:getState', () => collectorState);
 ipcMain.handle('collector:openLiveWindow', () => { if (liveWindow && !liveWindow.isDestroyed()) { liveWindow.show(); liveWindow.focus(); return true; } return false; });
 ipcMain.handle('graphs:open', (_event, carNumber) => openGraphsWindow(carNumber));
+ipcMain.handle('laps:updateStatus', (_event, payload) => updateStoredLapManualStatus(payload));
 
 // Creates timestamped exports of the current rows and in-memory lap history.
 // The always-overwritten "latest_*" files are written by saveLatestSnapshot().

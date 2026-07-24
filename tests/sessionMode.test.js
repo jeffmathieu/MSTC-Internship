@@ -24,15 +24,15 @@ function makeLap(carNumber, className, teamName, driverName, lapNumber, lapTimeM
 }
 
 const history = [
-  makeLap(13, 'LMP3', 'Our Team', 'Driver A', 1, 100000),
-  makeLap(13, 'LMP3', 'Our Team', 'Driver A', 2, 110000),
-  makeLap(13, 'LMP3', 'Our Team', 'Driver B', 3, 99000),
-  makeLap(13, 'LMP3', 'Our Team', 'Driver B', 4, 130000),
-  makeLap(2, 'LMP3', 'Best Quali Car', 'Rival A', 1, 98000),
-  makeLap(2, 'LMP3', 'Best Quali Car', 'Rival A', 2, 101000),
-  makeLap(9, 'LMP3', 'Selected Car', 'Rival B', 1, 102000),
-  makeLap(9, 'LMP3', 'Selected Car', 'Rival B', 2, 104000),
-  makeLap(77, 'GT', 'Other Class', 'GT Driver', 1, 90000)
+  makeLap(13, 'LMP3', 'Our Team', 'Driver A', 2, 100000),
+  makeLap(13, 'LMP3', 'Our Team', 'Driver A', 3, 110000),
+  makeLap(13, 'LMP3', 'Our Team', 'Driver B', 4, 99000),
+  makeLap(13, 'LMP3', 'Our Team', 'Driver B', 5, 130000),
+  makeLap(2, 'LMP3', 'Best Quali Car', 'Rival A', 2, 98000),
+  makeLap(2, 'LMP3', 'Best Quali Car', 'Rival A', 3, 101000),
+  makeLap(9, 'LMP3', 'Selected Car', 'Rival B', 2, 102000),
+  makeLap(9, 'LMP3', 'Selected Car', 'Rival B', 3, 104000),
+  makeLap(77, 'GT', 'Other Class', 'GT Driver', 2, 90000)
 ];
 const rows = [
   { position: 1, carNumber: '2', className: 'LMP3', classPosition: 1, driver: 'Rival A' },
@@ -100,11 +100,11 @@ assert.deepStrictEqual(longPitView.matrix.classCars.map((car) => car.carNumber),
 // BIC/XIC use the same current-minus-reference sign contract even when the
 // target car's current driver differs from its full-car average.
 const targetScopeHistory = [
-  makeLap(13, 'LMP3', 'Our Team', 'Our Driver', 1, 120000),
-  makeLap(2, 'LMP3', 'BIC', 'Old BIC Driver', 1, 90000),
-  makeLap(2, 'LMP3', 'BIC', 'Current BIC Driver', 2, 110000),
-  makeLap(9, 'LMP3', 'XIC', 'Old XIC Driver', 1, 120000),
-  makeLap(9, 'LMP3', 'XIC', 'Current XIC Driver', 2, 100000)
+  makeLap(13, 'LMP3', 'Our Team', 'Our Driver', 2, 120000),
+  makeLap(2, 'LMP3', 'BIC', 'Old BIC Driver', 2, 90000),
+  makeLap(2, 'LMP3', 'BIC', 'Current BIC Driver', 3, 110000),
+  makeLap(9, 'LMP3', 'XIC', 'Old XIC Driver', 2, 120000),
+  makeLap(9, 'LMP3', 'XIC', 'Current XIC Driver', 3, 100000)
 ];
 const targetScopeRows = [
   { carNumber: '13', className: 'LMP3', driver: 'Our Driver' },
@@ -167,8 +167,8 @@ assert.strictEqual(noTimesAdjacent.ahead.bestLapDeltaMs, null);
 assert.strictEqual(noTimesAdjacent.ahead.trendState, 'neutral');
 
 const equalHistory = [
-  makeLap(13, 'LMP3', 'Our Team', 'Our Driver', 1, 100000),
-  makeLap(2, 'LMP3', 'Rival', 'Rival Driver', 1, 100000)
+  makeLap(13, 'LMP3', 'Our Team', 'Our Driver', 2, 100000),
+  makeLap(2, 'LMP3', 'Rival', 'Rival Driver', 2, 100000)
 ];
 const equalRows = [
   { position: 1, carNumber: '2', className: 'LMP3', classPosition: 1, driverName: 'Rival Driver' },

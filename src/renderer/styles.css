@@ -124,6 +124,11 @@ select:focus-visible {
   padding: 10px 9px 8px;
   border-bottom: 2px solid var(--line);
   background: var(--box);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  position: relative;
 }
 .lap-strip header span {
   display: block;
@@ -131,6 +136,39 @@ select:focus-visible {
   font-size: 15px;
   font-weight: 900;
   text-transform: uppercase;
+}
+.lap-edit-toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 2px solid var(--soft-line);
+  background: var(--box);
+  color: var(--muted);
+  font-size: 0;
+  line-height: 1;
+  font-weight: 900;
+  cursor: pointer;
+}
+.lap-edit-toggle::before,
+.edit-ref::before {
+  content: "✎";
+  display: block;
+  font-size: 13px;
+  line-height: 1;
+  transform: scaleX(-1);
+}
+.lap-edit-toggle::before { font-size: 10px; }
+.lap-edit-toggle.active {
+  border-color: var(--accent);
+  color: var(--ink);
 }
 .lap-strip-list {
   min-height: 0;
@@ -141,13 +179,26 @@ select:focus-visible {
   min-height: 42px;
   padding: 7px 7px;
   display: grid;
-  grid-template-columns: 27px minmax(0, 1fr) 23px 12px;
+  grid-template-columns: 27px minmax(0, 1fr) 22px 24px;
   gap: 5px;
   align-items: center;
   border-bottom: 1px solid var(--soft-line);
   background: var(--box);
   color: var(--ink);
   font-variant-numeric: tabular-nums;
+}
+.lap-strip.editing .lap-strip-row {
+  grid-template-columns: 27px minmax(0, 1fr) 18px 24px 47px;
+}
+.lap-status-select {
+  width: 47px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: var(--box);
+  color: var(--ink);
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 .lap-strip-row .lap-number { color: var(--muted); font-size: 11px; font-weight: 900; }
 .lap-strip-row.condition-wet .lap-number { color: var(--lap-strip-wet-lap-number-color); }
@@ -162,6 +213,31 @@ select:focus-visible {
   white-space: nowrap;
 }
 .lap-strip-row .lap-marker { text-align: right; font-size: 12px; font-weight: 900; }
+.lap-strip-row .manual-status-badge {
+  display: inline-flex;
+  justify-content: flex-end;
+  font-size: 10px;
+  font-weight: 900;
+  opacity: 0.85;
+}
+.lap-strip-row.manual-track-limits {
+  border-left: 5px solid color-mix(in srgb, #2477c8 72%, transparent);
+  padding-left: 3px;
+  background: color-mix(in srgb, #2477c8 9%, var(--box));
+}
+.lap-strip-row.manual-invalid {
+  border-left: 5px solid color-mix(in srgb, var(--bad) 70%, transparent);
+  padding-left: 3px;
+  background: color-mix(in srgb, var(--bad) 10%, var(--box));
+}
+.lap-strip-row.manual-track-limits .lap-time,
+.lap-strip-row.manual-invalid .lap-time {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  opacity: 0.74;
+}
+.lap-strip-row.manual-track-limits .manual-status-badge { color: #2477c8; }
+.lap-strip-row.manual-invalid .manual-status-badge { color: var(--bad); }
 .lap-strip-row.pit-in,
 .lap-strip-row.pit-out {
   border-left: 5px solid var(--lap-strip-pit-color);
@@ -375,17 +451,21 @@ button:disabled { cursor: not-allowed; opacity: .38; }
 }
 .edit-ref {
   position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 24px;
-  height: 24px;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
   border: 2px solid var(--soft-line);
   background: var(--control);
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0;
   line-height: 1;
-  transform: scaleX(-1);
 }
 .edit-ref:hover { border-color: var(--line); color: var(--ink); }
 .ref-edit-input {
@@ -1026,15 +1106,6 @@ pre {
   gap: 0 14px;
 }
 .pit-setup-grid .pit-circuit-field { grid-column: 1 / -1; }
-.pit-setup-grid .pit-tyre-toggle {
-  align-items: center;
-  grid-template-columns: 1fr auto;
-  min-height: 52px;
-}
-.pit-setup-grid .pit-tyre-toggle input {
-  width: 22px;
-  height: 22px;
-}
 .pit-setup-grid select {
   width: 100%;
   min-height: 39px;

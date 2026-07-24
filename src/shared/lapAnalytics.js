@@ -135,6 +135,7 @@ function normalizeLap(entry) {
     sector1Flag: String(entry.sector1Flag ?? ''),
     sector2Flag: String(entry.sector2Flag ?? ''),
     sector3Flag: String(entry.sector3Flag ?? ''),
+    manualLapStatus: normalizedManualLapStatus(entry.manualLapStatus),
     paceEligible: boolOrNull(entry.paceEligible),
     sector1Eligible: boolOrNull(entry.sector1Eligible),
     sector2Eligible: boolOrNull(entry.sector2Eligible),
@@ -181,13 +182,39 @@ function pitAffectedLap(lap) {
   return lap?.isPitLap === true || /^(inlap|outlap)$/i.test(String(lap?.lapPhase || ''));
 }
 
-function rowShowsInPit(lap) {
-  return /^(in|in pit|pit)$/i.test(String(lap?.state || '').trim());
+function isOpeningRaceLap(lap) {
+  return numberOrNull(lap?.lapNumber) === 1;
 }
 
-// Annotates old and new history without requiring a storage migration. A PIT
-// counter increase marks the just-completed lap as the pit/inlap and the next
-// completed lap as the outlap. Both remain stored but are excluded from pace.
+function pitStatusText(lap) {
+  return [lap?.state, lap?.eta, lap?.pitStatus, lap?.pitInfoText]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
+function rowShowsInPit(lap) {
+  return /(?:^|\b)(?:in\s*pit|in-pit|pit|in)(?:\b|$)/i.test(pitStatusText(lap));
+}
+
+function rowShowsOutlap(lap) {
+  return /(?:^|\b)(?:out\s*lap|outlap)(?:\b|$)/i.test(pitStatusText(lap));
+}
+
+function normalizedManualLapStatus(value) {
+  const status = String(value || '').trim().toLowerCase();
+  if (['fcy', 'full-course-yellow', 'full course yellow'].includes(status)) return 'fcy';
+  if (['sc', 'safety-car', 'safety car'].includes(status)) return 'sc';
+  if (['track-limits', 'track limits', 'tracklimits'].includes(status)) return 'track-limits';
+  if (['invalid', 'ongeldig', 'excluded', 'exclude'].includes(status)) return 'invalid';
+  return '';
+}
+
+// Annotates old and new history without requiring a storage migration. Explicit
+// in-pit rows queue the next completed lap as the outlap. If the provider only
+// exposes a cumulative PIT counter, the lap where that counter increases is the
+// pit-in lap and the next completed lap is the outlap. Both remain stored but
+// are excluded from pace.
 function annotatePitPhases(laps) {
   const stateByCar = new Map();
   const annotated = [];
@@ -199,8 +226,9 @@ function annotatePitPhases(laps) {
     const driverName = String(lap.driverName || '').trim();
     const driverChanged = Boolean(driverName && state.previousDriver && driverName !== state.previousDriver);
 
-    const explicitlyInPit = rowShowsInPit(lap);
     const pitCountIncreased = pitCount !== null && state.previousPitCount !== null && pitCount > state.previousPitCount;
+    const explicitlyInPit = rowShowsInPit(lap);
+    const explicitlyOutlap = rowShowsOutlap(lap);
     const driverChangedAtPit = driverChanged && (pitCountIncreased || state.previousWasInPit);
     if (driverChangedAtPit && state.previousIndex !== null) {
       // A completed lap attributed to a new driver can only follow a stop. The
@@ -212,6 +240,13 @@ function annotatePitPhases(laps) {
         lapPhase: 'inlap',
         isPitLap: true
       };
+      lapPhase = 'outlap';
+      isPitLap = true;
+      state.nextIsOutlap = false;
+    } else if (!lapPhase && explicitlyOutlap) {
+      // RIS and some other providers expose "OUTLAP" in the ETA/status area
+      // while the car has just left pit lane. If that text is attached to a
+      // stored completed lap, it is direct evidence that this lap is pit-out.
       lapPhase = 'outlap';
       isPitLap = true;
       state.nextIsOutlap = false;
@@ -246,6 +281,11 @@ function annotatePitPhases(laps) {
 // Keeping reasons here prevents each consumer inventing a different pace filter.
 function baseLapExclusionReasons(lap) {
   const reasons = [];
+  const manualStatus = normalizedManualLapStatus(lap?.manualLapStatus);
+  if (manualStatus === 'track-limits') reasons.push('track-limits');
+  if (manualStatus === 'invalid') reasons.push('manual-invalid');
+  if (manualStatus === 'fcy' || manualStatus === 'sc') reasons.push('manual-neutralized');
+  if (isOpeningRaceLap(lap)) reasons.push('first-lap');
   if (lap?.lapPhase === 'inlap' || rowShowsInPit(lap)) reasons.push('pit-in');
   else if (lap?.lapPhase === 'outlap') reasons.push('pit-out');
   else if (pitAffectedLap(lap)) reasons.push('pit-affected');
@@ -260,7 +300,9 @@ function baseLapExclusionReasons(lap) {
 function lapPaceEligible(lap) {
   // Hard exclusions always win over a stale/incorrect explicit true value.
   // One neutralized sector means the complete lap was not fully green.
+  if (isOpeningRaceLap(lap)) return false;
   if (pitAffectedLap(lap)) return false;
+  if (normalizedManualLapStatus(lap?.manualLapStatus)) return false;
   if ([lap.lapFlag, lap.sessionFlag, lap.sector1Flag, lap.sector2Flag, lap.sector3Flag].some(isNeutralizedFlag)) return false;
   const explicit = boolOrNull(lap.paceEligible);
   if (explicit !== null) return explicit;
@@ -306,7 +348,9 @@ function representativePaceLaps(laps, options = {}) {
 // deliberately more granular than lapPaceEligible: a lap can become FCY in S3
 // while S1/S2 remain valid.
 function sectorPaceEligible(lap, sectorNumber, options = {}) {
+  if (isOpeningRaceLap(lap)) return false;
   if (pitAffectedLap(lap)) return false;
+  if (normalizedManualLapStatus(lap?.manualLapStatus)) return false;
   const conditionFilter = trackConditions.normalizeAnalysisFilter(options.conditionFilter, 'combined');
   if (!trackConditions.sectorMatchesCondition(lap, sectorNumber, conditionFilter)) return false;
   const explicit = boolOrNull(lap[`sector${sectorNumber}Eligible`]);
@@ -559,6 +603,7 @@ return {
   average,
   median,
   isNeutralizedFlag,
+  normalizedManualLapStatus,
   captureSectorFlags,
   lapPaceEligible,
   representativePaceLaps,
@@ -566,7 +611,9 @@ return {
   normalizeLap,
   pitCountFromLap,
   pitAffectedLap,
+  isOpeningRaceLap,
   rowShowsInPit,
+  rowShowsOutlap,
   annotatePitPhases,
   baseLapExclusionReasons,
   completedLaps,
