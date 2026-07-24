@@ -182,6 +182,10 @@ function pitAffectedLap(lap) {
   return lap?.isPitLap === true || /^(inlap|outlap)$/i.test(String(lap?.lapPhase || ''));
 }
 
+function isOpeningRaceLap(lap) {
+  return numberOrNull(lap?.lapNumber) === 1;
+}
+
 function pitStatusText(lap) {
   return [lap?.state, lap?.eta, lap?.pitStatus, lap?.pitInfoText]
     .map((value) => String(value || '').trim())
@@ -281,6 +285,7 @@ function baseLapExclusionReasons(lap) {
   if (manualStatus === 'track-limits') reasons.push('track-limits');
   if (manualStatus === 'invalid') reasons.push('manual-invalid');
   if (manualStatus === 'fcy' || manualStatus === 'sc') reasons.push('manual-neutralized');
+  if (isOpeningRaceLap(lap)) reasons.push('first-lap');
   if (lap?.lapPhase === 'inlap' || rowShowsInPit(lap)) reasons.push('pit-in');
   else if (lap?.lapPhase === 'outlap') reasons.push('pit-out');
   else if (pitAffectedLap(lap)) reasons.push('pit-affected');
@@ -295,6 +300,7 @@ function baseLapExclusionReasons(lap) {
 function lapPaceEligible(lap) {
   // Hard exclusions always win over a stale/incorrect explicit true value.
   // One neutralized sector means the complete lap was not fully green.
+  if (isOpeningRaceLap(lap)) return false;
   if (pitAffectedLap(lap)) return false;
   if (normalizedManualLapStatus(lap?.manualLapStatus)) return false;
   if ([lap.lapFlag, lap.sessionFlag, lap.sector1Flag, lap.sector2Flag, lap.sector3Flag].some(isNeutralizedFlag)) return false;
@@ -342,6 +348,7 @@ function representativePaceLaps(laps, options = {}) {
 // deliberately more granular than lapPaceEligible: a lap can become FCY in S3
 // while S1/S2 remain valid.
 function sectorPaceEligible(lap, sectorNumber, options = {}) {
+  if (isOpeningRaceLap(lap)) return false;
   if (pitAffectedLap(lap)) return false;
   if (normalizedManualLapStatus(lap?.manualLapStatus)) return false;
   const conditionFilter = trackConditions.normalizeAnalysisFilter(options.conditionFilter, 'combined');
@@ -604,6 +611,7 @@ return {
   normalizeLap,
   pitCountFromLap,
   pitAffectedLap,
+  isOpeningRaceLap,
   rowShowsInPit,
   rowShowsOutlap,
   annotatePitPhases,

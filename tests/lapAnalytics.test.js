@@ -11,6 +11,7 @@ const {
   normalizeLap,
   pitCountFromLap,
   pitAffectedLap,
+  isOpeningRaceLap,
   rowShowsInPit,
   annotatePitPhases,
   baseLapExclusionReasons,
@@ -147,12 +148,14 @@ const manualTrackLimitsHistory = completedLaps([
   lap({ carNumber: 33, teamName: 'Our Team', driverName: 'Driver A', lapNumber: 3, lapTimeMs: 102000, sector1Ms: 31000, sector2Ms: 41000, sector3Ms: 30000 })
 ]);
 const manualTrackLimitsStats = statsForLaps(manualTrackLimitsHistory);
+assert.strictEqual(isOpeningRaceLap(manualTrackLimitsHistory[0]), true);
+assert.strictEqual(lapPaceEligible(manualTrackLimitsHistory[0]), false);
 assert.strictEqual(lapPaceEligible(manualTrackLimitsHistory[1]), false);
 assert.strictEqual(sectorPaceEligible(manualTrackLimitsHistory[1], 1), false);
-assert.strictEqual(manualTrackLimitsStats.paceLapCount, 2);
-assert.strictEqual(manualTrackLimitsStats.averageLapMs, 101000);
-assert.strictEqual(manualTrackLimitsStats.bestLapMs, 100000);
-assert.deepStrictEqual(manualTrackLimitsStats.selection.lap.excludedLaps[0].reasons, ['track-limits']);
+assert.strictEqual(manualTrackLimitsStats.paceLapCount, 1);
+assert.strictEqual(manualTrackLimitsStats.averageLapMs, 102000);
+assert.strictEqual(manualTrackLimitsStats.bestLapMs, 102000);
+assert.deepStrictEqual(manualTrackLimitsStats.selection.lap.excludedLaps.map((lapEntry) => lapEntry.reasons), [['first-lap'], ['track-limits']]);
 
 const noisyHistory = [
   { carNumber: '', lapTimeMs: '100000', lapNumber: '1' },
@@ -168,11 +171,11 @@ assert.strictEqual(average(car33Laps.map((lap) => lap.lapTimeMs)), 99500);
 
 const tenLapStats = statsForLaps(car33Laps);
 assert.strictEqual(tenLapStats.lapCount, 10);
-assert.strictEqual(tenLapStats.paceLapCount, 10);
-assert.strictEqual(tenLapStats.averageLapMs, 99500);
+assert.strictEqual(tenLapStats.paceLapCount, 9);
+assert.strictEqual(tenLapStats.averageLapMs, 99444.44444444444);
 assert.strictEqual(tenLapStats.bestLapMs, 95000);
 assert.strictEqual(tenLapStats.lastLapMs, 95000);
-assert.strictEqual(tenLapStats.bestSector1Ms, 30000);
+assert.strictEqual(tenLapStats.bestSector1Ms, 30100);
 assert.strictEqual(tenLapStats.bestSector2Ms, 39100);
 assert.strictEqual(tenLapStats.bestSector3Ms, 25000);
 
@@ -186,9 +189,10 @@ assert.strictEqual(emptyStats.bestSector1Ms, null);
 const missingSectorStats = statsForLaps([
   { carNumber: '1', lapNumber: 1, lapTimeMs: 100000, sector1Ms: null, sector2Ms: 40000, sector3Ms: null }
 ]);
-assert.strictEqual(missingSectorStats.averageLapMs, 100000);
+assert.strictEqual(missingSectorStats.averageLapMs, null);
 assert.strictEqual(missingSectorStats.bestSector1Ms, null);
-assert.strictEqual(missingSectorStats.bestSector2Ms, 40000);
+assert.strictEqual(missingSectorStats.bestSector2Ms, null);
+assert.deepStrictEqual(missingSectorStats.selection.lap.excludedLaps[0].reasons, ['first-lap']);
 
 // RIS can expose elapsed session time as the first LAST value when collection
 // starts mid-session. It remains stored but must not distort pace statistics.
@@ -202,18 +206,19 @@ const representativeSpaLaps = representativePaceLaps(spaStartupLaps);
 assert.deepStrictEqual(representativeSpaLaps.map((entry) => entry.lapNumber), [2, 3, 4]);
 const spaStartupStats = statsForLaps(spaStartupLaps);
 assert.strictEqual(spaStartupStats.paceLapCount, 3);
-assert.strictEqual(spaStartupStats.excludedOutlierLapCount, 1);
+assert.strictEqual(spaStartupStats.excludedOutlierLapCount, 0);
+assert.strictEqual(spaStartupStats.selection.lap.excludedByReason['first-lap'], 1);
 assert.strictEqual(spaStartupStats.averageLapMs, 176906.66666666666);
 assert.strictEqual(spaStartupStats.lastLapMs, 173589);
 
 // Do not classify ordinary variation or a one-minute weather shift as garbage.
 const weatherTransition = [120000, 122000, 180000].map((lapTimeMs, index) => normalizeLap({
   carNumber: 7,
-  lapNumber: index + 1,
+  lapNumber: index + 2,
   lapTimeMs
 }));
 assert.strictEqual(representativePaceLaps(weatherTransition).length, 3);
-assert.strictEqual(representativePaceLaps(spaStartupLaps, { minimumSamples: 5 }).length, 4);
+assert.strictEqual(representativePaceLaps(spaStartupLaps, { minimumSamples: 5 }).length, 3);
 
 // A genuinely slow lap with a matching full sectorsum is evidence, not an
 // outlier: rain, a spin, or traffic may explain it and it must remain included.
@@ -234,7 +239,7 @@ const neutralizedHistory = [
   lap({ carNumber: 33, teamName: 'Our Team', driverName: 'Driver A', lapNumber: 4, lapTimeMs: 99000, sector1Ms: 31000, sector2Ms: 39000, sector3Ms: 29000, paceEligible: true, sector1Eligible: true, sector2Eligible: true, sector3Eligible: true })
 ];
 const normalizedNeutralized = completedLaps(neutralizedHistory);
-assert.strictEqual(lapPaceEligible(normalizedNeutralized[0]), true);
+assert.strictEqual(lapPaceEligible(normalizedNeutralized[0]), false);
 assert.strictEqual(lapPaceEligible(normalizedNeutralized[1]), false);
 assert.strictEqual(lapPaceEligible(normalizedNeutralized[2]), false);
 assert.strictEqual(sectorPaceEligible(normalizedNeutralized[2], 1), true);
@@ -324,16 +329,16 @@ assert.deepStrictEqual(auditableStats.selection.lap.excludedLaps.map((lapEntry) 
 
 const neutralizedStats = statsForLaps(normalizedNeutralized);
 assert.strictEqual(neutralizedStats.lapCount, 4);
-assert.strictEqual(neutralizedStats.paceLapCount, 2);
-assert.strictEqual(neutralizedStats.averageLapMs, 99500);
+assert.strictEqual(neutralizedStats.paceLapCount, 1);
+assert.strictEqual(neutralizedStats.averageLapMs, 99000);
 assert.strictEqual(neutralizedStats.bestLapMs, 99000);
 assert.strictEqual(neutralizedStats.lastLapMs, 99000);
 assert.strictEqual(neutralizedStats.bestSector1Ms, 28000);
 assert.strictEqual(neutralizedStats.bestSector2Ms, 39000);
 assert.strictEqual(neutralizedStats.bestSector3Ms, 29000);
-assert.strictEqual(neutralizedStats.averageSector1Ms, 29666.666666666668);
-assert.strictEqual(neutralizedStats.averageSector2Ms, 39500);
-assert.strictEqual(neutralizedStats.averageSector3Ms, 29500);
+assert.strictEqual(neutralizedStats.averageSector1Ms, 29500);
+assert.strictEqual(neutralizedStats.averageSector2Ms, 39000);
+assert.strictEqual(neutralizedStats.averageSector3Ms, 29000);
 
 const stintHistory = stintComparisonHistory();
 const ourDriverStats = driverStats(stintHistory, 33);
@@ -345,8 +350,8 @@ assert.strictEqual(lapsForDriver(stintHistory, 33, 'Driver 2').length, 20);
 
 const bestDriver = bestDriverByAverage(stintHistory, 33);
 assert.strictEqual(bestDriver.driverName, 'Driver 1');
-assert.strictEqual(bestDriver.averageLapMs, 100095);
-assert.strictEqual(bestDriver.bestLapMs, 100000);
+assert.strictEqual(bestDriver.averageLapMs, 100100);
+assert.strictEqual(bestDriver.bestLapMs, 100010);
 
 const driverComparison = compareBestDriverToCurrentDriver(stintHistory, 33, 'Driver 3');
 assert.strictEqual(driverComparison.bestDriver.driverName, 'Driver 1');
@@ -354,9 +359,9 @@ assert.strictEqual(driverComparison.currentDriver.driverName, 'Driver 3');
 assert.strictEqual(driverComparison.currentDriver.lastLapMs, 102090);
 assert.strictEqual(driverComparison.currentDriver.bestLapMs, 102000);
 assert.strictEqual(driverComparison.currentDriver.averageLapMs, 102045);
-assert.strictEqual(driverComparison.deltas.bestDriverBestLapToCurrentLastLapMs, 2090);
-assert.strictEqual(driverComparison.deltas.bestDriverBestLapToCurrentBestLapMs, 2000);
-assert.strictEqual(driverComparison.deltas.bestDriverAverageToCurrentAverageMs, 1950);
+assert.strictEqual(driverComparison.deltas.bestDriverBestLapToCurrentLastLapMs, 2080);
+assert.strictEqual(driverComparison.deltas.bestDriverBestLapToCurrentBestLapMs, 1990);
+assert.strictEqual(driverComparison.deltas.bestDriverAverageToCurrentAverageMs, 1945);
 
 const missingDriverComparison = compareBestDriverToCurrentDriver(stintHistory, 33, 'Driver 404');
 assert.strictEqual(missingDriverComparison, null);
@@ -386,7 +391,7 @@ assert.strictEqual(bestCarInClassByAverage(stintHistory, 'NOPE'), null);
 
 const bestClassCar = bestCarInClassByAverage(stintHistory, 'LMP3');
 assert.strictEqual(bestClassCar.carNumber, '2');
-assert.strictEqual(bestClassCar.averageLapMs, 99095);
+assert.strictEqual(bestClassCar.averageLapMs, 99100);
 
 const currentStint = currentStintStats(stintHistory, 33, 'Driver 3');
 assert.strictEqual(currentStint.driverName, 'Driver 3');
@@ -411,8 +416,8 @@ const classComparison = compareCarToClassTargets(stintHistory, 33, 9);
 assert.strictEqual(classComparison.bestClassCar.carNumber, '2');
 assert.strictEqual(classComparison.selectedCar.carNumber, '9');
 assert.strictEqual(classComparison.ourCurrentStint.driverName, 'Driver 3');
-assert.strictEqual(classComparison.deltas.currentStintAverageToBestClassCarAverageMs, 2950);
-assert.strictEqual(classComparison.deltas.currentStintAverageToSelectedCarAverageMs, 1450);
+assert.strictEqual(classComparison.deltas.currentStintAverageToBestClassCarAverageMs, 2945);
+assert.strictEqual(classComparison.deltas.currentStintAverageToSelectedCarAverageMs, 1445);
 
 const noSelectedComparison = compareCarToClassTargets(stintHistory, 33);
 assert.strictEqual(noSelectedComparison.selectedCar, null);
@@ -429,8 +434,8 @@ assert.strictEqual(unknownOurCarComparison.deltas.currentStintAverageToBestClass
 
 const dashboardAnalysis = buildDashboardAnalysis(stintHistory, { ourCarNumber: 33, selectedCarNumber: 9 });
 assert.strictEqual(dashboardAnalysis.currentDriverName, 'Driver 3');
-assert.strictEqual(dashboardAnalysis.driverComparison.deltas.bestDriverAverageToCurrentAverageMs, 1950);
-assert.strictEqual(dashboardAnalysis.classComparison.deltas.currentStintAverageToSelectedCarAverageMs, 1450);
+assert.strictEqual(dashboardAnalysis.driverComparison.deltas.bestDriverAverageToCurrentAverageMs, 1945);
+assert.strictEqual(dashboardAnalysis.classComparison.deltas.currentStintAverageToSelectedCarAverageMs, 1445);
 const liveDriverOverrideAnalysis = buildDashboardAnalysis(stintHistory, {
   ourCarNumber: 33,
   selectedCarNumber: 9,

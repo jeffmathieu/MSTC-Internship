@@ -27,12 +27,13 @@ assert.strictEqual(stint.closed, true);
 
 const combinedStats = analytics.statsForLaps(stint.laps);
 assert.strictEqual(combinedStats.lapCount, 30);
-assert.strictEqual(combinedStats.paceLapCount, 30);
-assert.strictEqual(combinedStats.selection.lap.excludedCount, 0);
+assert.strictEqual(combinedStats.paceLapCount, 29);
+assert.strictEqual(combinedStats.selection.lap.excludedCount, 1);
+assert.deepStrictEqual(combinedStats.selection.lap.excludedLaps[0].reasons, ['first-lap']);
 
 const byCondition = analytics.statsByCondition(stint.laps);
 assert.strictEqual(byCondition.wet.lapCount, 16);
-assert.strictEqual(byCondition.wet.paceLapCount, 16);
+assert.strictEqual(byCondition.wet.paceLapCount, 15);
 assert.strictEqual(byCondition.dry.lapCount, 10);
 assert.strictEqual(byCondition.dry.paceLapCount, 10);
 assert.strictEqual(byCondition.transition.lapCount, 4);
@@ -51,14 +52,14 @@ assert.strictEqual(reportStint.laps.length, 30);
 assert.strictEqual(reportStint.laps[0].lapCondition, 'wet');
 assert.strictEqual(reportStint.laps[7].lapCondition, 'dry');
 assert.strictEqual(reportStint.laps[24].lapCondition, 'transition');
-assert.strictEqual(reportStint.statsByCondition.wet.paceLapCount, 16);
+assert.strictEqual(reportStint.statsByCondition.wet.paceLapCount, 15);
 assert.strictEqual(reportStint.statsByCondition.dry.paceLapCount, 10);
 assert.strictEqual(reportStint.statsByCondition.transition.paceLapCount, 4);
-assert.strictEqual(reportStint.statsByCondition.combined.paceLapCount, 30);
+assert.strictEqual(reportStint.statsByCondition.combined.paceLapCount, 29);
 assert.ok(reportStint.classComparisons.length >= 2, 'same-class rivals during the stint are included');
 assert.ok(reportStint.teammates.length >= 1, 'other team-driver data is included for comparison');
-assert.match(reportStint.insights.compliance.lap.label, /^\d+\/30 safe$/);
-assert.match(reportStint.insights.compliance.sector1.label, /^\d+\/30 safe$/);
+assert.match(reportStint.insights.compliance.lap.label, /^\d+\/29 safe$/);
+assert.match(reportStint.insights.compliance.sector1.label, /^\d+\/29 safe$/);
 assert.ok(Number.isFinite(reportStint.insights.bestTheoreticalLapMs));
 assert.ok(Number.isFinite(reportStint.insights.averageTheoreticalLapMs));
 

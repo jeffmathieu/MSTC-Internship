@@ -52,20 +52,20 @@ assert.strictEqual(s1Finished.sector1Condition, 'transition');
 assert.strictEqual(s1Finished.sector2Condition, 'wet');
 
 const history = [
-  {
-    carNumber: '33', driverName: 'Driver', lapNumber: 1, lapTimeMs: 100000,
-    sector1Ms: 30000, sector2Ms: 40000, sector3Ms: 30000,
-    lapCondition: 'dry', sector1Condition: 'dry', sector2Condition: 'dry', sector3Condition: 'dry'
-  },
-  {
-    carNumber: '33', driverName: 'Driver', lapNumber: 2, lapTimeMs: 130000,
-    sector1Ms: 35000, sector2Ms: 55000, sector3Ms: 40000,
-    lapCondition: 'wet', sector1Condition: 'wet', sector2Condition: 'wet', sector3Condition: 'wet'
-  },
-  {
-    carNumber: '33', driverName: 'Driver', lapNumber: 3, lapTimeMs: 120000,
-    sector1Ms: 31000, sector2Ms: 50000, sector3Ms: 39000,
-    lapCondition: 'transition', sector1Condition: 'dry', sector2Condition: 'transition', sector3Condition: 'wet'
+	  {
+	    carNumber: '33', driverName: 'Driver', lapNumber: 2, lapTimeMs: 100000,
+	    sector1Ms: 30000, sector2Ms: 40000, sector3Ms: 30000,
+	    lapCondition: 'dry', sector1Condition: 'dry', sector2Condition: 'dry', sector3Condition: 'dry'
+	  },
+	  {
+	    carNumber: '33', driverName: 'Driver', lapNumber: 3, lapTimeMs: 130000,
+	    sector1Ms: 35000, sector2Ms: 55000, sector3Ms: 40000,
+	    lapCondition: 'wet', sector1Condition: 'wet', sector2Condition: 'wet', sector3Condition: 'wet'
+	  },
+	  {
+	    carNumber: '33', driverName: 'Driver', lapNumber: 4, lapTimeMs: 120000,
+	    sector1Ms: 31000, sector2Ms: 50000, sector3Ms: 39000,
+	    lapCondition: 'transition', sector1Condition: 'dry', sector2Condition: 'transition', sector3Condition: 'wet'
   }
 ];
 
