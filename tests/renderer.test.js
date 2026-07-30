@@ -125,7 +125,7 @@ function createFakeDocument() {
   ['best-sector1-card', 'best-sector2-card', 'best-sector3-card',
     'ref-sector1-card', 'ref-sector2-card', 'ref-sector3-card'
   ].forEach((id) => byId(id).classList.add('metric-box'));
-  ['best-time-card', 'predicted-lap-card', 'reference-lap-card'].forEach((id) => byId(id).classList.add('timing-row'));
+  ['last-time-card', 'best-time-card', 'predicted-lap-card', 'reference-lap-card'].forEach((id) => byId(id).classList.add('timing-row'));
 
   const metricChildren = {
     'best-time': 'best-time-card',
@@ -262,10 +262,10 @@ const updatedState = {
           sector3: { valueMs: 36000, classBestMs: 36000, isClassBest: true }
         },
         lapStrip: [
-          { lapNumber: 1, lapTimeMs: 123500, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'normal', highlight: 'class-best', marker: '', tooltip: 'Nigel Moore · Green flag' },
-          { lapNumber: 2, lapTimeMs: 180000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'neutralized', highlight: 'none', marker: '', manualLapStatus: 'invalid', tooltip: 'Nigel Moore · FCY' },
-          { lapNumber: 3, lapTimeMs: 140000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'pit-in', highlight: 'none', marker: 'P', tooltip: 'Nigel Moore · pit-in' },
-          { lapNumber: 4, lapTimeMs: 135000, driverName: 'Nigel Moore', driverInitials: 'NM', status: 'pit-out', highlight: 'none', marker: '', tooltip: 'Nigel Moore · pit-out' }
+          { lapNumber: 1, lapTimeMs: 123500, driverName: 'Nigel Moore', driverInitials: 'MOO', status: 'normal', highlight: 'class-best', marker: '', tooltip: 'Nigel Moore · Green flag' },
+          { lapNumber: 2, lapTimeMs: 180000, driverName: 'Nigel Moore', driverInitials: 'MOO', status: 'neutralized', highlight: 'none', marker: '', manualLapStatus: 'invalid', tooltip: 'Nigel Moore · FCY' },
+          { lapNumber: 3, lapTimeMs: 140000, driverName: 'Nigel Moore', driverInitials: 'MOO', status: 'pit-in', highlight: 'none', marker: 'P', tooltip: 'Nigel Moore · pit-in' },
+          { lapNumber: 4, lapTimeMs: 135000, driverName: 'Nigel Moore', driverInitials: 'MOO', status: 'pit-out', highlight: 'none', marker: '', tooltip: 'Nigel Moore · pit-out' }
         ]
       }
     },
@@ -308,6 +308,53 @@ const updatedState = {
         deltas: {}
       }
     }
+  }
+};
+
+updatedState.analyticsSummary.comparisonView = {
+  matrix: {
+    classCars: [
+      {
+        carNumber: '13',
+        isOurCar: true,
+        metrics: [],
+        sectors: []
+      },
+      {
+        carNumber: '2',
+        isBic: true,
+        metrics: [],
+        sectors: []
+      },
+      {
+        carNumber: '56',
+        metrics: [],
+        sectors: []
+      }
+    ],
+    averageCars: [
+      {
+        carNumber: '13',
+        isOurCar: true,
+        totalAverageMs: 127000,
+        totalAverageDeltaMs: 0,
+        averages: [{ label: 'MOO', valueMs: 127000, deltaMs: 0 }]
+      },
+      {
+        carNumber: '2',
+        isBic: true,
+        totalAverageMs: 124000,
+        totalAverageDeltaMs: 3000,
+        averages: [{ label: 'DRI', valueMs: 124000, deltaMs: 3000 }]
+      },
+      {
+        carNumber: '56',
+        isXic: true,
+        totalAverageMs: 130000,
+        totalAverageDeltaMs: -3000,
+        averages: [{ label: 'DRI', valueMs: 130000, deltaMs: -3000 }]
+      }
+    ]
   }
 };
 
@@ -367,7 +414,7 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('info-car').textContent, '13');
   assert.strictEqual(document.getElementById('info-driver').textContent, 'Nigel Moore');
   assert.strictEqual(document.getElementById('info-class-pic').textContent, 'LMP3 / 1');
-  assert.strictEqual(document.getElementById('last-time'), null, 'last time is represented by the lap strip instead of a duplicate card');
+  assert.strictEqual(document.getElementById('last-time').textContent, '2:05.000', 'last lap receives a prominent timing card');
   assert.strictEqual(document.getElementById('best-time').textContent, '2:03.500');
   assert.strictEqual(document.getElementById('sector-1').textContent, '41.000');
   assert.strictEqual(document.getElementById('reference-lap-time').textContent, '2:04.500');
@@ -399,7 +446,7 @@ module.exports = (async () => {
   assert.strictEqual(lapRows.length, 4, 'all stored laps are rendered in the vertical strip');
   assert.strictEqual(lapRows[0].children[0].textContent, '4', 'newest lap appears first');
   assert.strictEqual(lapRows[0].classList.contains('pit-out'), true);
-  assert.strictEqual(lapRows[0].children[2].textContent, 'NM', 'driver initials sit between time and pit marker');
+  assert.strictEqual(lapRows[0].children[2].textContent, 'MOO', 'surname-based driver code sits between time and pit marker');
   assert.strictEqual(lapRows[0].children[3].textContent, '', 'outlap is red without a P marker');
   assert.strictEqual(lapRows[1].classList.contains('pit-in'), true);
   assert.strictEqual(lapRows[1].children[3].textContent, 'P');
@@ -637,11 +684,16 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('battle-ahead-trend').textContent, 'Our best 2:03.500');
   assert.strictEqual(document.getElementById('battle-ahead-prediction').textContent, 'Qualifying comparison');
 
-  assert.strictEqual(document.getElementById('comparison-xic-car'), null, 'inline XIC selector is removed because class tabs show every car');
   assert.strictEqual(document.getElementById('comparison-tab-title').textContent, 'Best / Last / Last 10');
   await document.getElementById('comparison-next-tab').trigger('click');
   await flushAsync();
   assert.strictEqual(document.getElementById('comparison-tab-title').textContent, 'Averages');
+  const xicInput = document.getElementById('comparison-tab-averages').querySelectorAll('.comparison-xic-input')[0];
+  assert.ok(xicInput, 'averages tab provides an inline XIC car selector');
+  xicInput.value = '56';
+  await xicInput.trigger('change');
+  await flushAsync();
+  assert.strictEqual(lastSettingsPatch.comparisonCar, '56', 'inline XIC selection is persisted');
   await document.getElementById('comparison-next-tab').trigger('click');
   await flushAsync();
   assert.strictEqual(document.getElementById('comparison-tab-title').textContent, 'Sectors');

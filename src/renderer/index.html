@@ -191,27 +191,54 @@
         </div>
       </section>
 
-      <section class="timing-stack board-box" aria-label="Lap timing summary">
-        <article class="timing-row" id="best-time-card">
-          <span>Best Time</span>
-          <strong id="best-time">—</strong>
-        </article>
-        <article class="timing-row ideal">
-          <span>Ideal Time</span>
-          <strong id="ideal-time">—</strong>
-          <small id="ideal-time-delta">Best S1 + best S2 + best S3</small>
-        </article>
-        <article class="timing-row reference-card norm-card" id="reference-lap-card">
-          <button class="edit-ref" data-ref-key="lapMs" data-ref-label="reference lap time" title="Edit reference lap time" aria-label="Edit reference lap time">✎</button>
-          <span>Reference Time</span>
-          <strong id="reference-lap-time">—</strong>
-        </article>
-        <article class="timing-row prediction norm-card" id="predicted-lap-card">
-          <span>Prediction</span>
-          <strong id="predicted-lap-time">—</strong>
-          <small id="predicted-lap-delta">Waiting for S1</small>
-        </article>
-      </section>
+      <aside class="right-rail">
+        <section class="timing-stack board-box" aria-label="Lap timing summary">
+          <article class="timing-row last-time-row" id="last-time-card">
+            <span>Last Time</span>
+            <strong id="last-time">—</strong>
+          </article>
+          <article class="timing-row" id="best-time-card">
+            <span>Best Time</span>
+            <strong id="best-time">—</strong>
+          </article>
+          <article class="timing-row ideal">
+            <span>Ideal Time</span>
+            <strong id="ideal-time">—</strong>
+            <small id="ideal-time-delta">Best S1 + best S2 + best S3</small>
+          </article>
+          <article class="timing-row reference-card norm-card" id="reference-lap-card">
+            <button class="edit-ref" data-ref-key="lapMs" data-ref-label="reference lap time" title="Edit reference lap time" aria-label="Edit reference lap time">✎</button>
+            <span>Reference Time</span>
+            <strong id="reference-lap-time">—</strong>
+          </article>
+          <article class="timing-row prediction norm-card" id="predicted-lap-card">
+            <span>Prediction</span>
+            <strong id="predicted-lap-time">—</strong>
+            <small id="predicted-lap-delta">Waiting for S1</small>
+          </article>
+        </section>
+
+        <section class="battle-strip">
+          <article class="metric-box battle-card" id="battle-ahead-card">
+            <span>Car ahead in class</span>
+            <strong id="battle-ahead-main">—</strong>
+            <div class="battle-detail" id="battle-ahead-detail">
+              <small id="battle-ahead-delta">Waiting for class gap and pace</small>
+              <small id="battle-ahead-trend"></small>
+              <small id="battle-ahead-prediction"></small>
+            </div>
+          </article>
+          <article class="metric-box battle-card" id="battle-behind-card">
+            <span>Car behind in class</span>
+            <strong id="battle-behind-main">—</strong>
+            <div class="battle-detail" id="battle-behind-detail">
+              <small id="battle-behind-delta">Waiting for class gap and pace</small>
+              <small id="battle-behind-trend"></small>
+              <small id="battle-behind-prediction"></small>
+            </div>
+          </article>
+        </section>
+      </aside>
 
       <section id="comparison-placeholder" class="comparison-placeholder board-box" aria-label="Comparison area">
         <header class="comparison-board-header">
@@ -225,27 +252,6 @@
           <button id="comparison-prev-tab" type="button" aria-label="Previous comparison tab">←</button>
           <button id="comparison-next-tab" type="button" aria-label="Next comparison tab">→</button>
         </nav>
-      </section>
-
-      <section class="battle-strip">
-        <article class="metric-box battle-card" id="battle-ahead-card">
-          <span>Car ahead in class</span>
-          <strong id="battle-ahead-main">—</strong>
-          <div class="battle-detail" id="battle-ahead-detail">
-            <small id="battle-ahead-delta">Waiting for class gap and pace</small>
-            <small id="battle-ahead-trend"></small>
-            <small id="battle-ahead-prediction"></small>
-          </div>
-        </article>
-        <article class="metric-box battle-card" id="battle-behind-card">
-          <span>Car behind in class</span>
-          <strong id="battle-behind-main">—</strong>
-          <div class="battle-detail" id="battle-behind-detail">
-            <small id="battle-behind-delta">Waiting for class gap and pace</small>
-            <small id="battle-behind-trend"></small>
-            <small id="battle-behind-prediction"></small>
-          </div>
-        </article>
       </section>
 
       <section class="pit-window board-box" id="pit-window">
@@ -332,6 +338,7 @@
 
     <script src="../shared/trackConditions.js"></script>
     <script src="../shared/lapAnalytics.js"></script>
+    <script src="../shared/driverLabels.js"></script>
     <script src="../shared/classBattle.js"></script>
     <script src="../shared/pitstopCircuits.js"></script>
     <script src="../shared/pitstopPlanner.js"></script>

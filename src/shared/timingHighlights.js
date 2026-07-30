@@ -10,10 +10,13 @@
   const trackConditions = typeof module === 'object' && module.exports
     ? require('./trackConditions')
     : root?.trackConditions;
-  const api = factory(analytics, trackConditions);
+  const labels = typeof module === 'object' && module.exports
+    ? require('./driverLabels')
+    : root?.driverLabels;
+  const api = factory(analytics, trackConditions, labels);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.timingHighlights = api;
-})(typeof globalThis !== 'undefined' ? globalThis : null, function createTimingHighlightsApi(lapAnalytics, trackConditions) {
+})(typeof globalThis !== 'undefined' ? globalThis : null, function createTimingHighlightsApi(lapAnalytics, trackConditions, driverLabels) {
   function finiteMs(value) {
     if (value === null || value === undefined || value === '') return null;
     const number = Number(value);
@@ -25,11 +28,9 @@
     return finite.length ? Math.min(...finite) : null;
   }
 
-  // Uses at most three initials so long provider names such as "DE JONG Alain"
-  // remain readable in the narrow lap strip.
-  function driverInitials(name) {
-    const words = String(name || '').trim().split(/\s+/).filter(Boolean);
-    return words.slice(0, 3).map((word) => word[0].toUpperCase()).join('');
+  function driverInitials(name, codeMap = null) {
+    if (!String(name || '').trim()) return '';
+    return codeMap?.[name] || driverLabels.baseDriverCode(name);
   }
 
   function stripStatus(lap) {
@@ -53,6 +54,7 @@
     const followedCar = String(carNumber || '');
     const conditionFilter = trackConditions.normalizeAnalysisFilter(options.conditionFilter, 'combined');
     const laps = lapAnalytics.lapsForCar(history, followedCar);
+    const driverCodes = driverLabels.uniqueDriverCodes(laps.map((lap) => lap.driverName));
     const ourStats = lapAnalytics.carStats(history, followedCar, { conditionFilter });
     const className = ourStats.className || lapAnalytics.carStats(history, followedCar).className || '';
     const classCars = className ? lapAnalytics.carsInClass(history, className, { conditionFilter }) : [];
@@ -86,7 +88,7 @@
           manualLapStatus: lap.manualLapStatus || '',
           lapCondition: trackConditions.deriveLapCondition(lap),
           driverName: lap.driverName || '',
-          driverInitials: driverInitials(lap.driverName),
+          driverInitials: driverInitials(lap.driverName, driverCodes),
           status,
           highlight: isPersonalBest ? (bestLap.isClassBest ? 'class-best' : 'personal-best') : 'none',
           marker: status === 'pit-in' ? 'P' : '',

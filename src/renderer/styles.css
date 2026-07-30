@@ -100,9 +100,16 @@ select:focus-visible {
 
 .info-strip { grid-column: 1 / -1; }
 .sector-panel { grid-column: 2; grid-row: 2; }
-.timing-stack { grid-column: 3; grid-row: 2; }
 .comparison-placeholder { grid-column: 2; grid-row: 3; }
-.battle-strip { grid-column: 3; grid-row: 3; }
+.right-rail {
+  grid-column: 3;
+  grid-row: 2 / 4;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 8px;
+}
 .pit-window { grid-column: 1 / -1; grid-row: 4; }
 .debug-panel { display: none; }
 
@@ -521,9 +528,10 @@ button:disabled { cursor: not-allowed; opacity: .38; }
 .timing-stack {
   min-width: 0;
   min-height: 0;
+  height: 100%;
   overflow: hidden;
   display: grid;
-  grid-template-rows: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(5, minmax(0, 1fr));
 }
 .timing-row {
   min-width: 0;
@@ -539,6 +547,7 @@ button:disabled { cursor: not-allowed; opacity: .38; }
 .timing-row:last-child { border-bottom: 0; }
 .timing-row span { margin-bottom: 3px; font-size: 10px; }
 .timing-row strong { font-size: 25px; }
+.last-time-row strong { font-size: 31px; }
 .timing-row small {
   margin-top: 3px;
   overflow: hidden;
@@ -672,11 +681,8 @@ button:disabled { cursor: not-allowed; opacity: .38; }
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-template-rows: repeat(2, minmax(0, 1fr));
-  grid-auto-rows: minmax(0, 1fr);
-
-  /* verticaal | horizontaal */
-  gap: 8px 12px;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 12px;
 }
 .comparison-average-column {
   min-width: 0;
@@ -686,10 +692,28 @@ button:disabled { cursor: not-allowed; opacity: .38; }
 
   gap: 5px;
   padding: 0 12px 2px 0;
-
-  border-right: 0;
+  border-right: 1px solid var(--soft-line);
 }
-.comparison-average-column:nth-child(3n) { border-right: 0; }
+.comparison-average-column:last-child { border-right: 0; }
+.comparison-average-heading {
+  min-width: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.comparison-average-heading .comparison-car-label { flex: 0 0 auto; }
+.comparison-xic-input {
+  width: 72px;
+  height: 30px;
+  min-height: 0;
+  padding: 2px 7px;
+  border: 2px solid var(--line);
+  background: var(--control);
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 900;
+}
 .comparison-average-chip-list {
   min-width: 0;
   width: 100%;
@@ -735,7 +759,10 @@ button:disabled { cursor: not-allowed; opacity: .38; }
 .comparison-average-chip output {
   justify-self: end;
 }
-.comparison-average-chip.total { margin-right: 0; }
+.comparison-average-chip.total {
+  margin-right: 0;
+  margin-bottom: 8px;
+}
 .comparison-sector-row {
   grid-template-columns: 130px repeat(3, minmax(0, 1fr));
   min-height: 0;
@@ -748,13 +775,13 @@ button:disabled { cursor: not-allowed; opacity: .38; }
   align-items: baseline;
   justify-content: start;
   gap: 6px;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1;
   font-weight: 900;
 }
 .comparison-sector-label {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: .08em;
   line-height: 1;
@@ -813,10 +840,10 @@ input {
 .battle-strip {
   display: grid;
   grid-template-columns: 1fr;
-  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, 98px);
   gap: 8px;
 }
-.battle-card { min-height: 0; padding: 8px 12px; }
+.battle-card { min-height: 98px; padding: 8px 12px; }
 .battle-card strong {
   font-size: 18px;
   overflow: visible;
@@ -1124,12 +1151,15 @@ body.mode-qualifying .pit-window { display: none; }
   .engineer-dashboard { padding: 16px; grid-template-columns: 1fr; }
   .info-strip,
   .lap-strip,
+  .sector-panel,
+  .right-rail,
   .main-times,
   .performance-grid,
   .comparison-grid,
   .battle-strip,
   .pit-window,
   .debug-panel { grid-column: 1; grid-row: auto; }
+  .right-rail { grid-template-rows: auto auto; }
   .info-strip,
   .main-times,
   .performance-grid,
