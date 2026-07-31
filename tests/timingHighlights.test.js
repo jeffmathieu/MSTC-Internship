@@ -6,8 +6,8 @@ const {
   buildTimingHighlights
 } = require('../src/shared/timingHighlights');
 
-assert.strictEqual(driverInitials('Nigel Moore'), 'NM');
-assert.strictEqual(driverInitials('DE JONG Alain'), 'DJA');
+assert.strictEqual(driverInitials('Nigel Moore'), 'MOO');
+assert.strictEqual(driverInitials('DE JONG Alain'), 'JON');
 assert.strictEqual(driverInitials(''), '');
 assert.strictEqual(stripStatus({ lapPhase: 'inlap', sessionFlag: 'FCY' }), 'pit-in', 'pit status has visual priority');
 assert.strictEqual(stripStatus({ lapPhase: 'outlap' }), 'pit-out');
@@ -36,7 +36,7 @@ classBestHistory.find((entry) => entry.carNumber === '2').lapTimeMs = 124000;
 const classBest = buildTimingHighlights(classBestHistory, 13);
 assert.strictEqual(classBest.bestLap.isClassBest, true);
 assert.strictEqual(classBest.lapStrip[1].highlight, 'class-best');
-assert.strictEqual(classBest.lapStrip[1].driverInitials, 'NM');
+assert.strictEqual(classBest.lapStrip[1].driverInitials, 'MOO');
 
 const empty = buildTimingHighlights([], '13');
 assert.strictEqual(empty.bestLap.valueMs, null);
@@ -64,7 +64,7 @@ assert.deepStrictEqual(
   [86, 87, 4, 5],
   'lap strip follows storage time, not a provider lap counter that reset after a driver change'
 );
-assert.strictEqual(providerLapReset.lapStrip.at(-1).driverInitials, 'YH');
+assert.strictEqual(providerLapReset.lapStrip.at(-1).driverInitials, 'HAR');
 
 const conditionHistory = [
   lap({

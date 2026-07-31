@@ -715,7 +715,10 @@ function comparisonMetricCell(item) {
 
 function comparisonCarLabel(car, fallback = '—') {
   const label = document.createElement('strong');
-  label.className = `comparison-car-label${car?.isBic ? ' is-bic' : ''}`;
+  label.className = [
+    'comparison-car-label',
+    car?.isBic ? 'is-bic' : ''
+  ].filter(Boolean).join(' ');
   const number = document.createElement('span');
   number.textContent = car?.carNumber ? `#${car.carNumber}` : fallback;
   label.appendChild(number);
@@ -790,6 +793,35 @@ function comparisonAverageChip(item) {
   return chip;
 }
 
+function comparisonAverageHeading(car) {
+  const heading = document.createElement('div');
+  heading.className = 'comparison-average-heading';
+  if (!car?.isXic) {
+    heading.appendChild(comparisonCarLabel(car));
+    return heading;
+  }
+
+  const hash = document.createElement('strong');
+  hash.className = 'comparison-car-label';
+  hash.textContent = '#';
+  const input = document.createElement('input');
+  input.id = 'comparison-xic-car';
+  input.className = 'comparison-xic-input';
+  input.type = 'text';
+  input.inputMode = 'numeric';
+  input.value = car.carNumber || currentSettings?.comparisonCar || '';
+  input.title = 'Choose comparison car';
+  input.setAttribute('aria-label', 'Choose XIC comparison car');
+  input.addEventListener('change', async () => {
+    const value = String(input.value || '').trim();
+    if ($('comparison-car')) $('comparison-car').value = value;
+    currentSettings = await window.liveTiming.setSettings({ comparisonCar: value });
+  });
+  heading.appendChild(hash);
+  heading.appendChild(input);
+  return heading;
+}
+
 function renderComparisonAverageRows(cars) {
   const container = $('comparison-tab-averages');
   if (!container) return;
@@ -799,7 +831,7 @@ function renderComparisonAverageRows(cars) {
   (cars || []).forEach((car) => {
     const column = document.createElement('article');
     column.className = `comparison-average-column${car.isBic ? ' is-bic' : ''}`;
-    column.appendChild(comparisonCarLabel(car));
+    column.appendChild(comparisonAverageHeading(car));
     const chips = document.createElement('div');
     const averageItems = [
       { label: 'Total', valueMs: car.totalAverageMs, deltaMs: car.totalAverageDeltaMs, total: true },
@@ -864,7 +896,7 @@ function renderComparisonMatrix(matrix) {
   }
   const classCars = matrix.classCars || [];
   renderComparisonLapRows(classCars);
-  renderComparisonAverageRows(classCars);
+  renderComparisonAverageRows(matrix.averageCars || []);
   renderComparisonSectorRows(classCars);
   updateComparisonTabVisibility();
   return true;

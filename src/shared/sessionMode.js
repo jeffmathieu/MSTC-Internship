@@ -4,10 +4,13 @@
   const analytics = typeof module === 'object' && module.exports
     ? require('./lapAnalytics')
     : root?.lapAnalytics;
-  const api = factory(analytics);
+  const labels = typeof module === 'object' && module.exports
+    ? require('./driverLabels')
+    : root?.driverLabels;
+  const api = factory(analytics, labels);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.sessionMode = api;
-})(typeof globalThis !== 'undefined' ? globalThis : null, function createSessionModeApi(lapAnalytics) {
+})(typeof globalThis !== 'undefined' ? globalThis : null, function createSessionModeApi(lapAnalytics, driverLabels) {
   const MODES = ['race', 'practice', 'qualifying'];
 
   function normalizeMode(value) {
@@ -31,7 +34,7 @@
   }
 
   function initials(name) {
-    return String(name || '').trim().split(/\s+/).filter(Boolean).slice(0, 3).map((part) => part[0].toUpperCase()).join('') || '—';
+    return driverLabels.baseDriverCode(name);
   }
 
   function shortDriverName(name) {
@@ -85,7 +88,7 @@
     const activeRows = classRows.filter((row) => isRunningClassRow(row, classLeaderLap));
     const bic = lapAnalytics.bestCarInClassByAverage(history, className);
 
-    return activeRows.map((row) => {
+    const cars = activeRows.map((row) => {
       const stats = lapAnalytics.carStats(history, row.carNumber);
       const drivers = lapAnalytics.driverStats(history, row.carNumber);
       return {
@@ -105,11 +108,19 @@
         sectors: sectorAverages(stats, ourCar)
       };
     });
+    return cars.sort((left, right) => {
+      if (left.isOurCar !== right.isOurCar) return left.isOurCar ? -1 : 1;
+      return String(left.carNumber).localeCompare(String(right.carNumber), undefined, {
+        numeric: true,
+        sensitivity: 'base'
+      });
+    });
   }
 
   function averageRows(stats = [], comparisonMs = null, comparisonFirst = true) {
+    const codes = driverLabels.uniqueDriverCodes(stats.map((driver) => driver.driverName));
     return stats.map((driver) => ({
-      label: initials(driver.driverName),
+      label: codes[driver.driverName] || initials(driver.driverName),
       valueMs: driver.averageLapMs,
       deltaMs: comparisonFirst
         ? subtract(comparisonMs, driver.averageLapMs)
@@ -137,23 +148,32 @@
       averages: averageRows(target ? lapAnalytics.driverStats(history, target.carNumber) : [], ourCar.averageLapMs, true),
       sectors: sectorAverages(target, ourCar)
     });
+    const teammate = {
+      kind: 'teammate',
+      targetCarNumber: String(ourCarNumber || ''),
+      title: `${shortDriverName(current?.driverName)} vs. ${shortDriverName(best?.driverName)}`,
+      metrics: [
+        metric('Best', current?.bestLapMs, best?.bestLapMs),
+        metric('Last', current?.lastLapMs, best?.lastLapMs),
+        metric('Last 10', recentAverage(current), recentAverage(best))
+      ],
+      totalAverageMs: ourCar.averageLapMs,
+      totalAverageDeltaMs: subtract(ourCar.averageLapMs, best?.averageLapMs),
+      averages: averageRows(ourDrivers, best?.averageLapMs, false),
+      sectors: sectorAverages(ourCar)
+    };
+    const bicColumn = column(bic, 'bic');
+    const xicColumn = column(xic, 'xic');
     return {
       ourCarNumber: String(ourCarNumber || ''),
-      teammate: {
-        kind: 'teammate',
-        title: `${shortDriverName(current?.driverName)} vs. ${shortDriverName(best?.driverName)}`,
-        metrics: [
-          metric('Best', current?.bestLapMs, best?.bestLapMs),
-          metric('Last', current?.lastLapMs, best?.lastLapMs),
-          metric('Last 10', recentAverage(current), recentAverage(best))
-        ],
-        totalAverageMs: ourCar.averageLapMs,
-        totalAverageDeltaMs: subtract(ourCar.averageLapMs, best?.averageLapMs),
-        averages: averageRows(ourDrivers, best?.averageLapMs, false),
-        sectors: sectorAverages(ourCar)
-      },
-      bic: column(bic, 'bic'),
-      xic: column(xic, 'xic'),
+      teammate,
+      bic: bicColumn,
+      xic: xicColumn,
+      averageCars: [
+        { ...teammate, carNumber: String(ourCarNumber || ''), isOurCar: true, isBic: false },
+        { ...bicColumn, carNumber: String(bic?.carNumber || ''), isOurCar: String(bic?.carNumber || '') === String(ourCarNumber), isBic: true },
+        { ...xicColumn, carNumber: String(xic?.carNumber || selectedCarNumber || ''), isOurCar: String(xic?.carNumber || '') === String(ourCarNumber), isBic: false, isXic: true }
+      ],
       classCars: classCarsForComparison(history, rows, ourCarNumber, ourCar)
     };
   }
