@@ -8,6 +8,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const analytics = require('../src/shared/lapAnalytics');
+const graphData = require('../src/shared/graphData');
 const { buildStintInsights, classComparisonsForStint, classRankingForStint } = require('../src/shared/stintInsights');
 const { stintsForCar } = require('../src/shared/stintTracker');
 const { enrichPitStops, pitstopAnalysis, endPitStopForStint } = require('../src/main/stintReports');
@@ -231,7 +232,17 @@ function buildPayload(history, carNumber, rawHistory = history) {
       totalPitTimeMs: pitStops.every((stop) => Number.isFinite(stop.durationMs))
         ? pitStops.reduce((sum, stop) => sum + stop.durationMs, 0)
         : null,
-      raceControl: raceControlSummary(rawHistory)
+      raceControl: raceControlSummary(rawHistory),
+      graphs: (() => {
+        const classPace = graphData.classPaceComparison(history, carNumber);
+        return {
+          driverLaps: graphData.driverLapTimes(history, carNumber),
+          driverPace: graphData.driverPaceComparison(history, carNumber),
+          driverSectors: graphData.driverSectorComparison(history, carNumber),
+          classPace,
+          classPacePages: graphData.pdfClassPacePages(classPace)
+        };
+      })()
     },
     caveats: [
       'Class-gap history cannot be reconstructed reliably from lap-only records. Recorded GAP-to-overall-leader samples are shown instead.',

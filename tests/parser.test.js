@@ -9,7 +9,8 @@ const {
   splitTeamInfo,
   parseTimingRow,
   looksLikeTimingHeaders,
-  parseSessionInfo
+  parseSessionInfo,
+  applySingleClassFallback
 } = require('../src/shared/parser');
 
 // Lap-time parsing protects the formats seen in live timing tables. Add new
@@ -33,6 +34,7 @@ assert.strictEqual(formatMs(Number.NaN), '');
 
 assert.strictEqual(cleanText(`  hello\u00a0   timing\nworld  `), 'hello timing world');
 assert.strictEqual(canonicalHeader('#'), 'carNumber');
+assert.strictEqual(canonicalHeader('NAME'), 'driver');
 assert.strictEqual(canonicalHeader('Driver in car'), 'driver');
 assert.strictEqual(canonicalHeader('Class / PIC'), 'className');
 assert.strictEqual(canonicalHeader('Sector 2'), 'sector2');
@@ -212,5 +214,29 @@ const yellowSession = parseSessionInfo({ sessionFields: { status: 'LOCAL YELLOW'
 assert.strictEqual(yellowSession.flag, 'Yellow flag');
 const commonStatusSession = parseSessionInfo({ bodyText: 'Waiting for the LiveTiming data' });
 assert.strictEqual(commonStatusSession.statusText, 'Waiting for the LiveTiming data');
+
+const nameHeaderRow = parseTimingRow(
+  ['POS', 'NR', 'NAME', 'CLS', 'PIC', 'LAST', 'LAPS'],
+  ['2', '540', 'Heiko Engelke', 'C', '2', '2:09.418', '11']
+);
+assert.strictEqual(nameHeaderRow.driver, 'Heiko Engelke', 'GetRaceResults NAME is parsed as the driver');
+
+const finishedNamedSession = parseSessionInfo({
+  bodyText: 'Finish DMV Formel Vau - Free Practice Show class: All Highlight nr: POS NR E.T.A. NAME'
+});
+assert.strictEqual(finishedNamedSession.sessionName, 'DMV Formel Vau - Free Practice');
+const rejectedHistoryTitle = parseSessionInfo({
+  bodyText: 'Leader history From lap 1 to lap 12 Track limits Statistics Messages'
+});
+assert.notStrictEqual(rejectedHistoryTitle.sessionName, 'Leader history From lap 1 to lap 12');
+
+const oneClassRows = applySingleClassFallback([
+  { position: 1, carNumber: '555', className: '' },
+  { position: 2, carNumber: '540', className: '' }
+]);
+assert.deepStrictEqual(oneClassRows.map((row) => row.className), ['Overall', 'Overall']);
+assert.deepStrictEqual(oneClassRows.map((row) => row.classPosition), [1, 2]);
+const existingClassRows = [{ position: 1, carNumber: '1', className: 'A' }, { position: 2, carNumber: '2', className: '' }];
+assert.strictEqual(applySingleClassFallback(existingClassRows), existingClassRows, 'mixed/real class data is not rewritten');
 
 console.log('Parser tests passed.');

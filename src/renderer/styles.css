@@ -864,6 +864,13 @@ input {
 .battle-card.good { border-color: var(--green); }
 .battle-card.bad { border-color: var(--red); }
 .battle-card.neutral { border-color: var(--line); }
+.battle-card.qualifying-compact {
+  border-color: var(--ink);
+  align-content: center;
+}
+.qualifying-gap-delta.good { color: var(--green); }
+.qualifying-gap-delta.bad { color: var(--red); }
+.qualifying-gap-delta.neutral { color: var(--muted); }
 
 .pit-window {
   margin-top: 0;

@@ -149,4 +149,28 @@ assert.strictEqual(noWetOwnSamples.bestLap.isClassBest, false, 'a missing wet be
 assert.strictEqual(noWetOwnSamples.bestSectors.sector1.valueMs, null, 'wet view shows no best sector when our car has no wet sector');
 assert.strictEqual(noWetOwnSamples.bestSectors.sector1.isClassBest, false, 'a missing wet best sector must not render as class-best purple');
 
+const officialHighlights = buildTimingHighlights(personalBestHistory, '13', {
+  rows: [
+    { carNumber: '13', className: 'C.CHA', bestLapMs: 121500 },
+    { carNumber: '2', className: 'C.CHA', bestLapMs: 122000 }
+  ]
+});
+assert.strictEqual(officialHighlights.bestLap.valueMs, 121500, 'dashboard best card uses the provider BEST TIME value');
+assert.strictEqual(officialHighlights.bestLap.classBestMs, 121500, 'class-best detection also uses provider BEST TIME values');
+assert.strictEqual(officialHighlights.bestLap.isClassBest, true);
+assert.strictEqual(
+  officialHighlights.lapStrip.some((entry) => entry.highlight !== 'none'),
+  false,
+  'a provider best not present in local history must not color an unrelated stored lap'
+);
+const wetIgnoresOfficialOverallBest = buildTimingHighlights(conditionHistory, '12', {
+  conditionFilter: 'wet',
+  rows: [
+    { carNumber: '12', className: 'LMP3', bestLapMs: 120000 },
+    { carNumber: '9', className: 'LMP3', bestLapMs: 119000 }
+  ]
+});
+assert.strictEqual(wetIgnoresOfficialOverallBest.bestLap.valueMs, 132000);
+assert.strictEqual(wetIgnoresOfficialOverallBest.bestLap.classBestMs, 131000);
+
 console.log('Timing highlight tests passed.');

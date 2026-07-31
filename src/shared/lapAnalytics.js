@@ -524,6 +524,33 @@ function carStats(history, carNumber, options = {}) {
   };
 }
 
+// Returns the official best lap supplied by the live timing provider. Parsed
+// rows already normalize BEST/BEST TIME/BEST LAP to bestLapMs, so consumers do
+// not need to know which source-specific column was present.
+function providerBestLapMs(row) {
+  const value = numberOrNull(row?.bestLapMs);
+  return value !== null && value > 0 ? value : null;
+}
+
+// Combines stored statistics with the provider's official best lap. The live
+// value is authoritative for the combined view because it can include laps
+// completed before this app started collecting. Condition-specific views keep
+// using local history: timing providers do not identify whether BEST was set
+// in dry, wet or intermediate conditions.
+function carStatsWithProviderBest(history, rows, carNumber, options = {}) {
+  const stats = carStats(history, carNumber, options);
+  const row = (rows || []).find((candidate) => String(candidate?.carNumber) === String(carNumber));
+  const conditionFilter = trackConditions.normalizeAnalysisFilter(options.conditionFilter, 'combined');
+  const officialBestLapMs = conditionFilter === 'combined' ? providerBestLapMs(row) : null;
+  return {
+    ...stats,
+    className: stats.className || row?.className || '',
+    teamName: stats.teamName || row?.teamName || row?.team || '',
+    bestLapMs: officialBestLapMs ?? stats.bestLapMs,
+    bestLapSource: officialBestLapMs !== null ? 'provider' : 'history'
+  };
+}
+
 // Returns stats for every car with at least one completed lap in the class.
 function carsInClass(history, className, options = {}) {
   const carNumbers = new Set(completedLaps(history).filter((lap) => lap.className === className).map((lap) => lap.carNumber));
@@ -557,8 +584,8 @@ function currentStintStats(history, carNumber, currentDriver = '', options = {})
 }
 
 // Compares our current stint/driver average with the best car in class and an
-// optional selected class car. Deltas are our current stint average minus target
-// car average: positive means our current stint is slower.
+// optional selected class car. Deltas are target car minus our current stint:
+// positive means the target is slower, while negative means the target is faster.
 function compareCarToClassTargets(history, ourCarNumber, selectedCarNumber = '', currentDriver = '', options = {}) {
   const ourCar = carStats(history, ourCarNumber, options);
   const ourCurrentStint = currentStintStats(history, ourCarNumber, currentDriver, options);
@@ -567,7 +594,7 @@ function compareCarToClassTargets(history, ourCarNumber, selectedCarNumber = '',
 
   const deltaTo = (target) => {
     if (!target || ourCurrentStint.averageLapMs === null || target.averageLapMs === null) return null;
-    return ourCurrentStint.averageLapMs - target.averageLapMs;
+    return target.averageLapMs - ourCurrentStint.averageLapMs;
   };
 
   return {
@@ -626,6 +653,8 @@ return {
   bestDriverByAverage,
   compareBestDriverToCurrentDriver,
   carStats,
+  providerBestLapMs,
+  carStatsWithProviderBest,
   carsInClass,
   bestCarInClassByAverage,
   currentStintStats,

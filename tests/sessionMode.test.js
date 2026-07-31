@@ -73,17 +73,17 @@ assert.strictEqual(raceView.matrix.teammate.averages[0].deltaMs, 0);
 assert.strictEqual(raceView.matrix.teammate.averages[1].deltaMs, 9500, 'slower team driver average is positive versus D1');
 assert.strictEqual(raceView.matrix.bic.targetCarNumber, '2');
 assert.strictEqual(raceView.matrix.xic.targetCarNumber, '9');
-assert.strictEqual(raceView.matrix.bic.metrics[0].deltaMs, 1000, 'our BIC delta is positive when our best is slower');
+assert.strictEqual(raceView.matrix.bic.metrics[0].deltaMs, -1000, 'a faster BIC car is negative because target minus ours is negative');
 assert.strictEqual(raceView.matrix.bic.metrics[0].valueMs, 98000, 'BIC column displays the BIC car best time');
-assert.strictEqual(raceView.matrix.bic.totalAverageDeltaMs, 10250, 'total BIC delta is our car average minus BIC average');
-assert.strictEqual(raceView.matrix.bic.averages[0].deltaMs, 10250, 'external driver averages compare with our total car average');
-assert.strictEqual(raceView.matrix.xic.metrics[0].deltaMs, -3000, 'our XIC delta is negative when our best is faster');
+assert.strictEqual(raceView.matrix.bic.totalAverageDeltaMs, -10250, 'total BIC delta is target car average minus our average');
+assert.strictEqual(raceView.matrix.bic.averages[0].deltaMs, -10250, 'external driver averages use target minus our total car average');
+assert.strictEqual(raceView.matrix.xic.metrics[0].deltaMs, 3000, 'a slower XIC car is positive because target minus ours is positive');
 assert.strictEqual(raceView.matrix.xic.metrics[0].valueMs, 102000, 'XIC column displays the selected car best time');
 assert.strictEqual(raceView.matrix.teammate.sectors.length, 3);
 assert.strictEqual(raceView.matrix.teammate.sectors[0].averageMs, 30000, 'team sector average uses all valid sectors from our car');
 assert.strictEqual(raceView.matrix.teammate.sectors[0].showDelta, false, 'team sector averages do not show deltas');
 assert.strictEqual(raceView.matrix.bic.sectors[2].averageMs, 29500, 'BIC sector average comes from valid BIC sectors');
-assert.strictEqual(raceView.matrix.bic.sectors[2].deltaMs, 10250, 'BIC sector delta compares our average sector with their average sector');
+assert.strictEqual(raceView.matrix.bic.sectors[2].deltaMs, -10250, 'BIC sector delta is target average sector minus our average sector');
 assert.strictEqual(raceView.matrix.bic.sectors[2].showDelta, true);
 assert.deepStrictEqual(raceView.matrix.classCars.map((car) => car.carNumber), ['13', '2', '9'], 'class tabs put our car first and sort rivals numerically');
 assert.strictEqual(raceView.matrix.classCars[0].isOurCar, true, 'our car is marked so it can be highlighted and sector deltas can be hidden');
@@ -99,8 +99,8 @@ const longPitRows = [
 const longPitView = buildComparisonView({ history, rows: longPitRows, ourCarNumber: 13, selectedCarNumber: 9, mode: 'race' });
 assert.deepStrictEqual(longPitView.matrix.classCars.map((car) => car.carNumber), ['13', '2'], 'cars that are 5+ laps down in pit are hidden while our car remains first');
 
-// BIC/XIC use the same current-minus-reference sign contract even when the
-// target car's current driver differs from its full-car average.
+// BIC/XIC use the target-minus-ours sign contract even when the target car's
+// current driver differs from its full-car average.
 const targetScopeHistory = [
   makeLap(13, 'LMP3', 'Our Team', 'Our Driver', 2, 120000),
   makeLap(2, 'LMP3', 'BIC', 'Old BIC Driver', 2, 90000),
@@ -150,11 +150,11 @@ assert.strictEqual(buildComparisonView({ history, rows, ourCarNumber: 13, select
 const adjacent = qualifyingAdjacentView(history, rows, 13);
 assert.strictEqual(adjacent.available, true);
 assert.strictEqual(adjacent.ahead.row.carNumber, '2');
-assert.strictEqual(adjacent.ahead.bestLapDeltaMs, 1000);
-assert.strictEqual(adjacent.ahead.trendState, 'bad');
+assert.strictEqual(adjacent.ahead.bestLapDeltaMs, -1000);
+assert.strictEqual(adjacent.ahead.trendState, 'good');
 assert.strictEqual(adjacent.behind.row.carNumber, '9');
-assert.strictEqual(adjacent.behind.bestLapDeltaMs, -3000);
-assert.strictEqual(adjacent.behind.trendState, 'good');
+assert.strictEqual(adjacent.behind.bestLapDeltaMs, 3000);
+assert.strictEqual(adjacent.behind.trendState, 'bad');
 assert.strictEqual(qualifyingAdjacentView(history, rows, 2).ahead, null);
 assert.strictEqual(qualifyingAdjacentView(history, rows, 9).behind, null);
 assert.strictEqual(qualifyingAdjacentView(history, rows, 999).available, false);
@@ -178,5 +178,25 @@ const equalRows = [
 ];
 assert.strictEqual(qualifyingAdjacentView(equalHistory, equalRows, 13).ahead.trendState, 'neutral');
 assert.strictEqual(buildComparisonView({ history: equalHistory, rows: equalRows, ourCarNumber: 13, mode: 'race' }).columns[0].bottomMs, 100000);
+
+const officialBestRows = rows.map((row) => ({
+  ...row,
+  bestLapMs: row.carNumber === '13' ? 97000 : row.carNumber === '2' ? 96000 : 103000
+}));
+const officialBestView = buildComparisonView({
+  history,
+  rows: officialBestRows,
+  ourCarNumber: 13,
+  selectedCarNumber: 9,
+  mode: 'qualifying'
+});
+assert.strictEqual(officialBestView.matrix.bic.metrics[0].valueMs, 96000, 'BIC comparison uses its live BEST TIME');
+assert.strictEqual(officialBestView.matrix.bic.metrics[0].deltaMs, -1000, 'external best delta compares both official BEST TIME values');
+assert.strictEqual(officialBestView.matrix.xic.metrics[0].valueMs, 103000, 'XIC comparison uses its live BEST TIME');
+assert.strictEqual(officialBestView.columns[3].topMs, 96000, 'qualifying BIC card uses the official provider best');
+const officialAdjacent = qualifyingAdjacentView(history, officialBestRows, 13);
+assert.strictEqual(officialAdjacent.ahead.ourBestLapMs, 97000);
+assert.strictEqual(officialAdjacent.ahead.rivalBestLapMs, 96000);
+assert.strictEqual(officialAdjacent.ahead.bestLapDeltaMs, -1000);
 
 console.log('Session mode tests passed.');

@@ -94,6 +94,38 @@ assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').
 assert.strictEqual(classGraph.series.find((series) => series.carNumber === '33').points[0].deltaToOurCarMs, 0);
 assert.strictEqual(classGraph.series.find((series) => series.carNumber === '2').points[0].deltaToOurCarMs, -1000);
 
+const longRaceGraph = {
+  type: 'line',
+  title: 'Class pace comparison',
+  subtitle: 'Actual valid lap times',
+  xLabel: 'Race lap',
+  series: [{
+    name: '#33 Long Race Team',
+    carNumber: '33',
+    highlight: true,
+    points: Array.from({ length: 180 }, (_unused, index) => ({
+      x: index + 1,
+      y: index === 89 ? 240000 : 120000 + (index % 5) * 1000
+    }))
+  }]
+};
+const longRacePages = graphData.pdfClassPacePages(longRaceGraph, 75);
+assert.deepStrictEqual(
+  longRacePages.map((page) => [page.startLap, page.endLap]),
+  [[1, 75], [76, 150], [151, 180]],
+  'a 24-hour-style graph is split into stable 75-lap PDF windows'
+);
+assert.strictEqual(longRacePages[1].omittedSlowLapCount, 1, 'a clear slow outlier is reported on its PDF page');
+assert.strictEqual(longRacePages[1].series[0].points.some((point) => point.x === 90), false, 'the outlier is hidden from the PDF graph');
+assert.strictEqual(longRacePages[0].series[0].points.some((point) => point.y === 124000), true, 'normal lap-time variation remains visible');
+assert.strictEqual(longRaceGraph.series[0].points.length, 180, 'PDF filtering never mutates stored or graph-window data');
+assert.deepStrictEqual(graphData.pdfClassPacePages({ series: [] }), [], 'an empty race does not create blank graph pages');
+assert.strictEqual(
+  graphData.pdfClassPacePages({ series: [{ name: 'Short run', points: [{ x: 1, y: 100000 }, { x: 2, y: 180000 }] }] })[0].series[0].points.length,
+  2,
+  'short runs retain every sample because there is not enough evidence to classify an outlier'
+);
+
 const otherClass = lap({ carNumber: 77, className: 'GT', teamName: 'GT Team', driverName: 'GT Driver', lapNumber: 1, lapTimeMs: 110000, sector1Ms: 35000, sector2Ms: 40000, sector3Ms: 35000 });
 assert.strictEqual(graphData.classPaceComparison([...history, otherClass], 33).series.some((series) => series.carNumber === '77'), false);
 assert.deepStrictEqual(graphData.classPaceComparison([], 33).series, []);

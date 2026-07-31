@@ -967,35 +967,43 @@ function renderDriverAndClassComparisons(summary, rows) {
 function renderAdjacentClassBattles(summary) {
   const battles = summary?.adjacentClassBattles;
   const setDetailLines = (side, delta = '', trend = '', prediction = '') => {
-    setText(`battle-${side}-delta`, delta);
-    setText(`battle-${side}-trend`, trend);
-    setText(`battle-${side}-prediction`, prediction);
+    const setOptionalLine = (id, value) => {
+      const element = $(id);
+      if (!element) return;
+      // Qualifying cards intentionally omit the race-only trend and catch
+      // prediction lines. An empty string must remain empty instead of being
+      // converted to the dashboard's generic em-dash placeholder.
+      element.textContent = value === '' ? '' : String(rowValue(value));
+    };
+    setOptionalLine(`battle-${side}-delta`, delta);
+    setOptionalLine(`battle-${side}-trend`, trend);
+    setOptionalLine(`battle-${side}-prediction`, prediction);
   };
   const renderSide = (side, item) => {
     const card = $(`battle-${side}-card`);
+    const deltaLine = $(`battle-${side}-delta`);
     if (!item) {
       setText(`battle-${side}-main`, side === 'ahead' && battles?.available ? 'Class leader' : side === 'behind' && battles?.available ? 'No class car behind' : '—');
       setDetailLines(side, battles?.available ? 'No adjacent rival' : 'Waiting for class gap and pace');
       if (card) {
-        card.classList.remove('good', 'bad');
+        card.classList.remove('good', 'bad', 'qualifying-compact');
         card.classList.add('neutral');
       }
+      if (deltaLine) deltaLine.className = '';
       return;
     }
     if (battles?.mode === 'qualifying') {
-      setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · Best Δ ${displayDelta(numericMs(item.bestLapDeltaMs))}`);
-      setDetailLines(
-        side,
-        `Their best ${formatMs(numericMs(item.rivalBestLapMs))}`,
-        `Our best ${formatMs(numericMs(item.ourBestLapMs))}`,
-        'Qualifying comparison'
-      );
+      const delta = numericMs(item.bestLapDeltaMs);
+      setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · ${formatMs(numericMs(item.rivalBestLapMs)) || '—'}`);
+      setDetailLines(side, `Delta ${delta === null ? '—' : displayDelta(delta)}`, '', '');
+      if (deltaLine) deltaLine.className = `qualifying-gap-delta ${comparisonDeltaState(delta)}`;
       if (card) {
         card.classList.remove('good', 'bad', 'neutral');
-        card.classList.add(item.trendState || 'neutral');
+        card.classList.add('qualifying-compact');
       }
       return;
     }
+    if (deltaLine) deltaLine.className = '';
     if (item.suppressed) {
       setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · In pit`);
       setDetailLines(
@@ -1017,7 +1025,7 @@ function renderAdjacentClassBattles(summary) {
       );
     }
     if (card) {
-      card.classList.remove('good', 'bad', 'neutral');
+      card.classList.remove('good', 'bad', 'neutral', 'qualifying-compact');
       card.classList.add(item.trendState || 'neutral');
     }
   };

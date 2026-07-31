@@ -3,10 +3,11 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const lapAnalytics = require('../shared/lapAnalytics');
+const graphData = require('../shared/graphData');
 const { buildStintInsights, classComparisonsForStint, classRankingForStint } = require('../shared/stintInsights');
 const { normalizeMode } = require('../shared/sessionMode');
 
-const REPORT_LAYOUT_VERSION = 'canonical-reportlab-landscape-v5-session-modes';
+const REPORT_LAYOUT_VERSION = 'canonical-reportlab-landscape-v6-race-graphs';
 
 // Practice and qualifying still produce a full pace/sector stint overview, but
 // pitstop analysis and end-of-race summary pages only make sense in race mode.
@@ -364,7 +365,17 @@ function buildCanonicalReportPayload({
       totalPitTimeMs: pitStops.length && pitStops.every((stop) => Number.isFinite(stop.durationMs))
         ? pitStops.reduce((total, stop) => total + stop.durationMs, 0)
         : null,
-      raceControl: raceControlSummary(history)
+      raceControl: raceControlSummary(history),
+      graphs: (() => {
+        const classPace = graphData.classPaceComparison(history, followedCar);
+        return {
+          driverLaps: graphData.driverLapTimes(history, followedCar),
+          driverPace: graphData.driverPaceComparison(history, followedCar, 10, reportPolicy.sessionMode),
+          driverSectors: graphData.driverSectorComparison(history, followedCar),
+          classPace,
+          classPacePages: graphData.pdfClassPacePages(classPace)
+        };
+      })()
     },
     caveats: [],
     stints: stints.map((stint) => canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes, pitStops)),
@@ -587,6 +598,9 @@ async function writeClosedStintArtifacts({
   renderPdf = renderReportLabPdf
 }) {
   if (!stint?.closed) return { written: false, reason: 'stint-open' };
+  if (!Number(stint.lapCount ?? stint.laps?.length)) {
+    return { written: false, reason: 'stint-empty' };
+  }
   const paths = artifactPaths(sessionFolder, stint);
   fs.mkdirSync(paths.folder, { recursive: true });
   let previousPayload = null;
@@ -594,6 +608,16 @@ async function writeClosedStintArtifacts({
     if (fs.existsSync(paths.jsonPath)) previousPayload = JSON.parse(fs.readFileSync(paths.jsonPath, 'utf8'));
   } catch (_error) {
     previousPayload = null;
+  }
+  const pdfExists = fs.existsSync(paths.pdfPath);
+  const layoutIsCurrent = previousPayload?.reportLayoutVersion === REPORT_LAYOUT_VERSION;
+  if (previousPayload && pdfExists && layoutIsCurrent) {
+    return {
+      ...paths,
+      written: false,
+      pdfCreated: false,
+      reason: 'already-generated'
+    };
   }
   const payload = buildCanonicalReportPayload({
     stints: [stint],
@@ -606,8 +630,7 @@ async function writeClosedStintArtifacts({
     carNumber: stint.carNumber
   });
   fs.writeFileSync(paths.jsonPath, JSON.stringify(payload, null, 2));
-  const needsPdf = !fs.existsSync(paths.pdfPath)
-    || previousPayload?.reportLayoutVersion !== REPORT_LAYOUT_VERSION;
+  const needsPdf = !pdfExists || !layoutIsCurrent;
   if (needsPdf) {
     const result = await renderPdf(paths.jsonPath, paths.pdfPath, { includeSummary: false });
     if (!result?.rendered) {

@@ -671,18 +671,19 @@ module.exports = (async () => {
       adjacentClassBattles: {
         available: true,
         mode: 'qualifying',
-        ahead: { row: { carNumber: '2' }, ourBestLapMs: 123500, rivalBestLapMs: 122000, bestLapDeltaMs: 1500, trendState: 'bad' },
-        behind: { row: { carNumber: '56' }, ourBestLapMs: 123500, rivalBestLapMs: 125000, bestLapDeltaMs: -1500, trendState: 'good' }
+        ahead: { row: { carNumber: '2' }, ourBestLapMs: 123500, rivalBestLapMs: 122000, bestLapDeltaMs: -1500, trendState: 'good' },
+        behind: { row: { carNumber: '56' }, ourBestLapMs: 123500, rivalBestLapMs: 125000, bestLapDeltaMs: 1500, trendState: 'bad' }
       }
     }
   };
   collectorUpdate(qualifyingState);
   await flushAsync();
   assert.ok(document.getElementById('comparison-placeholder'), 'mode changes do not repopulate the reserved comparison area');
-  assert.strictEqual(document.getElementById('battle-ahead-main').textContent, '#2 · Best Δ +1.500s');
-  assert.strictEqual(document.getElementById('battle-ahead-delta').textContent, 'Their best 2:02.000');
-  assert.strictEqual(document.getElementById('battle-ahead-trend').textContent, 'Our best 2:03.500');
-  assert.strictEqual(document.getElementById('battle-ahead-prediction').textContent, 'Qualifying comparison');
+  assert.strictEqual(document.getElementById('battle-ahead-main').textContent, '#2 · 2:02.000');
+  assert.strictEqual(document.getElementById('battle-ahead-delta').textContent, 'Delta -1.500s');
+  assert.strictEqual(document.getElementById('battle-ahead-trend').textContent, '');
+  assert.strictEqual(document.getElementById('battle-ahead-prediction').textContent, '');
+  assert.ok(document.getElementById('battle-ahead-card').classList.contains('qualifying-compact'));
 
   assert.strictEqual(document.getElementById('comparison-tab-title').textContent, 'Best / Last / Last 10');
   await document.getElementById('comparison-next-tab').trigger('click');

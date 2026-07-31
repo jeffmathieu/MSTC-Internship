@@ -86,6 +86,7 @@ assert.strictEqual(canonical.raceSummary.pitStops[0].driverChanged, true);
 assert.strictEqual(canonical.raceSummary.pitAnalysis.averageDeltaVsTargetMs, 8000);
 assert.strictEqual(canonical.stints[0].endPitStop.stopNumber, 1);
 assert.strictEqual(canonical.stints[0].endPitStop.classPositionAfter, 3);
+assert.strictEqual(canonical.raceSummary.graphs.classPacePages.length, 1);
 
 for (const sessionMode of ['practice', 'qualifying']) {
   const stintOnly = buildCanonicalReportPayload({
@@ -156,8 +157,76 @@ module.exports = (async () => {
     history,
     renderPdf: fakeCanonicalRenderer
   });
+  assert.strictEqual(second.written, false, 'an existing current report is not rewritten by later polls or Stop');
   assert.strictEqual(second.pdfCreated, false, 'existing PDF is not regenerated on every poll');
+  assert.strictEqual(second.reason, 'already-generated');
   assert.strictEqual(printCount, 1);
+
+  // A live driver change closes the previous stint before the replacement
+  // driver completes a lap. Its report must therefore be available during the
+  // session instead of being deferred until Stop.
+  const liveChangeStints = stintsForCar(history.slice(0, 2), 33, {
+    liveRow: { carNumber: '33', driver: 'Driver Two' },
+    generatedAt: '2026-06-23T12:04:00.000Z'
+  });
+  assert.strictEqual(liveChangeStints[0].closed, true);
+  assert.strictEqual(liveChangeStints[0].lapCount, 2);
+  assert.strictEqual(liveChangeStints[1].closed, false);
+  assert.strictEqual(liveChangeStints[1].lapCount, 0);
+  const liveOutput = path.join(output, 'live-driver-change');
+  const liveReport = await writeClosedStintArtifacts({
+    BrowserWindow: FakeBrowserWindow,
+    sessionFolder: liveOutput,
+    stint: liveChangeStints[0],
+    session: { sessionName: 'Live Race' },
+    history: history.slice(0, 2),
+    renderPdf: fakeCanonicalRenderer
+  });
+  assert.strictEqual(liveReport.pdfCreated, true, 'driver change writes the closed stint immediately');
+  assert.strictEqual(fs.existsSync(liveReport.pdfPath), true);
+  assert.strictEqual(printCount, 2);
+
+  const emptyFinal = { ...liveChangeStints[1], closed: true, closedAt: '2026-06-23T12:04:05.000Z' };
+  const emptyResult = await writeClosedStintArtifacts({
+    BrowserWindow: FakeBrowserWindow,
+    sessionFolder: liveOutput,
+    stint: emptyFinal,
+    session: { sessionName: 'Live Race' },
+    history: history.slice(0, 2),
+    renderPdf: fakeCanonicalRenderer
+  });
+  assert.deepStrictEqual(emptyResult, { written: false, reason: 'stint-empty' });
+
+  // Stop and automatic race completion use the same finalization path. At
+  // that point an earlier driver-change report already exists, so only the
+  // final active stint may create a new stint PDF.
+  const finalizedStints = stintsForCar(history, 33, {
+    closeFinalAt: '2026-06-23T12:06:00.000Z',
+    generatedAt: '2026-06-23T12:06:00.000Z'
+  });
+  assert.strictEqual(finalizedStints.length, 2);
+  assert.strictEqual(finalizedStints.every((stint) => stint.closed), true);
+  const previousAtFinish = await writeClosedStintArtifacts({
+    BrowserWindow: FakeBrowserWindow,
+    sessionFolder: liveOutput,
+    stint: finalizedStints[0],
+    session: { sessionName: 'Live Race' },
+    history,
+    renderPdf: fakeCanonicalRenderer
+  });
+  const finalAtFinish = await writeClosedStintArtifacts({
+    BrowserWindow: FakeBrowserWindow,
+    sessionFolder: liveOutput,
+    stint: finalizedStints[1],
+    session: { sessionName: 'Live Race' },
+    history,
+    renderPdf: fakeCanonicalRenderer
+  });
+  assert.strictEqual(previousAtFinish.written, false, 'finalization preserves previously generated stints');
+  assert.strictEqual(previousAtFinish.reason, 'already-generated');
+  assert.strictEqual(finalAtFinish.written, true, 'finalization writes the last active stint');
+  assert.strictEqual(finalAtFinish.pdfCreated, true);
+  assert.strictEqual(printCount, 3);
 
   const summaries = await writeEventSummaryArtifacts({
     BrowserWindow: FakeBrowserWindow,
@@ -170,7 +239,7 @@ module.exports = (async () => {
   });
   assert.strictEqual(summaries.length, 2, 'race and driver summaries are generated at session end');
   assert.strictEqual(summaries.every((summary) => fs.existsSync(summary.pdfPath)), true);
-  assert.strictEqual(printCount, 3);
+  assert.strictEqual(printCount, 5);
 
   const practiceOutput = path.join(output, 'practice');
   const practice = await writeClosedStintArtifacts({
@@ -189,7 +258,7 @@ module.exports = (async () => {
   assert.strictEqual(storedPractice.reportScope, 'stints-only');
   assert.deepStrictEqual(storedPractice.raceSummary.pitStops, []);
   assert.strictEqual(storedPractice.stints[0].endPitStop, null);
-  assert.strictEqual(printCount, 4);
+  assert.strictEqual(printCount, 6);
 
   const practiceSummaries = await writeEventSummaryArtifacts({
     BrowserWindow: FakeBrowserWindow,
@@ -202,7 +271,7 @@ module.exports = (async () => {
     renderPdf: fakeCanonicalRenderer
   });
   assert.deepStrictEqual(practiceSummaries, [], 'practice only writes individual stint overviews');
-  assert.strictEqual(printCount, 4);
+  assert.strictEqual(printCount, 6);
 
   const migrationOutput = path.join(output, 'old-layout');
   const oldPaths = artifactPaths(migrationOutput, closedStint);
@@ -218,7 +287,7 @@ module.exports = (async () => {
     renderPdf: fakeCanonicalRenderer
   });
   assert.strictEqual(migrated.pdfCreated, true, 'old automatic reports are regenerated once');
-  assert.strictEqual(printCount, 5);
+  assert.strictEqual(printCount, 7);
   assert.strictEqual(fs.readFileSync(oldPaths.pdfPath, 'utf8'), '%PDF-canonical-fake');
 
   const openStint = stintsForCar(history, 33).at(-1);

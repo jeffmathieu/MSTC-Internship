@@ -46,6 +46,7 @@ function canonicalHeader(header) {
     CARMODEL: 'car',
     VEHICLE: 'car',
     DRIVERINCAR: 'driver',
+    NAME: 'driver',
     DRIVER: 'driver',
     DRIVERS: 'driver',
     DRIVERSONTRACK: 'driver',
@@ -306,7 +307,13 @@ function parseSessionInfo(snapshot = {}) {
 
   if (fields.remaining) session.timeToGo = cleanText(fields.remaining);
   if (fields.elapsed) session.elapsed = cleanText(fields.elapsed);
-  if (fields.sessionName) session.sessionName = cleanText(fields.sessionName);
+  const isPlausibleSessionName = (value) => {
+    const candidate = cleanText(value);
+    return Boolean(candidate)
+      && /\b(race|quali(?:fying|fication)?|practice|session|warm.?up)\b/i.test(candidate)
+      && !/leader history|from lap|track limits|statistics|messages/i.test(candidate);
+  };
+  if (isPlausibleSessionName(fields.sessionName)) session.sessionName = cleanText(fields.sessionName);
 
   const risRemaining = text.match(/\bRemaining:\s*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)/i);
   const risElapsed = text.match(/\bElapsed:\s*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)/i);
@@ -345,6 +352,14 @@ function parseSessionInfo(snapshot = {}) {
     if (simpleToGo) session.timeToGo = cleanText(simpleToGo[1]);
   }
 
+  // Finished GetRaceResults pages put "Finish" immediately before the real
+  // event/session name. Prefer that value over generic page text such as the
+  // "Leader history" tab, which previously leaked into the dashboard title.
+  const finishedSession = text.match(/\b(?:Finish|Finished|Finishd)\s+([A-Z0-9][A-Za-z0-9 .:&'()\/-]+?\s-\s(?:Race|Qualifying|Qualification|Free Practice|Practice|Session|Warm.?up))(?=\s+(?:Show class|Highlight|POS|Results|Tracker|Statistics|Messages|Track limits)|$)/i);
+  if (finishedSession && isPlausibleSessionName(finishedSession[1])) {
+    session.sessionName = cleanText(finishedSession[1]);
+  }
+
   const flagMatch = text.match(/(Green flag|Red flag|Yellow flag|Safety car|Full course yellow|Code 60|Finished flag)/i);
   if (flagMatch) {
     const flag = cleanText(flagMatch[1]).toLowerCase();
@@ -365,13 +380,26 @@ function parseSessionInfo(snapshot = {}) {
   if (foundStatus) session.statusText = foundStatus;
 
   if (!session.sessionName) {
-    const sessionMatch = text.match(/([A-Z][A-Za-z0-9 .:&'()\-]+?\s-\s(?:Race|Qualifying|Practice|Session|Warm.?up))/i);
+    const sessionMatches = Array.from(text.matchAll(/([A-Z][A-Za-z0-9 .:&'()\-]+?\s-\s(?:Race|Qualifying|Qualification|Free Practice|Practice|Session|Warm.?up))/gi));
+    const sessionMatch = sessionMatches.find((match) => isPlausibleSessionName(match[1]));
     if (sessionMatch) session.sessionName = cleanText(sessionMatch[1]);
   }
 
   const updated = text.match(/Page updated\s*([0-9:]+\s*\(UTC\))?/i);
   if (updated) session.pageUpdated = cleanText(updated[1] || '');
   return session;
+}
+
+// Some single-make timing pages omit CLASS and PIC entirely because every car
+// competes together. Assign one synthetic class so all class-based comparison,
+// gap and report functions keep working without provider-specific branches.
+function applySingleClassFallback(rows = [], fallbackName = 'Overall') {
+  if (!rows.length || rows.some((row) => cleanText(row.className))) return rows;
+  return rows.map((row, index) => ({
+    ...row,
+    className: fallbackName,
+    classPosition: row.classPosition || row.position || index + 1
+  }));
 }
 
 // Export each parser primitive separately so tests can cover small pieces and
@@ -386,5 +414,6 @@ module.exports = {
   splitTeamInfo,
   parseTimingRow,
   looksLikeTimingHeaders,
-  parseSessionInfo
+  parseSessionInfo,
+  applySingleClassFallback
 };

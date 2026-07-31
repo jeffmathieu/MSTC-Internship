@@ -24,6 +24,8 @@ const {
   carsInClass,
   compareBestDriverToCurrentDriver,
   carStats,
+  providerBestLapMs,
+  carStatsWithProviderBest,
   bestCarInClassByAverage,
   currentStintStats,
   compareCarToClassTargets,
@@ -416,8 +418,8 @@ const classComparison = compareCarToClassTargets(stintHistory, 33, 9);
 assert.strictEqual(classComparison.bestClassCar.carNumber, '2');
 assert.strictEqual(classComparison.selectedCar.carNumber, '9');
 assert.strictEqual(classComparison.ourCurrentStint.driverName, 'Driver 3');
-assert.strictEqual(classComparison.deltas.currentStintAverageToBestClassCarAverageMs, 2945);
-assert.strictEqual(classComparison.deltas.currentStintAverageToSelectedCarAverageMs, 1445);
+assert.strictEqual(classComparison.deltas.currentStintAverageToBestClassCarAverageMs, -2945);
+assert.strictEqual(classComparison.deltas.currentStintAverageToSelectedCarAverageMs, -1445);
 
 const noSelectedComparison = compareCarToClassTargets(stintHistory, 33);
 assert.strictEqual(noSelectedComparison.selectedCar, null);
@@ -435,7 +437,7 @@ assert.strictEqual(unknownOurCarComparison.deltas.currentStintAverageToBestClass
 const dashboardAnalysis = buildDashboardAnalysis(stintHistory, { ourCarNumber: 33, selectedCarNumber: 9 });
 assert.strictEqual(dashboardAnalysis.currentDriverName, 'Driver 3');
 assert.strictEqual(dashboardAnalysis.driverComparison.deltas.bestDriverAverageToCurrentAverageMs, 1945);
-assert.strictEqual(dashboardAnalysis.classComparison.deltas.currentStintAverageToSelectedCarAverageMs, 1445);
+assert.strictEqual(dashboardAnalysis.classComparison.deltas.currentStintAverageToSelectedCarAverageMs, -1445);
 const liveDriverOverrideAnalysis = buildDashboardAnalysis(stintHistory, {
   ourCarNumber: 33,
   selectedCarNumber: 9,
@@ -445,5 +447,33 @@ assert.strictEqual(liveDriverOverrideAnalysis.currentDriverName, 'Driver 1');
 assert.strictEqual(liveDriverOverrideAnalysis.driverComparison.currentDriver.driverName, 'Driver 1');
 assert.strictEqual(liveDriverOverrideAnalysis.classComparison.ourCurrentStint.driverName, 'Driver 1');
 assert.strictEqual(buildDashboardAnalysis(stintHistory), null);
+
+const officialBestHistory = [lap({
+  carNumber: 33,
+  className: 'C.CHA',
+  teamName: 'MSTC',
+  lapNumber: 2,
+  lapTimeMs: 183000,
+  lapCondition: 'wet'
+})];
+const officialBestRows = [{ carNumber: '33', className: 'C.CHA', team: 'MSTC', bestLapMs: 178500 }];
+assert.strictEqual(providerBestLapMs(officialBestRows[0]), 178500);
+assert.strictEqual(providerBestLapMs({ bestLapMs: 0 }), null, 'zero is not a real provider best lap');
+assert.strictEqual(providerBestLapMs({ bestLapMs: '--' }), null, 'placeholder values are ignored');
+assert.strictEqual(
+  carStatsWithProviderBest(officialBestHistory, officialBestRows, 33).bestLapMs,
+  178500,
+  'combined stats prefer the official BEST TIME column over locally collected laps'
+);
+assert.strictEqual(
+  carStatsWithProviderBest(officialBestHistory, officialBestRows, 33, { conditionFilter: 'wet' }).bestLapMs,
+  183000,
+  'condition views keep their condition-specific locally calculated best'
+);
+assert.strictEqual(
+  carStatsWithProviderBest(officialBestHistory, [{ carNumber: '33', bestLapMs: null }], 33).bestLapMs,
+  183000,
+  'missing provider best time falls back to local history'
+);
 
 console.log('Lap analytics tests passed.');
