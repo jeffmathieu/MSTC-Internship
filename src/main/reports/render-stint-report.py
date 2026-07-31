@@ -695,7 +695,8 @@ def render_page(c, payload, stint, page_number):
     draw_consistency_note(c, 44 + bottom_w * 2 + 8, 23)
     c.setFillColor(MUTED)
     c.setFont('Helvetica', 6.5)
-    c.drawRightString(PAGE_W - 28, 18, f'Generated from stored race data | page {page_number}')
+    source_label = 'race data' if payload.get('reportMode', 'race') == 'race' else 'session data'
+    c.drawRightString(PAGE_W - 28, 18, f'Generated from stored {source_label} | page {page_number}')
 
 
 def render_pdf(filename, payload, stints, include_summary=False):

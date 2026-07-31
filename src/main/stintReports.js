@@ -4,8 +4,23 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const lapAnalytics = require('../shared/lapAnalytics');
 const { buildStintInsights, classComparisonsForStint, classRankingForStint } = require('../shared/stintInsights');
+const { normalizeMode } = require('../shared/sessionMode');
 
-const REPORT_LAYOUT_VERSION = 'canonical-reportlab-landscape-v4-conditions';
+const REPORT_LAYOUT_VERSION = 'canonical-reportlab-landscape-v5-session-modes';
+
+// Practice and qualifying still produce a full pace/sector stint overview, but
+// pitstop analysis and end-of-race summary pages only make sense in race mode.
+// Keeping this decision in one policy prevents the live trigger, JSON payload
+// and PDF renderer from quietly disagreeing about what belongs in a report.
+function reportPolicyForSessionMode(value) {
+  const sessionMode = normalizeMode(value);
+  const isRace = sessionMode === 'race';
+  return {
+    sessionMode,
+    includePitstops: isRace,
+    writeEventSummaries: isRace
+  };
+}
 
 function safeFilePart(value, fallback = 'Unknown') {
   const safe = String(value || '')
@@ -288,7 +303,17 @@ function canonicalStint(stint, session, gapSamples, driverStats, history, refere
 // Adapts live stint objects to the exact payload consumed by the polished
 // ReportLab renderer used by the post-race script. This is the single contract
 // that keeps manual and automatic PDFs visually and statistically identical.
-function buildCanonicalReportPayload({ stints = [], session = {}, gapSamples = [], history = [], carNumber = '', referenceTimes = {}, pitRules = {} }) {
+function buildCanonicalReportPayload({
+  stints = [],
+  session = {},
+  gapSamples = [],
+  history = [],
+  carNumber = '',
+  referenceTimes = {},
+  pitRules = {},
+  sessionMode = 'race'
+}) {
+  const reportPolicy = reportPolicyForSessionMode(sessionMode);
   const followedCar = String(carNumber || stints[0]?.carNumber || '');
   const carLaps = lapAnalytics.lapsForCar(history, followedCar);
   const fallbackLaps = stints.flatMap((stint) => stint.laps || []);
@@ -302,12 +327,16 @@ function buildCanonicalReportPayload({ stints = [], session = {}, gapSamples = [
     }));
   const driverStats = rawDriverStats.map(compactStats);
   const expectedPitDurationMs = expectedPitDurationMsFromRules(pitRules);
-  const pitStops = enrichPitStops(pitStopsFromHistory(history, followedCar), expectedPitDurationMs);
+  const pitStops = reportPolicy.includePitstops
+    ? enrichPitStops(pitStopsFromHistory(history, followedCar), expectedPitDurationMs)
+    : [];
   const pitAnalysis = pitstopAnalysis(pitStops);
   const legacy = stints[0] ? buildStintReportPayload(stints[0], session, gapSamples) : null;
   return {
     schemaVersion: 2,
     reportLayoutVersion: REPORT_LAYOUT_VERSION,
+    reportMode: reportPolicy.sessionMode,
+    reportScope: reportPolicy.includePitstops ? 'race-and-stints' : 'stints-only',
     generatedAt: new Date().toISOString(),
     race: {
       sessionName: session.sessionName || session.pageTitle || 'Race session',
@@ -554,6 +583,7 @@ async function writeClosedStintArtifacts({
   history = [],
   referenceTimes = {},
   pitRules = {},
+  sessionMode = 'race',
   renderPdf = renderReportLabPdf
 }) {
   if (!stint?.closed) return { written: false, reason: 'stint-open' };
@@ -572,6 +602,7 @@ async function writeClosedStintArtifacts({
     history,
     referenceTimes,
     pitRules,
+    sessionMode,
     carNumber: stint.carNumber
   });
   fs.writeFileSync(paths.jsonPath, JSON.stringify(payload, null, 2));
@@ -631,8 +662,11 @@ async function writeEventSummaryArtifacts({
   history = [],
   referenceTimes = {},
   pitRules = {},
+  sessionMode = 'race',
   renderPdf = renderReportLabPdf
 }) {
+  const reportPolicy = reportPolicyForSessionMode(sessionMode);
+  if (!reportPolicy.writeEventSummaries) return [];
   const closed = stints.filter((stint) => stint.closed);
   if (!closed.length) return [];
   const carFolder = path.join(sessionFolder, 'stints', `car-${safeFilePart(carNumber, 'unknown')}`);
@@ -662,6 +696,7 @@ async function writeEventSummaryArtifacts({
       history,
       referenceTimes,
       pitRules,
+      sessionMode: reportPolicy.sessionMode,
       carNumber
     });
     payload.title = group.title;
@@ -690,6 +725,7 @@ async function writeEventSummaryArtifacts({
 
 module.exports = {
   safeFilePart,
+  reportPolicyForSessionMode,
   formatMs,
   htmlEscape,
   lapStatus,

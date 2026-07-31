@@ -7,6 +7,7 @@ const { stintsForCar } = require('../src/shared/stintTracker');
 const {
   safeFilePart,
   htmlEscape,
+  reportPolicyForSessionMode,
   buildStintReportPayload,
   buildCanonicalReportPayload,
   buildStintReportHtml,
@@ -31,6 +32,16 @@ const payload = buildStintReportPayload(closedStint, { sessionName: 'Spa <Race>'
 
 assert.strictEqual(safeFilePart('Driver / One'), 'Driver_One');
 assert.strictEqual(htmlEscape('<MSTC & "team">'), '&lt;MSTC &amp; &quot;team&quot;&gt;');
+assert.deepStrictEqual(reportPolicyForSessionMode('practice'), {
+  sessionMode: 'practice',
+  includePitstops: false,
+  writeEventSummaries: false
+});
+assert.deepStrictEqual(reportPolicyForSessionMode('quali'), {
+  sessionMode: 'qualifying',
+  includePitstops: false,
+  writeEventSummaries: false
+});
 assert.strictEqual(payload.stint.laps[0].status, 'valid');
 assert.strictEqual(payload.stint.laps[1].status, 'neutralized');
 assert.strictEqual(payload.stint.stats.paceLapCount, 1);
@@ -75,6 +86,23 @@ assert.strictEqual(canonical.raceSummary.pitStops[0].driverChanged, true);
 assert.strictEqual(canonical.raceSummary.pitAnalysis.averageDeltaVsTargetMs, 8000);
 assert.strictEqual(canonical.stints[0].endPitStop.stopNumber, 1);
 assert.strictEqual(canonical.stints[0].endPitStop.classPositionAfter, 3);
+
+for (const sessionMode of ['practice', 'qualifying']) {
+  const stintOnly = buildCanonicalReportPayload({
+    stints: [closedStint],
+    session: { sessionName: `Spa ${sessionMode}` },
+    history,
+    carNumber: '33',
+    pitRules: { pitStopDurationMs: 75000 },
+    sessionMode
+  });
+  assert.strictEqual(stintOnly.reportMode, sessionMode);
+  assert.strictEqual(stintOnly.reportScope, 'stints-only');
+  assert.deepStrictEqual(stintOnly.raceSummary.pitStops, [], `${sessionMode} does not expose pitstops`);
+  assert.strictEqual(stintOnly.raceSummary.pitAnalysis.stopCount, 0);
+  assert.strictEqual(stintOnly.raceSummary.totalPitTimeMs, null);
+  assert.strictEqual(stintOnly.stints[0].endPitStop, null);
+}
 
 const output = fs.mkdtempSync(path.join(os.tmpdir(), 'mstc-stint-report-'));
 const paths = artifactPaths(output, closedStint);
@@ -144,6 +172,38 @@ module.exports = (async () => {
   assert.strictEqual(summaries.every((summary) => fs.existsSync(summary.pdfPath)), true);
   assert.strictEqual(printCount, 3);
 
+  const practiceOutput = path.join(output, 'practice');
+  const practice = await writeClosedStintArtifacts({
+    BrowserWindow: FakeBrowserWindow,
+    sessionFolder: practiceOutput,
+    stint: closedStint,
+    session: { sessionName: 'Spa Practice' },
+    history,
+    pitRules: { pitStopDurationMs: 75000 },
+    sessionMode: 'practice',
+    renderPdf: fakeCanonicalRenderer
+  });
+  const storedPractice = JSON.parse(fs.readFileSync(practice.jsonPath, 'utf8'));
+  assert.strictEqual(practice.pdfCreated, true);
+  assert.strictEqual(storedPractice.reportMode, 'practice');
+  assert.strictEqual(storedPractice.reportScope, 'stints-only');
+  assert.deepStrictEqual(storedPractice.raceSummary.pitStops, []);
+  assert.strictEqual(storedPractice.stints[0].endPitStop, null);
+  assert.strictEqual(printCount, 4);
+
+  const practiceSummaries = await writeEventSummaryArtifacts({
+    BrowserWindow: FakeBrowserWindow,
+    sessionFolder: practiceOutput,
+    carNumber: '33',
+    stints: [closedStint],
+    session: { sessionName: 'Spa Practice' },
+    history,
+    sessionMode: 'practice',
+    renderPdf: fakeCanonicalRenderer
+  });
+  assert.deepStrictEqual(practiceSummaries, [], 'practice only writes individual stint overviews');
+  assert.strictEqual(printCount, 4);
+
   const migrationOutput = path.join(output, 'old-layout');
   const oldPaths = artifactPaths(migrationOutput, closedStint);
   fs.mkdirSync(oldPaths.folder, { recursive: true });
@@ -158,7 +218,7 @@ module.exports = (async () => {
     renderPdf: fakeCanonicalRenderer
   });
   assert.strictEqual(migrated.pdfCreated, true, 'old automatic reports are regenerated once');
-  assert.strictEqual(printCount, 4);
+  assert.strictEqual(printCount, 5);
   assert.strictEqual(fs.readFileSync(oldPaths.pdfPath, 'utf8'), '%PDF-canonical-fake');
 
   const openStint = stintsForCar(history, 33).at(-1);

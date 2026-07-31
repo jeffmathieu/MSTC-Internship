@@ -856,6 +856,7 @@ async function writeStintStateAndReports(settings, context, rows = []) {
   const generatedAt = context?.collectedAt || new Date().toISOString();
   const sessionStatus = String(context?.session?.statusText || context?.session?.status || context?.session?.flag || '');
   const sessionFinished = /finished|complete(?:d)?|checkered|chequered|session\s+ended/i.test(sessionStatus);
+  const reportSessionMode = normalizeMode(settings.sessionMode);
   const stintOptions = {
     closeFinalAt: sessionFinished ? generatedAt : null,
     generatedAt,
@@ -887,13 +888,14 @@ async function writeStintStateAndReports(settings, context, rows = []) {
           gapSamples: gapMemoryState?.samples || [],
           history: collectorState.lapHistory || [],
           referenceTimes: settings.referenceTimes || {},
-          pitRules: settings.pitRules || {}
+          pitRules: settings.pitRules || {},
+          sessionMode: reportSessionMode
         });
       } finally {
         pendingStintReports.delete(reportKey);
       }
     }
-    if (sessionFinished && closedStints.length) {
+    if (sessionFinished && closedStints.length && reportSessionMode === 'race') {
       await writeEventSummaryArtifacts({
         BrowserWindow,
         sessionFolder: folder,
@@ -903,7 +905,8 @@ async function writeStintStateAndReports(settings, context, rows = []) {
         gapSamples: gapMemoryState?.samples || [],
         history: collectorState.lapHistory || [],
         referenceTimes: settings.referenceTimes || {},
-        pitRules: settings.pitRules || {}
+        pitRules: settings.pitRules || {},
+        sessionMode: reportSessionMode
       });
     }
   }
