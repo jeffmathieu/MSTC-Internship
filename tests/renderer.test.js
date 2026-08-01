@@ -522,6 +522,18 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-red'), true);
   assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-caution'), false);
   assert.strictEqual(document.getElementById('status-text').textContent, 'RED');
+  collectorUpdate({
+    ...updatedState,
+    session: { ...updatedState.session, flag: 'Finish' },
+    finishCountdown: { active: true, remainingMs: 127000 }
+  });
+  assert.strictEqual(document.getElementById('status-text').textContent, '🏁 FINISH');
+  assert.strictEqual(document.getElementById('session-time-label').textContent, 'Auto stop');
+  assert.strictEqual(document.getElementById('session-time').textContent, '2:07');
+  assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-red'), false);
+  collectorUpdate(updatedState);
+  assert.strictEqual(document.getElementById('session-time-label').textContent, 'Time left');
+  assert.strictEqual(document.getElementById('session-time').textContent, '55:54');
   collectorUpdate({ ...updatedState, status: 'error', message: 'Timing page unavailable' });
   assert.strictEqual(document.getElementById('collector-health').classList.contains('is-error'), true);
   assert.strictEqual(document.getElementById('collector-health').attributes.title, 'Timing page unavailable');
