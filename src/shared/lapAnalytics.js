@@ -388,7 +388,13 @@ function representativePaceLaps(laps, options = {}) {
 // deliberately more granular than lapPaceEligible: a lap can become FCY in S3
 // while S1/S2 remain valid.
 function sectorPaceEligible(lap, sectorNumber, options = {}) {
-  if (isOpeningRaceLap(lap)) return false;
+  // The full opening lap and its start-affected S1 stay excluded from normal
+  // pace statistics. The prediction model may explicitly reuse green S2/S3,
+  // however, so lap two can already be predicted after its first sector.
+  const openingPredictionSector = options.allowOpeningPredictionSector === true
+    && isOpeningRaceLap(lap)
+    && sectorNumber > 1;
+  if (isOpeningRaceLap(lap) && !openingPredictionSector) return false;
   if (pitAffectedLap(lap)) return false;
   if (normalizedManualLapStatus(lap?.manualLapStatus)) return false;
   const conditionFilter = trackConditions.normalizeAnalysisFilter(options.conditionFilter, 'combined');
@@ -402,6 +408,9 @@ function sectorPaceEligible(lap, sectorNumber, options = {}) {
   // If the exact sector flag is unknown, fall back to the lap/session flag. This
   // is conservative: a lap marked FCY excludes all sectors unless the sector has
   // its own explicit green/eligible marker.
+  if (openingPredictionSector) {
+    return ![lap.lapFlag, lap.sessionFlag].some(isNeutralizedFlag);
+  }
   return lapPaceEligible(lap);
 }
 
