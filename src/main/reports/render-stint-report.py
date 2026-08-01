@@ -430,6 +430,175 @@ def summary_card(c, x, y, w, label, value):
     c.drawString(x + 10, y + 14, value)
 
 
+GRAPH_COLORS = [BLUE, RED, GREEN, YELLOW, HexColor('#7651B5'), WET, ORANGE, GRAY]
+
+
+def draw_report_header(c, payload, page_title):
+    race = payload['race']
+    c.setFillColor(PAPER)
+    c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
+    c.setFillColor(NAVY)
+    c.rect(0, PAGE_H - 58, PAGE_W, 58, fill=1, stroke=0)
+    c.setFillColor(HexColor('#FFFFFF'))
+    c.setFont('Helvetica-Bold', 15)
+    c.drawString(28, PAGE_H - 26, race['sessionName'])
+    c.setFont('Helvetica', 8)
+    c.drawString(28, PAGE_H - 43, race_detail_line(race))
+    c.setFont('Helvetica-Bold', 14)
+    c.drawRightString(PAGE_W - 28, PAGE_H - 27, page_title)
+
+
+def graph_values(graph):
+    if graph.get('type') == 'bar':
+        return [value for series in graph.get('series', []) for value in series.get('values', [])
+                if isinstance(value, (int, float)) and math.isfinite(value)]
+    return [point.get('y') for series in graph.get('series', []) for point in series.get('points', [])
+            if isinstance(point.get('y'), (int, float)) and math.isfinite(point.get('y'))]
+
+
+def graph_bounds(values):
+    if not values:
+        return 0, 1
+    low, high = min(values), max(values)
+    span = high - low
+    padding = span * 0.08 if span else max(abs(high) * 0.02, 1000)
+    return low - padding, high + padding
+
+
+def draw_graph_axes(c, chart_x, chart_y, chart_w, chart_h, low, high):
+    c.setStrokeColor(GRID)
+    c.setFillColor(MUTED)
+    c.setFont('Helvetica', 5.5)
+    for index in range(5):
+        ratio = index / 4
+        yy = chart_y + ratio * chart_h
+        value = low + ratio * (high - low)
+        c.line(chart_x, yy, chart_x + chart_w, yy)
+        c.drawRightString(chart_x - 5, yy - 2, fmt_time(value))
+
+
+def draw_line_graph(c, x, y, w, h, graph):
+    panel(c, x, y, w, h, graph.get('title', 'Graph'))
+    c.setFillColor(MUTED)
+    c.setFont('Helvetica', 5.5)
+    c.drawString(x + 10, y + h - 27, graph.get('subtitle', '')[:125])
+    values = graph_values(graph)
+    if not values:
+        c.setFillColor(MUTED)
+        c.setFont('Helvetica-Bold', 9)
+        c.drawCentredString(x + w / 2, y + h / 2, 'No valid lap samples available')
+        return
+    all_points = [point for series in graph.get('series', []) for point in series.get('points', [])
+                  if isinstance(point.get('x'), (int, float)) and isinstance(point.get('y'), (int, float))]
+    min_x = min(point['x'] for point in all_points)
+    max_x = max(point['x'] for point in all_points)
+    low, high = graph_bounds(values)
+    chart_x, chart_y = x + 42, y + 38
+    chart_w, chart_h = w - 54, h - 78
+    draw_graph_axes(c, chart_x, chart_y, chart_w, chart_h, low, high)
+
+    def px(value):
+        return chart_x + (value - min_x) / max(1, max_x - min_x) * chart_w
+
+    def py(value):
+        return chart_y + (value - low) / max(1, high - low) * chart_h
+
+    for series_index, series in enumerate(graph.get('series', [])):
+        points = [point for point in series.get('points', [])
+                  if isinstance(point.get('x'), (int, float)) and isinstance(point.get('y'), (int, float))]
+        color = GRAPH_COLORS[series_index % len(GRAPH_COLORS)]
+        c.setStrokeColor(color)
+        c.setFillColor(color)
+        c.setLineWidth(1.1 if series.get('highlight') else 0.7)
+        for index in range(1, len(points)):
+            c.line(px(points[index - 1]['x']), py(points[index - 1]['y']), px(points[index]['x']), py(points[index]['y']))
+        for point in points:
+            c.circle(px(point['x']), py(point['y']), 1.25 if series.get('highlight') else 0.8, fill=1, stroke=0)
+    c.setFillColor(MUTED)
+    c.setFont('Helvetica', 5.5)
+    c.drawString(chart_x, chart_y - 12, f"{graph.get('xLabel', 'Lap')} {int(min_x)}")
+    c.drawRightString(chart_x + chart_w, chart_y - 12, f"{graph.get('xLabel', 'Lap')} {int(max_x)}")
+    legend_x, legend_y = x + 10, y + 10
+    for series_index, series in enumerate(graph.get('series', [])):
+        label = str(series.get('name', ''))[:32]
+        item_w = min(165, 18 + len(label) * 3.2)
+        if legend_x + item_w > x + w - 10:
+            legend_x = x + 10
+            legend_y += 9
+        c.setFillColor(GRAPH_COLORS[series_index % len(GRAPH_COLORS)])
+        c.rect(legend_x, legend_y, 7, 2.5, fill=1, stroke=0)
+        c.setFillColor(INK)
+        c.setFont('Helvetica', 5.2)
+        c.drawString(legend_x + 10, legend_y - 1, label)
+        legend_x += item_w
+
+
+def draw_bar_graph(c, x, y, w, h, graph):
+    panel(c, x, y, w, h, graph.get('title', 'Graph'))
+    c.setFillColor(MUTED)
+    c.setFont('Helvetica', 5.2)
+    c.drawString(x + 10, y + h - 27, graph.get('subtitle', '')[:90])
+    values = graph_values(graph)
+    categories = graph.get('categories', [])
+    series_list = graph.get('series', [])
+    if not values or not categories:
+        c.setFont('Helvetica-Bold', 8)
+        c.drawCentredString(x + w / 2, y + h / 2, 'No valid samples available')
+        return
+    low, high = graph_bounds(values)
+    chart_x, chart_y = x + 40, y + 39
+    chart_w, chart_h = w - 50, h - 80
+    draw_graph_axes(c, chart_x, chart_y, chart_w, chart_h, low, high)
+    group_w = chart_w / len(categories)
+    bar_w = min(18, group_w * 0.72 / max(1, len(series_list)))
+    for category_index, category in enumerate(categories):
+        group_center = chart_x + group_w * (category_index + 0.5)
+        start_x = group_center - bar_w * len(series_list) / 2
+        for series_index, series in enumerate(series_list):
+            value = (series.get('values') or [None] * len(categories))[category_index]
+            if not isinstance(value, (int, float)) or not math.isfinite(value):
+                continue
+            bar_x = start_x + series_index * bar_w
+            bar_h = max(1, (value - low) / max(1, high - low) * chart_h)
+            color = GRAPH_COLORS[series_index % len(GRAPH_COLORS)]
+            c.setFillColor(color)
+            c.rect(bar_x, chart_y, max(2, bar_w - 1), bar_h, fill=1, stroke=0)
+            c.saveState()
+            c.translate(bar_x + bar_w / 2, chart_y + bar_h + 3)
+            c.rotate(90)
+            c.setFillColor(INK)
+            c.setFont('Helvetica-Bold', 4.5)
+            c.drawString(0, 0, fmt_time(value))
+            c.restoreState()
+        c.setFillColor(INK)
+        c.setFont('Helvetica', 5.2)
+        c.drawCentredString(group_center, chart_y - 12, str(category)[:18])
+    legend_x = x + 10
+    for series_index, series in enumerate(series_list):
+        c.setFillColor(GRAPH_COLORS[series_index % len(GRAPH_COLORS)])
+        c.rect(legend_x, y + 10, 7, 3, fill=1, stroke=0)
+        c.setFillColor(INK)
+        c.setFont('Helvetica', 5.2)
+        label = str(series.get('name', ''))
+        c.drawString(legend_x + 10, y + 9, label)
+        legend_x += min(105, 18 + len(label) * 3.1)
+
+
+def render_team_graphs_page(c, payload):
+    graphs = payload.get('raceSummary', {}).get('graphs', {})
+    draw_report_header(c, payload, 'RACE ANALYSIS GRAPHS')
+    draw_line_graph(c, 24, 305, PAGE_W - 48, 220, graphs.get('driverLaps', {}))
+    half_w = (PAGE_W - 56) / 2
+    draw_bar_graph(c, 24, 32, half_w, 258, graphs.get('driverPace', {}))
+    draw_bar_graph(c, 32 + half_w, 32, half_w, 258, graphs.get('driverSectors', {}))
+
+
+def render_class_graph_page(c, payload, graph, page_number=1, page_count=1):
+    title = 'CLASS LAP TIMES' if page_count == 1 else f'CLASS LAP TIMES {page_number}/{page_count}'
+    draw_report_header(c, payload, title)
+    draw_line_graph(c, 24, 35, PAGE_W - 48, 490, graph)
+
+
 def render_race_summary(c, payload):
     race = payload['race']
     summary = payload['raceSummary']
@@ -717,6 +886,17 @@ def render_pdf(filename, payload, stints, include_summary=False):
     for index, stint in enumerate(stints, 1):
         render_page(pdf, payload, stint, index)
         pdf.showPage()
+    # Analysis graphs are an appendix: the detailed stint and pitstop reports
+    # come first, while the paginated 24-hour class charts always finish the PDF.
+    if include_summary:
+        graphs = payload.get('raceSummary', {}).get('graphs', {})
+        if any(graphs.get(key) for key in ('driverLaps', 'driverPace', 'driverSectors')):
+            render_team_graphs_page(pdf, payload)
+            pdf.showPage()
+        class_pages = graphs.get('classPacePages') or ([graphs.get('classPace')] if graphs.get('classPace') else [])
+        for page_index, graph in enumerate(class_pages, 1):
+            render_class_graph_page(pdf, payload, graph, page_index, len(class_pages))
+            pdf.showPage()
     pdf.save()
 
 

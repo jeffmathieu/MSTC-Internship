@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { lapIdentity } = require('../src/shared/storageSchema');
-const { resolveSessionFolder, loadSessionHistory, loadStoredJson } = require('../src/shared/storageSession');
+const { resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalReportSettings } = require('../src/shared/storageSession');
 
 assert.strictEqual(resolveSessionFolder('/race/zolder', '/fallback'), '/race/zolder');
 assert.strictEqual(resolveSessionFolder('', '/fallback'), '/fallback');
@@ -34,6 +34,30 @@ try {
   const savedPitState = { completedPitStops: 1, validCompletedPitStops: 1, lastPitElapsedMs: 3600000 };
   fs.writeFileSync(pitPlanPath, JSON.stringify({ pitState: savedPitState }));
   assert.deepStrictEqual(loadStoredJson(fs, pitPlanPath).pitState, savedPitState);
+
+  const historicalRaceSettings = resolveFinalReportSettings(
+    { followedCar: '2', followedCars: ['2'], sessionMode: 'qualifying' },
+    { followedCar: '33', followedCars: ['33'], sessionName: 'Ligier Js Cup - Race' },
+    laps
+  );
+  assert.strictEqual(historicalRaceSettings.followedCar, '33', 'old folder metadata selects the originally followed car');
+  assert.deepStrictEqual(historicalRaceSettings.followedCars, ['33']);
+  assert.strictEqual(historicalRaceSettings.sessionMode, 'race', 'legacy race metadata still enables the race overview');
+
+  const explicitPracticeSettings = resolveFinalReportSettings(
+    { followedCar: '2', followedCars: ['2'], sessionMode: 'race' },
+    { followedCar: '33', sessionName: 'Friday Race Simulation', sessionMode: 'practice' },
+    laps
+  );
+  assert.strictEqual(explicitPracticeSettings.sessionMode, 'practice', 'new explicit metadata wins over words in the session title');
+
+  const onlyHistoricalCar = resolveFinalReportSettings(
+    { followedCar: '999', followedCars: ['999'], sessionMode: 'race' },
+    {},
+    laps
+  );
+  assert.deepStrictEqual(onlyHistoricalCar.followedCars, ['33'], 'a single historical car is a safe metadata fallback');
+
   fs.writeFileSync(jsonlPath, '{invalid json}\n');
   assert.throws(() => loadSessionHistory({ fs, jsonlPath, identityForLap: lapIdentity }), SyntaxError);
   fs.writeFileSync(pitPlanPath, '{invalid json}');

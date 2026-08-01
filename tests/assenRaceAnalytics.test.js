@@ -106,8 +106,8 @@ const classComparison = compareCarToClassTargets(history, '33', '56');
 assert.strictEqual(classComparison.bestClassCar.carNumber, '38');
 assert.strictEqual(classComparison.selectedCar.carNumber, '56');
 assert.strictEqual(classComparison.ourCurrentStint.driverName, 'Janssens');
-closeTo(classComparison.deltas.currentStintAverageToBestClassCarAverageMs, 10526.61151924773);
-closeTo(classComparison.deltas.currentStintAverageToSelectedCarAverageMs, 2982.211793763505);
+closeTo(classComparison.deltas.currentStintAverageToBestClassCarAverageMs, -10526.61151924773);
+closeTo(classComparison.deltas.currentStintAverageToSelectedCarAverageMs, -2982.211793763505);
 
 const dashboardAnalysis = buildDashboardAnalysis(history, { ourCarNumber: '33', selectedCarNumber: '56' });
 assert.strictEqual(dashboardAnalysis.currentDriverName, 'Janssens');
@@ -134,7 +134,7 @@ assert.strictEqual(neutralizedCurrentStint.paceLapCount, 40);
 closeTo(neutralizedCurrentStint.averageLapMs, 135137.575);
 
 const neutralizedClassComparison = compareCarToClassTargets(neutralizedHistory, '33', '56');
-closeTo(neutralizedClassComparison.deltas.currentStintAverageToBestClassCarAverageMs, 6267.43042168676);
-closeTo(neutralizedClassComparison.deltas.currentStintAverageToSelectedCarAverageMs, -1276.9693037974648);
+closeTo(neutralizedClassComparison.deltas.currentStintAverageToBestClassCarAverageMs, -6267.43042168676);
+closeTo(neutralizedClassComparison.deltas.currentStintAverageToSelectedCarAverageMs, 1276.9693037974648);
 
 console.log('Assen race analytics tests passed.');

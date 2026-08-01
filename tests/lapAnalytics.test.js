@@ -24,6 +24,8 @@ const {
   carsInClass,
   compareBestDriverToCurrentDriver,
   carStats,
+  providerBestLapMs,
+  carStatsWithProviderBest,
   bestCarInClassByAverage,
   currentStintStats,
   compareCarToClassTargets,
@@ -83,6 +85,21 @@ const spaCompletedLapFlags = captureSectorFlags({ lastLap: '3:30.000', sector1: 
 assert.strictEqual(spaCompletedLapFlags.sector1Flag, 'Green flag');
 assert.strictEqual(spaCompletedLapFlags.sector2Flag, 'Full Course Yellow');
 assert.strictEqual(spaCompletedLapFlags.sector3Flag, 'Full Course Yellow');
+
+// A completely new green lap after FCY must not inherit the previous lap's
+// neutralization when all newly observed sector values differ.
+const freshGreenLapAfterFcy = captureSectorFlags({
+  lastLap: '2:09.104',
+  sector1: '42.196',
+  sector2: '48.155',
+  sector3: '38.753'
+}, spaCompletedLapFlags, 'Green flag');
+assert.strictEqual(freshGreenLapAfterFcy.sector1Flag, 'Green flag');
+assert.strictEqual(freshGreenLapAfterFcy.sector2Flag, 'Green flag');
+assert.strictEqual(freshGreenLapAfterFcy.sector3Flag, 'Green flag');
+assert.strictEqual(freshGreenLapAfterFcy.sector1Eligible, 'true');
+assert.strictEqual(freshGreenLapAfterFcy.sector2Eligible, 'true');
+assert.strictEqual(freshGreenLapAfterFcy.sector3Eligible, 'true');
 const fcyDuringS1 = captureSectorFlags({ lastLap: '3:01.000', sector1: '', sector2: '', sector3: '' }, null, 'Full Course Yellow');
 assert.strictEqual(fcyDuringS1.sector1Flag, 'Full Course Yellow');
 assert.strictEqual(fcyDuringS1.sector1Eligible, 'false');
@@ -156,6 +173,35 @@ assert.strictEqual(manualTrackLimitsStats.paceLapCount, 1);
 assert.strictEqual(manualTrackLimitsStats.averageLapMs, 102000);
 assert.strictEqual(manualTrackLimitsStats.bestLapMs, 102000);
 assert.deepStrictEqual(manualTrackLimitsStats.selection.lap.excludedLaps.map((lapEntry) => lapEntry.reasons), [['first-lap'], ['track-limits']]);
+
+// GetRaceResults race tables can omit the LAPS column. The first observed lap
+// must still be stored but excluded from both lap and sector pace statistics.
+const noProviderLapNumbers = completedLaps([
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:00:00.000Z', lapTimeMs: 107114, sector1Ms: 34000, sector2Ms: 40000, sector3Ms: 33114 }),
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:02:00.000Z', lapTimeMs: 104311, sector1Ms: 33000, sector2Ms: 39000, sector3Ms: 32311 }),
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:04:00.000Z', lapTimeMs: 104220, sector1Ms: 32900, sector2Ms: 38900, sector3Ms: 32420 })
+]);
+const noProviderLapNumberStats = statsForLaps(noProviderLapNumbers);
+assert.strictEqual(isOpeningRaceLap(noProviderLapNumbers[0]), true);
+assert.strictEqual(lapPaceEligible(noProviderLapNumbers[0]), false);
+assert.strictEqual(sectorPaceEligible(noProviderLapNumbers[0], 1), false);
+assert.strictEqual(noProviderLapNumberStats.paceLapCount, 2);
+assert.strictEqual(noProviderLapNumberStats.averageLapMs, (104311 + 104220) / 2);
+assert.strictEqual(noProviderLapNumberStats.bestSector1Ms, 32900);
+assert.strictEqual(noProviderLapNumberStats.selection.lap.excludedByReason['first-lap'], 1);
+
+const finishSnapshotHistory = completedLaps([
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:10:00.000Z', lapTimeMs: 102830 }),
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:10:05.000Z', lapTimeMs: 102830, sessionName: 'Finish' }),
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:11:50.000Z', lapTimeMs: 101676 })
+]);
+assert.deepStrictEqual(finishSnapshotHistory.map((entry) => entry.lapTimeMs), [102830, 101676]);
+
+const genuinelyEqualConsecutiveLaps = completedLaps([
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:20:00.000Z', lapTimeMs: 102830 }),
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:21:43.000Z', lapTimeMs: 102830 })
+]);
+assert.strictEqual(genuinelyEqualConsecutiveLaps.length, 2, 'equal real laps separated by a lap duration must both remain');
 
 const noisyHistory = [
   { carNumber: '', lapTimeMs: '100000', lapNumber: '1' },
@@ -416,8 +462,8 @@ const classComparison = compareCarToClassTargets(stintHistory, 33, 9);
 assert.strictEqual(classComparison.bestClassCar.carNumber, '2');
 assert.strictEqual(classComparison.selectedCar.carNumber, '9');
 assert.strictEqual(classComparison.ourCurrentStint.driverName, 'Driver 3');
-assert.strictEqual(classComparison.deltas.currentStintAverageToBestClassCarAverageMs, 2945);
-assert.strictEqual(classComparison.deltas.currentStintAverageToSelectedCarAverageMs, 1445);
+assert.strictEqual(classComparison.deltas.currentStintAverageToBestClassCarAverageMs, -2945);
+assert.strictEqual(classComparison.deltas.currentStintAverageToSelectedCarAverageMs, -1445);
 
 const noSelectedComparison = compareCarToClassTargets(stintHistory, 33);
 assert.strictEqual(noSelectedComparison.selectedCar, null);
@@ -435,7 +481,7 @@ assert.strictEqual(unknownOurCarComparison.deltas.currentStintAverageToBestClass
 const dashboardAnalysis = buildDashboardAnalysis(stintHistory, { ourCarNumber: 33, selectedCarNumber: 9 });
 assert.strictEqual(dashboardAnalysis.currentDriverName, 'Driver 3');
 assert.strictEqual(dashboardAnalysis.driverComparison.deltas.bestDriverAverageToCurrentAverageMs, 1945);
-assert.strictEqual(dashboardAnalysis.classComparison.deltas.currentStintAverageToSelectedCarAverageMs, 1445);
+assert.strictEqual(dashboardAnalysis.classComparison.deltas.currentStintAverageToSelectedCarAverageMs, -1445);
 const liveDriverOverrideAnalysis = buildDashboardAnalysis(stintHistory, {
   ourCarNumber: 33,
   selectedCarNumber: 9,
@@ -445,5 +491,33 @@ assert.strictEqual(liveDriverOverrideAnalysis.currentDriverName, 'Driver 1');
 assert.strictEqual(liveDriverOverrideAnalysis.driverComparison.currentDriver.driverName, 'Driver 1');
 assert.strictEqual(liveDriverOverrideAnalysis.classComparison.ourCurrentStint.driverName, 'Driver 1');
 assert.strictEqual(buildDashboardAnalysis(stintHistory), null);
+
+const officialBestHistory = [lap({
+  carNumber: 33,
+  className: 'C.CHA',
+  teamName: 'MSTC',
+  lapNumber: 2,
+  lapTimeMs: 183000,
+  lapCondition: 'wet'
+})];
+const officialBestRows = [{ carNumber: '33', className: 'C.CHA', team: 'MSTC', bestLapMs: 178500 }];
+assert.strictEqual(providerBestLapMs(officialBestRows[0]), 178500);
+assert.strictEqual(providerBestLapMs({ bestLapMs: 0 }), null, 'zero is not a real provider best lap');
+assert.strictEqual(providerBestLapMs({ bestLapMs: '--' }), null, 'placeholder values are ignored');
+assert.strictEqual(
+  carStatsWithProviderBest(officialBestHistory, officialBestRows, 33).bestLapMs,
+  178500,
+  'combined stats prefer the official BEST TIME column over locally collected laps'
+);
+assert.strictEqual(
+  carStatsWithProviderBest(officialBestHistory, officialBestRows, 33, { conditionFilter: 'wet' }).bestLapMs,
+  183000,
+  'condition views keep their condition-specific locally calculated best'
+);
+assert.strictEqual(
+  carStatsWithProviderBest(officialBestHistory, [{ carNumber: '33', bestLapMs: null }], 33).bestLapMs,
+  183000,
+  'missing provider best time falls back to local history'
+);
 
 console.log('Lap analytics tests passed.');

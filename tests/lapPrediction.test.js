@@ -56,6 +56,41 @@ prediction = buildLapPrediction({
 assert.strictEqual(prediction.available, false);
 assert.match(prediction.reason, /Need sector 2 history/);
 
+// The opening race lap itself remains excluded from lap averages, and its S1
+// is start-affected. Its green S2/S3 are useful prediction history: lap two can
+// therefore be predicted immediately after S1, as required by the dashboard.
+const openingLapHistory = [driverLap('Opening Driver', 1, [35000, 41000, 31000], {
+  sector1Flag: 'Green',
+  sector2Flag: 'Green',
+  sector3Flag: 'Green'
+})];
+assert.deepStrictEqual(recentDriverSectorValues(openingLapHistory, 33, 'Opening Driver', 1), []);
+assert.deepStrictEqual(recentDriverSectorValues(openingLapHistory, 33, 'Opening Driver', 2), [41000]);
+assert.deepStrictEqual(recentDriverSectorValues(openingLapHistory, 33, 'Opening Driver', 3), [31000]);
+prediction = buildLapPrediction({
+  history: openingLapHistory,
+  rows: [liveRow({ driver: 'Opening Driver', sector1: '34.000' })],
+  carNumber: 33
+});
+assert.strictEqual(prediction.available, true);
+assert.strictEqual(prediction.predictedLapMs, 106000);
+
+// A neutralized opening-lap sector remains unusable. Allowing opening-lap
+// samples must never turn FCY/SC/red sectors into prediction history.
+const neutralizedOpeningLap = [driverLap('Opening Driver', 1, [35000, 41000, 31000], {
+  sector1Flag: 'Green',
+  sector2Flag: 'Full Course Yellow',
+  sector3Flag: 'Green'
+})];
+assert.deepStrictEqual(recentDriverSectorValues(neutralizedOpeningLap, 33, 'Opening Driver', 2), []);
+prediction = buildLapPrediction({
+  history: neutralizedOpeningLap,
+  rows: [liveRow({ driver: 'Opening Driver', sector1: '34.000' })],
+  carNumber: 33
+});
+assert.strictEqual(prediction.available, false);
+assert.match(prediction.reason, /Need sector 2 history/);
+
 const fallbackDriverHistory = [driverLap('History Driver', 2, [30000, 40000, 30000])];
 prediction = buildLapPrediction({
   history: fallbackDriverHistory,

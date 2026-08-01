@@ -9,7 +9,8 @@ const {
   splitTeamInfo,
   parseTimingRow,
   looksLikeTimingHeaders,
-  parseSessionInfo
+  parseSessionInfo,
+  applySingleClassFallback
 } = require('../src/shared/parser');
 
 // Lap-time parsing protects the formats seen in live timing tables. Add new
@@ -33,6 +34,7 @@ assert.strictEqual(formatMs(Number.NaN), '');
 
 assert.strictEqual(cleanText(`  hello\u00a0   timing\nworld  `), 'hello timing world');
 assert.strictEqual(canonicalHeader('#'), 'carNumber');
+assert.strictEqual(canonicalHeader('NAME'), 'driver');
 assert.strictEqual(canonicalHeader('Driver in car'), 'driver');
 assert.strictEqual(canonicalHeader('Class / PIC'), 'className');
 assert.strictEqual(canonicalHeader('Sector 2'), 'sector2');
@@ -202,6 +204,35 @@ assert.strictEqual(getRaceResultsSession.timeToGo, '01:45:00');
 assert.strictEqual(getRaceResultsSession.sessionName, 'Spa Test - Practice');
 assert.strictEqual(getRaceResultsSession.flag, 'Green flag');
 
+// GetRaceResults pages can retain historical FCY text after returning to
+// green. The explicitly extracted top-page flag must always win.
+const getRaceResultsGreenAfterFcy = parseSessionInfo({
+  bodyText: 'Full Course Yellow Race control history Green flag Cup und Tourenwagen Trophy - Qualifying',
+  sessionFields: { currentFlag: 'Green flag' }
+});
+assert.strictEqual(getRaceResultsGreenAfterFcy.flag, 'Green flag');
+
+// Without a current banner, mixed historical states are ambiguous. Treating
+// the first match as current would incorrectly exclude fully green laps.
+const ambiguousHistoricalFlags = parseSessionInfo({
+  bodyText: 'Full Course Yellow Race control history Green flag'
+});
+assert.strictEqual(ambiguousHistoricalFlags.flag, '');
+
+// Even one stale body message is unsafe on GetRaceResults. The provider must
+// supply the separately extracted current top-page banner instead.
+const getRaceResultsStaleFcyOnly = parseSessionInfo({
+  location: 'https://livetiming.getraceresults.com/zolder#screen-results',
+  bodyText: 'Full Course Yellow old race-control history'
+});
+assert.strictEqual(getRaceResultsStaleFcyOnly.flag, '');
+
+const finishedCurrentFlag = parseSessionInfo({
+  bodyText: 'Old Full Course Yellow message',
+  sessionFields: { currentFlag: 'Finish' }
+});
+assert.strictEqual(finishedCurrentFlag.flag, 'Finished flag');
+
 const simpleToGoSession = parseSessionInfo({
   bodyText: 'To go: 00:42:15  Timing server connected'
 });
@@ -212,5 +243,29 @@ const yellowSession = parseSessionInfo({ sessionFields: { status: 'LOCAL YELLOW'
 assert.strictEqual(yellowSession.flag, 'Yellow flag');
 const commonStatusSession = parseSessionInfo({ bodyText: 'Waiting for the LiveTiming data' });
 assert.strictEqual(commonStatusSession.statusText, 'Waiting for the LiveTiming data');
+
+const nameHeaderRow = parseTimingRow(
+  ['POS', 'NR', 'NAME', 'CLS', 'PIC', 'LAST', 'LAPS'],
+  ['2', '540', 'Heiko Engelke', 'C', '2', '2:09.418', '11']
+);
+assert.strictEqual(nameHeaderRow.driver, 'Heiko Engelke', 'GetRaceResults NAME is parsed as the driver');
+
+const finishedNamedSession = parseSessionInfo({
+  bodyText: 'Finish DMV Formel Vau - Free Practice Show class: All Highlight nr: POS NR E.T.A. NAME'
+});
+assert.strictEqual(finishedNamedSession.sessionName, 'DMV Formel Vau - Free Practice');
+const rejectedHistoryTitle = parseSessionInfo({
+  bodyText: 'Leader history From lap 1 to lap 12 Track limits Statistics Messages'
+});
+assert.notStrictEqual(rejectedHistoryTitle.sessionName, 'Leader history From lap 1 to lap 12');
+
+const oneClassRows = applySingleClassFallback([
+  { position: 1, carNumber: '555', className: '' },
+  { position: 2, carNumber: '540', className: '' }
+]);
+assert.deepStrictEqual(oneClassRows.map((row) => row.className), ['Overall', 'Overall']);
+assert.deepStrictEqual(oneClassRows.map((row) => row.classPosition), [1, 2]);
+const existingClassRows = [{ position: 1, carNumber: '1', className: 'A' }, { position: 2, carNumber: '2', className: '' }];
+assert.strictEqual(applySingleClassFallback(existingClassRows), existingClassRows, 'mixed/real class data is not rewritten');
 
 console.log('Parser tests passed.');

@@ -183,7 +183,47 @@ function pitAffectedLap(lap) {
 }
 
 function isOpeningRaceLap(lap) {
-  return numberOrNull(lap?.lapNumber) === 1;
+  const providerLapNumber = numberOrNull(lap?.lapNumber);
+  return providerLapNumber === 1 || (providerLapNumber === null && numberOrNull(lap?.historySequence) === 1);
+}
+
+// Some timing tables omit LAPS entirely. Their records are still append-only,
+// so assign a per-car observed sequence after chronological sorting. This keeps
+// the opening lap excluded from pace statistics without inventing or persisting
+// an official provider lap number.
+function annotateHistorySequences(laps) {
+  const countByCar = new Map();
+  return laps.map((lap) => {
+    const key = [lap.sourceProvider || '', lap.timingUrl || '', lap.carNumber].join('|');
+    const historySequence = (countByCar.get(key) || 0) + 1;
+    countByCar.set(key, historySequence);
+    return { ...lap, historySequence };
+  });
+}
+
+// Repairs already-saved finish/reconnect duplicates from providers without a
+// LAPS column. A repeated snapshot normally arrives one poll later, whereas two
+// real completed laps are separated by roughly a full lap duration. Keep the
+// latter even when both laps happen to have exactly the same time.
+function deduplicateRepeatedLiveSnapshots(laps, maximumSnapshotGapMs = 30000) {
+  const previousByCar = new Map();
+  return laps.filter((lap) => {
+    const key = [lap.sourceProvider || '', lap.timingUrl || '', lap.carNumber].join('|');
+    const previous = previousByCar.get(key);
+    previousByCar.set(key, lap);
+    if (!previous) return true;
+
+    const currentLapNumber = numberOrNull(lap.lapNumber);
+    const previousLapNumber = numberOrNull(previous.lapNumber);
+    if (currentLapNumber !== null || previousLapNumber !== null) {
+      return currentLapNumber !== previousLapNumber || lap.lapTimeMs !== previous.lapTimeMs;
+    }
+    if (lap.driverName !== previous.driverName || lap.lapTimeMs !== previous.lapTimeMs) return true;
+    const currentRecordedAt = recordedTimeMs(lap);
+    const previousRecordedAt = recordedTimeMs(previous);
+    if (currentRecordedAt === null || previousRecordedAt === null) return true;
+    return currentRecordedAt - previousRecordedAt > maximumSnapshotGapMs;
+  });
 }
 
 function pitStatusText(lap) {
@@ -348,7 +388,13 @@ function representativePaceLaps(laps, options = {}) {
 // deliberately more granular than lapPaceEligible: a lap can become FCY in S3
 // while S1/S2 remain valid.
 function sectorPaceEligible(lap, sectorNumber, options = {}) {
-  if (isOpeningRaceLap(lap)) return false;
+  // The full opening lap and its start-affected S1 stay excluded from normal
+  // pace statistics. The prediction model may explicitly reuse green S2/S3,
+  // however, so lap two can already be predicted after its first sector.
+  const openingPredictionSector = options.allowOpeningPredictionSector === true
+    && isOpeningRaceLap(lap)
+    && sectorNumber > 1;
+  if (isOpeningRaceLap(lap) && !openingPredictionSector) return false;
   if (pitAffectedLap(lap)) return false;
   if (normalizedManualLapStatus(lap?.manualLapStatus)) return false;
   const conditionFilter = trackConditions.normalizeAnalysisFilter(options.conditionFilter, 'combined');
@@ -362,6 +408,9 @@ function sectorPaceEligible(lap, sectorNumber, options = {}) {
   // If the exact sector flag is unknown, fall back to the lap/session flag. This
   // is conservative: a lap marked FCY excludes all sectors unless the sector has
   // its own explicit green/eligible marker.
+  if (openingPredictionSector) {
+    return ![lap.lapFlag, lap.sessionFlag].some(isNeutralizedFlag);
+  }
   return lapPaceEligible(lap);
 }
 
@@ -372,7 +421,7 @@ function completedLaps(history) {
     .map(normalizeLap)
     .filter((lap) => lap.carNumber && lap.lapTimeMs !== null)
     .sort(compareLapsChronologically);
-  return annotatePitPhases(sorted);
+  return annotatePitPhases(annotateHistorySequences(deduplicateRepeatedLiveSnapshots(sorted)));
 }
 
 // Convenience filter for all completed laps of one car.
@@ -524,6 +573,33 @@ function carStats(history, carNumber, options = {}) {
   };
 }
 
+// Returns the official best lap supplied by the live timing provider. Parsed
+// rows already normalize BEST/BEST TIME/BEST LAP to bestLapMs, so consumers do
+// not need to know which source-specific column was present.
+function providerBestLapMs(row) {
+  const value = numberOrNull(row?.bestLapMs);
+  return value !== null && value > 0 ? value : null;
+}
+
+// Combines stored statistics with the provider's official best lap. The live
+// value is authoritative for the combined view because it can include laps
+// completed before this app started collecting. Condition-specific views keep
+// using local history: timing providers do not identify whether BEST was set
+// in dry, wet or intermediate conditions.
+function carStatsWithProviderBest(history, rows, carNumber, options = {}) {
+  const stats = carStats(history, carNumber, options);
+  const row = (rows || []).find((candidate) => String(candidate?.carNumber) === String(carNumber));
+  const conditionFilter = trackConditions.normalizeAnalysisFilter(options.conditionFilter, 'combined');
+  const officialBestLapMs = conditionFilter === 'combined' ? providerBestLapMs(row) : null;
+  return {
+    ...stats,
+    className: stats.className || row?.className || '',
+    teamName: stats.teamName || row?.teamName || row?.team || '',
+    bestLapMs: officialBestLapMs ?? stats.bestLapMs,
+    bestLapSource: officialBestLapMs !== null ? 'provider' : 'history'
+  };
+}
+
 // Returns stats for every car with at least one completed lap in the class.
 function carsInClass(history, className, options = {}) {
   const carNumbers = new Set(completedLaps(history).filter((lap) => lap.className === className).map((lap) => lap.carNumber));
@@ -557,8 +633,8 @@ function currentStintStats(history, carNumber, currentDriver = '', options = {})
 }
 
 // Compares our current stint/driver average with the best car in class and an
-// optional selected class car. Deltas are our current stint average minus target
-// car average: positive means our current stint is slower.
+// optional selected class car. Deltas are target car minus our current stint:
+// positive means the target is slower, while negative means the target is faster.
 function compareCarToClassTargets(history, ourCarNumber, selectedCarNumber = '', currentDriver = '', options = {}) {
   const ourCar = carStats(history, ourCarNumber, options);
   const ourCurrentStint = currentStintStats(history, ourCarNumber, currentDriver, options);
@@ -567,7 +643,7 @@ function compareCarToClassTargets(history, ourCarNumber, selectedCarNumber = '',
 
   const deltaTo = (target) => {
     if (!target || ourCurrentStint.averageLapMs === null || target.averageLapMs === null) return null;
-    return ourCurrentStint.averageLapMs - target.averageLapMs;
+    return target.averageLapMs - ourCurrentStint.averageLapMs;
   };
 
   return {
@@ -626,6 +702,8 @@ return {
   bestDriverByAverage,
   compareBestDriverToCurrentDriver,
   carStats,
+  providerBestLapMs,
+  carStatsWithProviderBest,
   carsInClass,
   bestCarInClassByAverage,
   currentStintStats,

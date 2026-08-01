@@ -1,5 +1,6 @@
 const { parseLapTimeToMs } = require('./parser');
 const { normalizeTrackCondition, deriveLapCondition } = require('./trackConditions');
+const { preferStableSessionName } = require('./sessionName');
 
 // Provider adapters/parsers may have different raw column names, but before
 // writing anything to disk they must produce this storage schema. Future timing
@@ -55,6 +56,8 @@ const LAP_HISTORY_COLUMNS = [
   'sector1Flag',
   'sector2Flag',
   'sector3Flag',
+  'lapPhase',
+  'isPitLap',
   'manualLapStatus',
   'paceEligible',
   'sector1Eligible',
@@ -115,7 +118,11 @@ function valueAt(row, ...keys) {
 // Picks the best available session label for storage metadata.
 function normalizedSessionName(context = {}) {
   const session = context.session || {};
-  return normalizeStorageField(session.sessionName || session.statusText || session.pageTitle || context.sessionName || '');
+  return normalizeStorageField(preferStableSessionName(
+    session.sessionName,
+    context.sessionName,
+    session.pageTitle
+  ));
 }
 
 // Converts one parsed live row into the provider-independent latest-row schema.
@@ -219,6 +226,8 @@ function lapRecordFromNormalizedRow(row) {
     sector1Flag: normalizeStorageField(row.sector1Flag),
     sector2Flag: normalizeStorageField(row.sector2Flag),
     sector3Flag: normalizeStorageField(row.sector3Flag),
+    lapPhase: normalizeStorageField(row.lapPhase),
+    isPitLap: normalizeStorageField(row.isPitLap),
     manualLapStatus: normalizeStorageField(row.manualLapStatus),
     paceEligible: normalizeStorageField(row.paceEligible),
     sector1Eligible: normalizeStorageField(row.sector1Eligible),
@@ -298,15 +307,35 @@ function completedLapRowFromLiveRow(row, previousRow) {
     completed.lapFlag = neutralizedSectorFlag;
     completed.paceEligible = 'false';
   }
+  const pitStatus = [row.state, row.eta, row.pitStatus, row.pitInfoText]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(' ');
+  if (/\bout\s*lap\b/i.test(pitStatus)) {
+    completed.lapPhase = 'outlap';
+    completed.isPitLap = 'true';
+    completed.paceEligible = 'false';
+    completed.sector1Eligible = 'false';
+    completed.sector2Eligible = 'false';
+    completed.sector3Eligible = 'false';
+  }
   completed.lapCondition = deriveLapCondition(completed, completed.trackCondition);
   return completed;
 }
 
-// Builds a duplicate-detection key for completed laps. Lap number is preferred;
-// when missing, driver + last lap is the fallback because some providers do not
-// expose lap numbers reliably.
+// Identifies one live car inside the selected session folder. Session names are
+// deliberately excluded: timing providers can replace the real title with a
+// finish/reconnect message while the same car row remains on screen.
+function liveRowIdentity(row) {
+  return [row.sourceProvider, row.timingUrl, row.carNumber].join('|');
+}
+
+// Builds a duplicate-detection key for completed laps. The selected data folder
+// is the session boundary, so volatile provider session text must not be part of
+// this key. Lap number is preferred; when missing, driver + last lap is the best
+// available fallback for providers that do not expose a lap counter.
 function lapIdentity(row) {
-  const base = [row.sourceProvider, row.timingUrl, row.sessionName, row.carNumber];
+  const base = [row.sourceProvider, row.timingUrl, row.carNumber];
   if (row.lapNumber) return [...base, row.lapNumber, row.lastLap].join('|');
   return [...base, row.driverName || row.driver || '', row.lastLap].join('|');
 }
@@ -320,6 +349,7 @@ module.exports = {
   lapRecordFromNormalizedRow,
   currentSectorsMatchCompletedLap,
   completedLapRowFromLiveRow,
+  liveRowIdentity,
   lapIdentity,
   toCsvRows,
   detectSourceProvider

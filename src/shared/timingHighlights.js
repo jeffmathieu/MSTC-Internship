@@ -53,12 +53,19 @@
   function buildTimingHighlights(history = [], carNumber = '', options = {}) {
     const followedCar = String(carNumber || '');
     const conditionFilter = trackConditions.normalizeAnalysisFilter(options.conditionFilter, 'combined');
+    const rows = options.rows || [];
     const laps = lapAnalytics.lapsForCar(history, followedCar);
     const driverCodes = driverLabels.uniqueDriverCodes(laps.map((lap) => lap.driverName));
-    const ourStats = lapAnalytics.carStats(history, followedCar, { conditionFilter });
+    const ourStats = lapAnalytics.carStatsWithProviderBest(history, rows, followedCar, { conditionFilter });
     const className = ourStats.className || lapAnalytics.carStats(history, followedCar).className || '';
     const classCars = className ? lapAnalytics.carsInClass(history, className, { conditionFilter }) : [];
-    const classBestLapMs = minimum(classCars.map((car) => car.bestLapMs));
+    const classCarNumbers = new Set([
+      ...classCars.map((car) => car.carNumber),
+      ...rows.filter((row) => row.className === className).map((row) => String(row.carNumber || ''))
+    ].filter(Boolean));
+    const classBestLapMs = minimum([...classCarNumbers].map((classCarNumber) => (
+      lapAnalytics.carStatsWithProviderBest(history, rows, classCarNumber, { conditionFilter }).bestLapMs
+    )));
     const classBestSector1Ms = minimum(classCars.map((car) => car.bestSector1Ms));
     const classBestSector2Ms = minimum(classCars.map((car) => car.bestSector2Ms));
     const classBestSector3Ms = minimum(classCars.map((car) => car.bestSector3Ms));

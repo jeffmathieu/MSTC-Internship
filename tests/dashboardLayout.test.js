@@ -32,7 +32,8 @@ assert.match(css, /\.comparison-average-heading\s*\{[\s\S]*?height:\s*30px;/, 'a
 assert.match(css, /\.comparison-average-chip\.total\s*\{[\s\S]*?margin-bottom:\s*8px;/, 'car total average is separated from individual driver averages');
 assert.match(css, /\.comparison-sector-cell\s*\{[\s\S]*?font-size:\s*15px;/, 'sector values use the same font size as lap comparison values');
 assert.match(css, /\.comparison-sector-label\s*\{[\s\S]*?font-size:\s*11px;/, 'sector headings use the same font size as lap comparison headings');
-assert.strictEqual(css.includes('.comparison-car-label.is-our-car'), false, 'our car number is not given a special color in comparison tabs');
+assert.ok(css.includes('.comparison-car-label.is-our-car'), 'our car number receives a distinct comparison-tab color');
+assert.match(css, /\.comparison-tab\.comparison-tab-scrollable\s*\{[\s\S]*?overflow-y:\s*auto;/, 'large classes can scroll inside comparison tabs');
 assert.match(css, /select:focus,[\s\S]*select:focus-visible\s*\{[\s\S]*outline:\s*none;[\s\S]*border-color:\s*var\(--line\);/, 'select dropdowns do not keep the browser focus highlight');
 assert.match(css, /--lap-strip-wet-lap-number-color:/, 'wet laps have their own editable lap-number color');
 assert.match(css, /\.lap-strip-row\.condition-wet \.lap-number\s*\{\s*color:\s*var\(--lap-strip-wet-lap-number-color\);/, 'wet lap numbers are visually marked without recoloring the full row');

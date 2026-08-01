@@ -41,6 +41,13 @@ assert.strictEqual(payload.raceSummary.pitStops.length, 3);
 assert.deepStrictEqual(payload.raceSummary.pitStops.map((stop) => stop.durationMs), [284000, 154000, 286000]);
 assert.strictEqual(payload.raceSummary.totalPitTimeMs, 724000);
 assert.deepStrictEqual(payload.raceSummary.raceControl, { fcy: 9, safetyCar: 0, redFlag: 0 });
+assert.ok(payload.raceSummary.graphs.driverLaps.series.length >= 3, 'race report contains the same per-driver lap graph data as the graph window');
+assert.ok(payload.raceSummary.graphs.driverPace.series.every((series) => series.values.length >= 3), 'driver bar values are preserved for PDF labels');
+assert.ok(payload.raceSummary.graphs.driverSectors.series.length === 6, 'all average and best sector series are included');
+assert.ok(payload.raceSummary.graphs.classPace.series.length >= 3, 'class report page contains every available class car');
+assert.strictEqual(payload.raceSummary.graphs.classPacePages.length, 1, 'all class cars in the Spa race fit on one readable 75-lap PDF page');
+assert.strictEqual(payload.raceSummary.graphs.classPacePages[0].startLap, 2, 'the excluded opening lap does not create an empty graph position');
+assert.strictEqual(payload.raceSummary.graphs.classPacePages[0].endLap, 69, 'the page range follows the furthest-running class car, not only our car');
 assert.strictEqual(payload.stints[0].laps.find((lap) => lap.lapNumber === 1).sector1Status, 'neutralized');
 assert.strictEqual(payload.stints[1].laps.find((lap) => lap.lapNumber === 37).sector1Status, 'neutralized');
 assert.strictEqual(payload.stints[1].laps.find((lap) => lap.lapNumber === 37).sector2Status, 'neutralized');
@@ -66,7 +73,7 @@ try {
     ]
   };
   fs.writeFileSync(payloadPath, JSON.stringify({ ...payload, stints: [stintWithGaps] }));
-  const rendered = renderReportLabPdf(payloadPath, pdfPath);
+  const rendered = renderReportLabPdf(payloadPath, pdfPath, { includeSummary: true });
   assert.strictEqual(rendered.rendered, true, rendered.error || rendered.reason);
   assert.strictEqual(fs.readFileSync(pdfPath).subarray(0, 5).toString(), '%PDF-');
 } finally {

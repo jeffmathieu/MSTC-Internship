@@ -51,7 +51,10 @@ function recentDriverSectorValues(history, carNumber, driverName, sectorNumber, 
   const condition = options.condition || 'combined';
   return sortLapsChronologically(completedLaps(history))
     .filter((lap) => lap.carNumber === String(carNumber) && lap.driverName === driverName)
-    .filter((lap) => sectorPaceEligible(lap, sectorNumber, { conditionFilter: condition }))
+    .filter((lap) => sectorPaceEligible(lap, sectorNumber, {
+      conditionFilter: condition,
+      allowOpeningPredictionSector: true
+    }))
     .map((lap) => numberOrNull(lap[`sector${sectorNumber}Ms`]))
     .filter((value) => value !== null)
     .slice(-sampleSize);
@@ -69,7 +72,10 @@ function weightedAverage(values) {
 function recentCarSectorValues(history, carNumber, sectorNumber, sampleSize, condition) {
   return sortLapsChronologically(completedLaps(history))
     .filter((lap) => lap.carNumber === String(carNumber))
-    .filter((lap) => sectorPaceEligible(lap, sectorNumber, { conditionFilter: condition }))
+    .filter((lap) => sectorPaceEligible(lap, sectorNumber, {
+      conditionFilter: condition,
+      allowOpeningPredictionSector: true
+    }))
     .map((lap) => numberOrNull(lap[`sector${sectorNumber}Ms`]))
     .filter((value) => value !== null)
     .slice(-sampleSize);

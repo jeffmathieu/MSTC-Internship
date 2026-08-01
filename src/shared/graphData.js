@@ -169,6 +169,67 @@
     };
   }
 
+  // Race PDFs need a denser but still readable version of the class graph.
+  // Split long races into fixed race-lap windows and omit only clear slow
+  // outliers from the drawing. The source graph and stored laps are untouched.
+  function pdfClassPacePages(graph, lapsPerPage = 75) {
+    const safePageSize = Math.max(10, Math.floor(Number(lapsPerPage) || 75));
+    const allPoints = (graph?.series || []).flatMap((series) => series.points || [])
+      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+    if (!allPoints.length) return [];
+
+    const quantile = (sorted, ratio) => {
+      if (!sorted.length) return null;
+      const position = (sorted.length - 1) * ratio;
+      const lower = Math.floor(position);
+      const upper = Math.ceil(position);
+      if (lower === upper) return sorted[lower];
+      return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+    };
+    const cutoffFor = (points) => {
+      const values = points.map((point) => point.y).filter(Number.isFinite).sort((a, b) => a - b);
+      if (values.length < 5) return Infinity;
+      const median = quantile(values, 0.5);
+      const q1 = quantile(values, 0.25);
+      const q3 = quantile(values, 0.75);
+      // Keep normal traffic variation. A point is hidden only when it exceeds
+      // both an 8% pace margin and the generous three-IQR outlier boundary.
+      return Math.max(median * 1.08, q3 + 3 * Math.max(0, q3 - q1));
+    };
+    const filteredSeries = (graph.series || []).map((series) => {
+      const valid = (series.points || []).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+      const cutoff = cutoffFor(valid);
+      const points = valid.filter((point) => point.y <= cutoff);
+      return { ...series, points, omittedSlowLapCount: valid.length - points.length };
+    });
+    const minLap = Math.floor(Math.min(...allPoints.map((point) => point.x)));
+    const maxLap = Math.ceil(Math.max(...allPoints.map((point) => point.x)));
+    const pages = [];
+    for (let startLap = minLap; startLap <= maxLap; startLap += safePageSize) {
+      const endLap = Math.min(maxLap, startLap + safePageSize - 1);
+      const series = filteredSeries.map((item) => ({
+        ...item,
+        points: item.points.filter((point) => point.x >= startLap && point.x <= endLap)
+      }));
+      const omittedSlowLapCount = (graph.series || []).reduce((total, original, index) => {
+        const originalInWindow = (original.points || []).filter((point) => (
+          Number.isFinite(point.x) && Number.isFinite(point.y) && point.x >= startLap && point.x <= endLap
+        )).length;
+        return total + originalInWindow - series[index].points.length;
+      }, 0);
+      pages.push({
+        ...graph,
+        title: `Class lap times - laps ${startLap}-${endLap}`,
+        subtitle: `Valid pace laps only; ${omittedSlowLapCount} slow outlier${omittedSlowLapCount === 1 ? '' : 's'} omitted from this PDF chart.`,
+        startLap,
+        endLap,
+        omittedSlowLapCount,
+        series
+      });
+    }
+    return pages;
+  }
+
   function buildGraph(type, history, carNumber, options = {}) {
     if (type === 'driver-pace') return driverPaceComparison(history, carNumber, 10, options.mode);
     if (type === 'driver-sectors') return driverSectorComparison(history, carNumber);
@@ -219,6 +280,7 @@
     driverSectorComparison,
     rollingAveragePoints,
     classPaceComparison,
+    pdfClassPacePages,
     buildGraph,
     normalizeViewport,
     zoomViewport,

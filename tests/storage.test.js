@@ -8,6 +8,7 @@ const {
   lapRecordFromNormalizedRow,
   currentSectorsMatchCompletedLap,
   completedLapRowFromLiveRow,
+  liveRowIdentity,
   lapIdentity,
   toCsvRows,
   detectSourceProvider
@@ -193,7 +194,7 @@ const fallbackContextRow = normalizeForStorage({
   sessionFlag: 'Safety car'
 });
 assert.strictEqual(fallbackContextRow.sourceProvider, 'unknown');
-assert.strictEqual(fallbackContextRow.sessionName, 'Waiting for race');
+assert.strictEqual(fallbackContextRow.sessionName, '', 'transient connection/status text is not stored as a session name');
 assert.strictEqual(fallbackContextRow.state, 'up');
 assert.strictEqual(fallbackContextRow.carNumber, '007');
 assert.strictEqual(fallbackContextRow.teamName, 'Team, With "Quotes"');
@@ -244,7 +245,17 @@ const noLapNumberIdentity = lapIdentity({
   sector2: '40.000',
   sector3: '30.000'
 });
-assert.strictEqual(noLapNumberIdentity, 'unknown|https://example.com/live|Demo|7|Fallback Driver|1:40.000');
+assert.strictEqual(noLapNumberIdentity, 'unknown|https://example.com/live|7|Fallback Driver|1:40.000');
+assert.strictEqual(
+  liveRowIdentity({ sourceProvider: 'getraceresults', timingUrl: 'https://example.com/live', sessionName: 'Race 1', carNumber: '46' }),
+  liveRowIdentity({ sourceProvider: 'getraceresults', timingUrl: 'https://example.com/live', sessionName: 'LIVE Not connected', carNumber: '46' }),
+  'finish/reconnect session text must not create a second live-car identity'
+);
+assert.strictEqual(
+  lapIdentity({ sourceProvider: 'getraceresults', timingUrl: 'https://example.com/live', sessionName: 'Race 1', carNumber: '46', driverName: 'Marcel Biehl', lastLap: '1:42.830' }),
+  lapIdentity({ sourceProvider: 'getraceresults', timingUrl: 'https://example.com/live', sessionName: 'Finish', carNumber: '46', driverName: 'Marcel Biehl', lastLap: '1:42.830' }),
+  'the same completed lap must remain deduplicated when the provider title changes at finish'
+);
 assert.strictEqual(detectSourceProvider({ sourceProvider: 'manual-provider', timingUrl: 'https://livetiming.getraceresults.com' }), 'manual-provider');
 assert.strictEqual(detectSourceProvider({ timingUrl: 'https://example.com/RISTiming/live' }), 'ris-timing');
 assert.strictEqual(detectSourceProvider({ timingUrl: 'https://example.com/RIS TIMING/live' }), 'ris-timing');

@@ -1,6 +1,7 @@
 // Parser utilities shared by the Electron main process and tests. This file is
 // intentionally dependency-free so timing formats and table headers can be
 // validated without launching Electron.
+const { isPlausibleSessionName } = require('./sessionName');
 
 // Normalizes text extracted from timing pages. Live timing HTML often contains
 // non-breaking spaces and inconsistent whitespace, so all parser entry points
@@ -46,6 +47,7 @@ function canonicalHeader(header) {
     CARMODEL: 'car',
     VEHICLE: 'car',
     DRIVERINCAR: 'driver',
+    NAME: 'driver',
     DRIVER: 'driver',
     DRIVERS: 'driver',
     DRIVERSONTRACK: 'driver',
@@ -306,22 +308,26 @@ function parseSessionInfo(snapshot = {}) {
 
   if (fields.remaining) session.timeToGo = cleanText(fields.remaining);
   if (fields.elapsed) session.elapsed = cleanText(fields.elapsed);
-  if (fields.sessionName) session.sessionName = cleanText(fields.sessionName);
+  if (isPlausibleSessionName(fields.sessionName)) session.sessionName = cleanText(fields.sessionName);
 
   const risRemaining = text.match(/\bRemaining:\s*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)/i);
   const risElapsed = text.match(/\bElapsed:\s*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)/i);
   const risStatus = text.match(/\bStatus:\s*([A-Z][A-Z ]*?)(?=\s+Elapsed:|\s+Remaining:|$)/i);
   if (!session.timeToGo && risRemaining) session.timeToGo = cleanText(risRemaining[1]);
   if (!session.elapsed && risElapsed) session.elapsed = cleanText(risElapsed[1]);
-  const structuredOrParsedStatus = cleanText(fields.status || (risStatus ? risStatus[1] : ''));
+  // GetRaceResults exposes its current flag in a separate top-page banner,
+  // while RIS uses the labelled Status field. The current banner must win over
+  // flattened body text because that body can include old race-control events.
+  const structuredOrParsedStatus = cleanText(fields.currentFlag || fields.status || (risStatus ? risStatus[1] : ''));
   if (structuredOrParsedStatus) {
     session.statusText = structuredOrParsedStatus;
     const status = session.statusText.toLowerCase();
-    if (status === 'green') session.flag = 'Green flag';
+    if (/^green(?:\s+flag)?$/.test(status)) session.flag = 'Green flag';
     else if (/fcy|full course yellow/.test(status)) session.flag = 'Full course yellow';
     else if (/safety car/.test(status)) session.flag = 'Safety car';
     else if (/yellow/.test(status)) session.flag = 'Yellow flag';
     else if (/red/.test(status)) session.flag = 'Red flag';
+    else if (/finish/.test(status)) session.flag = 'Finished flag';
   }
 
   // RIS displays event and session as "Ligier Js Cup • Paying Practice".
@@ -345,9 +351,20 @@ function parseSessionInfo(snapshot = {}) {
     if (simpleToGo) session.timeToGo = cleanText(simpleToGo[1]);
   }
 
-  const flagMatch = text.match(/(Green flag|Red flag|Yellow flag|Safety car|Full course yellow|Code 60|Finished flag)/i);
-  if (flagMatch) {
-    const flag = cleanText(flagMatch[1]).toLowerCase();
+  // Finished GetRaceResults pages put "Finish" immediately before the real
+  // event/session name. Prefer that value over generic page text such as the
+  // "Leader history" tab, which previously leaked into the dashboard title.
+  const finishedSession = text.match(/\b(?:Finish|Finished|Finishd)\s+(.{1,180}?)(?=\s+(?:Show class|Highlight(?:\s+nr)?|POS|Results|Tracker|Statistics|Messages|Track limits)\b|$)/i);
+  if (finishedSession && isPlausibleSessionName(finishedSession[1])) {
+    session.sessionName = cleanText(finishedSession[1]);
+  }
+
+  // A body-only snapshot is retained for compatibility with saved fixtures and
+  // providers without a structured status. GetRaceResults is deliberately
+  // excluded: its body can retain one old race-control state after the live
+  // banner has changed, so even a single body match is not trustworthy there.
+  const isGetRaceResults = /getraceresults/i.test(session.url);
+  if (!session.flag && !isGetRaceResults) {
     const canonicalFlags = {
       'green flag': 'Green flag',
       'red flag': 'Red flag',
@@ -357,7 +374,11 @@ function parseSessionInfo(snapshot = {}) {
       'code 60': 'Code 60',
       'finished flag': 'Finished flag'
     };
-    session.flag = canonicalFlags[flag] || cleanText(flagMatch[1]);
+    const bodyFlags = Array.from(text.matchAll(/(Green flag|Red flag|Yellow flag|Safety car|Full course yellow|Code 60|Finished flag)/gi))
+      .map((match) => canonicalFlags[cleanText(match[1]).toLowerCase()])
+      .filter(Boolean);
+    const distinctFlags = [...new Set(bodyFlags)];
+    if (distinctFlags.length === 1) session.flag = distinctFlags[0];
   }
 
   const commonStatus = ['No active heat', 'Waiting for the LiveTiming data', 'Not connected to the LiveTiming server', 'Trying to reconnect to the LiveTiming server', 'Connecting to the LiveTiming server'];
@@ -365,13 +386,26 @@ function parseSessionInfo(snapshot = {}) {
   if (foundStatus) session.statusText = foundStatus;
 
   if (!session.sessionName) {
-    const sessionMatch = text.match(/([A-Z][A-Za-z0-9 .:&'()\-]+?\s-\s(?:Race|Qualifying|Practice|Session|Warm.?up))/i);
+    const sessionMatches = Array.from(text.matchAll(/([A-Z][A-Za-z0-9 .:&'()\-]+?\s-\s(?:Race|Qualifying|Qualification|Free Practice|Practice|Session|Warm.?up))/gi));
+    const sessionMatch = sessionMatches.find((match) => isPlausibleSessionName(match[1]));
     if (sessionMatch) session.sessionName = cleanText(sessionMatch[1]);
   }
 
   const updated = text.match(/Page updated\s*([0-9:]+\s*\(UTC\))?/i);
   if (updated) session.pageUpdated = cleanText(updated[1] || '');
   return session;
+}
+
+// Some single-make timing pages omit CLASS and PIC entirely because every car
+// competes together. Assign one synthetic class so all class-based comparison,
+// gap and report functions keep working without provider-specific branches.
+function applySingleClassFallback(rows = [], fallbackName = 'Overall') {
+  if (!rows.length || rows.some((row) => cleanText(row.className))) return rows;
+  return rows.map((row, index) => ({
+    ...row,
+    className: fallbackName,
+    classPosition: row.classPosition || row.position || index + 1
+  }));
 }
 
 // Export each parser primitive separately so tests can cover small pieces and
@@ -386,5 +420,6 @@ module.exports = {
   splitTeamInfo,
   parseTimingRow,
   looksLikeTimingHeaders,
-  parseSessionInfo
+  parseSessionInfo,
+  applySingleClassFallback
 };
