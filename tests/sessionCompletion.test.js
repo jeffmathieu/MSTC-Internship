@@ -1,5 +1,12 @@
 const assert = require('assert');
-const { rowIsFinished, followedClassCompletion } = require('../src/shared/sessionCompletion');
+const {
+  DEFAULT_FINISH_BUFFER_RATIO,
+  DEFAULT_FINISH_LAP_MS,
+  rowIsFinished,
+  followedClassCompletion,
+  finishSignalPresent,
+  updateFinishCountdown
+} = require('../src/shared/sessionCompletion');
 
 assert.strictEqual(rowIsFinished({ eta: 'Finishd' }), true);
 assert.strictEqual(rowIsFinished({ eta: 'Finish' }), true);
@@ -26,5 +33,58 @@ const noClassRows = [
   { carNumber: 2, eta: 'Finishd' }
 ];
 assert.strictEqual(followedClassCompletion(noClassRows, 1).complete, true, 'missing class means one overall class');
+
+assert.strictEqual(DEFAULT_FINISH_BUFFER_RATIO, 0.25);
+assert.strictEqual(DEFAULT_FINISH_LAP_MS, 180000);
+assert.strictEqual(finishSignalPresent({ status: 'GREEN' }, [{ eta: '00:05' }]), false);
+assert.strictEqual(finishSignalPresent({ flag: 'Checkered flag' }, []), true);
+assert.strictEqual(finishSignalPresent({}, [{ eta: 'Finishd' }]), true);
+
+const beforeFinish = updateFinishCountdown(null, {
+  nowMs: 1000,
+  session: { status: 'GREEN' },
+  rows: [],
+  primaryAverageLapMs: 100000
+});
+assert.strictEqual(beforeFinish.active, false);
+assert.strictEqual(beforeFinish.expired, false);
+
+const startedCountdown = updateFinishCountdown(beforeFinish, {
+  nowMs: 2000,
+  session: { flag: 'CHECKERED' },
+  rows: [],
+  primaryAverageLapMs: 100000
+});
+assert.strictEqual(startedCountdown.active, true);
+assert.strictEqual(startedCountdown.baseLapMs, 100000);
+assert.strictEqual(startedCountdown.deadlineAtMs, 127000, '100 seconds plus a 25% finish buffer');
+
+const latchedCountdown = updateFinishCountdown(startedCountdown, {
+  nowMs: 126999,
+  session: { flag: 'GREEN' },
+  rows: [],
+  primaryAverageLapMs: 50000
+});
+assert.strictEqual(latchedCountdown.expired, false, 'the first finish deadline stays latched when later page data changes');
+assert.strictEqual(latchedCountdown.deadlineAtMs, 127000);
+assert.strictEqual(latchedCountdown.baseLapMs, 100000);
+assert.strictEqual(updateFinishCountdown(latchedCountdown, { nowMs: 127000 }).expired, true);
+
+const lastLapFallback = updateFinishCountdown(null, {
+  nowMs: '2026-08-01T10:00:00.000Z',
+  rows: [{ eta: 'Finished' }],
+  primaryAverageLapMs: null,
+  primaryLastLapMs: 80000
+});
+assert.strictEqual(lastLapFallback.baseLapMs, 80000);
+assert.strictEqual(lastLapFallback.remainingMs, 100000);
+
+const safeDefault = updateFinishCountdown(null, {
+  nowMs: 0,
+  session: { sessionStatus: 'Finished' },
+  primaryAverageLapMs: 0,
+  primaryLastLapMs: null
+});
+assert.strictEqual(safeDefault.baseLapMs, DEFAULT_FINISH_LAP_MS);
 
 console.log('Session completion tests passed.');

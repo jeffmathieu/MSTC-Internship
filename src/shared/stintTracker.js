@@ -76,6 +76,15 @@
   }
 
   function currentStintTimeMs(group, options = {}) {
+    // The collector can run before the official session starts. Freeze the
+    // active timer in that state, including when a provider already exposes a
+    // driver or a stale STINT value on the grid.
+    if (options.timerRunning === false) {
+      const previous = options.previousCurrentStint;
+      return previous && driverKey(previous.driverName) === driverKey(group.driverName)
+        ? Number(previous.stintTimeMs || 0)
+        : 0;
+    }
     const progress = providerTimerProgress(group.laps);
     const liveTimerMs = parseStintDurationMs(options.liveRow?.stint);
     if (Number.isFinite(liveTimerMs)) {
@@ -100,9 +109,19 @@
       return progress.totalMs + (Number.isFinite(now) && Number.isFinite(lastCompletedAt) ? Math.max(0, now - lastCompletedAt) : 0);
     }
     if (!group.laps.length) {
+      // Before the first completed lap, the official session start is the best
+      // available anchor for the first driver's stint. Once lap history is
+      // available, the timestamp-based branch below replaces this estimate.
+      const sessionStartedAt = options.sessionStartedAt
+        ? new Date(options.sessionStartedAt).getTime()
+        : NaN;
+      const now = new Date(options.generatedAt || 0).getTime();
+      if (options.isFirstStint && Number.isFinite(sessionStartedAt)
+        && Number.isFinite(now) && now >= sessionStartedAt) {
+        return now - sessionStartedAt;
+      }
       const previous = options.previousCurrentStint;
       const previousAt = new Date(previous?.timerObservedAt || options.previousGeneratedAt || 0).getTime();
-      const now = new Date(options.generatedAt || 0).getTime();
       if (previous && driverKey(previous.driverName) === driverKey(group.driverName)
         && Number.isFinite(previousAt) && Number.isFinite(now) && now >= previousAt) {
         return Number(previous.stintTimeMs || 0) + (now - previousAt);
@@ -168,14 +187,16 @@
       const providerProgress = providerTimerProgress(group.laps);
       const isLatest = index === groups.length - 1;
       const stintTimeMs = isLatest
-        ? currentStintTimeMs(group, options)
+        ? currentStintTimeMs(group, { ...options, isFirstStint: index === 0 })
         : providerProgress.totalMs ?? sumLapTimes(group.laps);
       return {
         ...group,
         stintNumber: index + 1,
         driverStintNumber,
         detectionSource: 'driver-change',
-        timerSource: Number.isFinite(parseStintDurationMs(options.liveRow?.stint)) && isLatest
+        timerSource: options.timerRunning === false && isLatest
+          ? 'session-not-started'
+          : Number.isFinite(parseStintDurationMs(options.liveRow?.stint)) && isLatest
           ? 'live-provider-stint-timer'
           : Number.isFinite(providerProgress.totalMs) ? 'stored-provider-stint-timer' : 'timestamps',
         providerTimerMs: isLatest

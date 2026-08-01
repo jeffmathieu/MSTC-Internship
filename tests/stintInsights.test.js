@@ -36,16 +36,17 @@ assert.strictEqual(compliance([1, 2], 0).known, false);
 const history = [
   ...ourLaps,
   lap({ carNumber: 2, className: 'C.CHA', teamName: 'BIC', driverName: 'Rival', lapNumber: 1, lapTimeMs: 177000, collectedAt: at(5) }),
-  lap({ carNumber: 2, className: 'C.CHA', teamName: 'BIC', driverName: 'Rival', lapNumber: 2, lapTimeMs: 178000, collectedAt: at(15) }),
-  lap({ carNumber: 2, className: 'C.CHA', teamName: 'BIC', driverName: 'Rival', lapNumber: 3, lapTimeMs: 179000, collectedAt: at(25) }),
+  lap({ carNumber: 2, className: 'C.CHA', teamName: 'BIC', driverName: 'Rival', lapNumber: 2, lapTimeMs: 180000, collectedAt: at(15) }),
+  lap({ carNumber: 2, className: 'C.CHA', teamName: 'BIC', driverName: 'Rival', lapNumber: 3, lapTimeMs: 181000, collectedAt: at(25) }),
   lap({ carNumber: 9, className: 'OTHER', teamName: 'Other', driverName: 'Other', lapNumber: 1, lapTimeMs: 160000, collectedAt: at(20) })
 ];
 const comparisons = classComparisonsForStint(history, ourLaps.slice(0, 3), '33', 'C.CHA');
 assert.strictEqual(comparisons.length, 1);
 assert.strictEqual(comparisons[0].carNumber, '2');
 assert.strictEqual(comparisons[0].lapCount, 2, 'only rival laps completed inside the analyzed stint window are compared');
-assert.strictEqual(comparisons[0].averageLapMs, 178500);
-assert.strictEqual(comparisons[0].averageDeltaMs, 0);
+assert.strictEqual(comparisons[0].averageLapMs, 180500);
+assert.strictEqual(comparisons[0].averageDeltaMs, 2000, 'positive means the comparison car was slower than our stint');
+assert.strictEqual(comparisons[0].bestDeltaMs, 2000, 'best-lap PDF delta uses the same target-minus-us convention');
 const ranking = classRankingForStint(ourLaps.slice(0, 3), comparisons);
 assert.deepStrictEqual(ranking.average, { rank: 1, total: 2, leaderCarNumber: 'our car', deltaToLeaderMs: 0 });
 assert.deepStrictEqual(ranking.best, { rank: 1, total: 2, leaderCarNumber: 'our car', deltaToLeaderMs: 0 });

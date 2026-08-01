@@ -11,9 +11,10 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.gapMemory = api;
 })(typeof globalThis !== 'undefined' ? globalThis : null, function createGapMemoryApi(classBattle) {
-// Spa race one-step MAE: 3 laps 14.691s, 5 laps 14.644s, 10 laps 14.807s.
-// Five laps was marginally best and reacts faster than a ten-lap window.
-const DEFAULT_PACE_WINDOW = 5;
+// Spa race one-step MAE was nearly equal for 3 and 5 laps (14.691s vs
+// 14.644s). Three laps reacts two completed laps sooner to traffic, driver and
+// condition changes, which matters more for a live catch prediction.
+const DEFAULT_PACE_WINDOW = 3;
 const DEFAULT_PIT_SUPPRESSION_LAPS = 5;
 const MAX_SAMPLES = 5000;
 

@@ -124,13 +124,36 @@ assert.strictEqual(
 );
 
 const noColumnStart = buildStintState([], ['33'], '2026-06-23T12:00:00.000Z', {
-  liveRows: [{ carNumber: '33', driver: 'New Driver', stint: '' }]
+  liveRows: [{ carNumber: '33', driver: 'New Driver', stint: '' }],
+  timerRunning: true
 });
 assert.strictEqual(noColumnStart.cars['33'].currentStint.stintTimeMs, 0);
 const noColumnNextPoll = buildStintState([], ['33'], '2026-06-23T12:00:05.000Z', {
   liveRows: [{ carNumber: '33', driver: 'New Driver', stint: '' }],
-  previousState: noColumnStart
+  previousState: noColumnStart,
+  timerRunning: true
 });
 assert.strictEqual(noColumnNextPoll.cars['33'].currentStint.stintTimeMs, 5000, 'timestamp fallback advances every poll without STINT column');
+
+const preStartState = buildStintState([], ['33'], '2026-06-23T11:59:55.000Z', {
+  liveRows: [{ carNumber: '33', driver: 'Grid Driver', stint: '42:07' }],
+  timerRunning: false
+});
+assert.strictEqual(preStartState.cars['33'].currentStint.stintTimeMs, 0, 'a provider timer must not start the stint while the session is waiting');
+assert.strictEqual(preStartState.cars['33'].currentStint.timerSource, 'session-not-started');
+const laterPreStartState = buildStintState([], ['33'], '2026-06-23T12:00:05.000Z', {
+  liveRows: [{ carNumber: '33', driver: 'Grid Driver', stint: '' }],
+  previousState: preStartState,
+  timerRunning: false
+});
+assert.strictEqual(laterPreStartState.cars['33'].currentStint.stintTimeMs, 0, 'polling before the official start keeps the stint frozen');
+
+const officiallyStartedState = buildStintState([], ['33'], '2026-06-23T12:00:05.000Z', {
+  liveRows: [{ carNumber: '33', driver: 'Grid Driver', stint: '' }],
+  previousState: laterPreStartState,
+  timerRunning: true,
+  sessionStartedAt: '2026-06-23T12:00:00.000Z'
+});
+assert.strictEqual(officiallyStartedState.cars['33'].currentStint.stintTimeMs, 5000, 'the first stint starts at the detected official session start');
 
 console.log('Stint tracker tests passed.');

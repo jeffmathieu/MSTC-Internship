@@ -52,7 +52,8 @@ const {
 const { normalizeMode, buildComparisonView, qualifyingAdjacentView } = require('../shared/sessionMode');
 const { preferStableSessionName } = require('../shared/sessionName');
 const { stintsForCar, buildStintState } = require('../shared/stintTracker');
-const { followedClassCompletion } = require('../shared/sessionCompletion');
+const { updateSessionTiming } = require('../shared/sessionTiming');
+const { followedClassCompletion, updateFinishCountdown } = require('../shared/sessionCompletion');
 const { buildTimingHighlights } = require('../shared/timingHighlights');
 const { resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalReportSettings } = require('../shared/storageSession');
 const { setupAutoUpdates } = require('./autoUpdater');
@@ -127,6 +128,8 @@ let collectorState = {
   pitstopPlansByCar: {},
   gapMemory: null,
   stintState: null,
+  sessionTiming: null,
+  finishCountdown: null,
   storageSessionFolder: '',
   pollIntervalMs: 5000
 };
@@ -906,7 +909,10 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
     closeFinalAt: sessionFinished ? generatedAt : null,
     generatedAt,
     liveRows: rows,
-    previousState: collectorState.stintState
+    previousState: collectorState.stintState,
+    timerRunning: collectorState.sessionTiming?.started === true
+      || (!collectorState.sessionTiming && Boolean(collectorState.lapHistory?.length)),
+    sessionStartedAt: collectorState.sessionTiming?.startedAt || null
   };
   const stintState = buildStintState(collectorState.lapHistory || [], followedCars, generatedAt, stintOptions);
   fs.writeFileSync(path.join(folder, 'stint_state.json'), JSON.stringify(stintState, null, 2));
@@ -969,7 +975,7 @@ async function showReportGeneratedMessage(result = {}, automatic = false) {
   await dialog.showMessageBox(mainWindow, {
     type: 'info',
     title: automatic ? 'Session completed' : 'Session ended',
-    message: automatic ? 'Every car in the followed class has finished.' : 'Collection has been stopped.',
+    message: automatic ? 'Session completion was detected.' : 'Collection has been stopped.',
     detail: pdfs.length
       ? `${eventPdfs.length ? 'Session overview' : 'Final stint'} PDF generated:\n${pdfs[0]}`
       : 'No new PDF was required. Existing reports remain available in the session folder.',
@@ -1000,7 +1006,7 @@ async function finalizeCurrentSession({ automatic = false } = {}) {
   stopCollector(true);
   collectorState.status = 'finished';
   collectorState.message = automatic
-    ? 'All cars in the followed class have finished.'
+    ? 'Session completion detected; final reports generated.'
     : 'Session ended after confirmation.';
   broadcastState();
   await showReportGeneratedMessage(stintState, automatic);
@@ -1196,7 +1202,10 @@ function rebuildCollectorDerivedState(settings, context = null, rows = collector
   collectorState.stintState = buildStintState(collectorState.lapHistory || [], followedCars, generatedAt, {
     generatedAt,
     liveRows: rows,
-    previousState: collectorState.stintState
+    previousState: collectorState.stintState,
+    timerRunning: collectorState.sessionTiming?.started === true
+      || (!collectorState.sessionTiming && Boolean(collectorState.lapHistory?.length)),
+    sessionStartedAt: collectorState.sessionTiming?.startedAt || null
   });
   fs.writeFileSync(path.join(ensureStorage(settings), 'stint_state.json'), JSON.stringify(collectorState.stintState, null, 2));
   collectorState.analyticsSummary = writeAnalyticsSummary(settings, context || { collectedAt: generatedAt, session: collectorState.session || {} }, rows);
@@ -1264,8 +1273,28 @@ async function pollLivePage() {
     const { storageRows, analysisRows, context } = saveLatestSnapshot(settings, normalized);
     const primaryCar = String(settings.followedCar || '');
     const completion = followedClassCompletion(analysisRows, primaryCar);
-    const shouldFinalizeAutomatically = completion.complete && !automaticCompletionHandled;
     const newLapCount = updateLapHistory(settings, storageRows);
+    const primaryStats = carStats(collectorState.lapHistory || [], primaryCar);
+    const primaryRow = analysisRows.find((row) => String(row.carNumber) === primaryCar);
+    const finishCountdown = updateFinishCountdown(collectorState.finishCountdown, {
+      session: context?.session || normalized.session || {},
+      rows: analysisRows,
+      nowMs: context?.collectedAt || new Date().toISOString(),
+      primaryAverageLapMs: primaryStats.averageLapMs,
+      primaryLastLapMs: primaryRow?.lastLapMs
+    });
+    const automaticCompletionReason = completion.complete
+      ? 'all-class-cars-finished'
+      : finishCountdown.expired
+        ? 'finish-countdown-expired'
+        : '';
+    const shouldFinalizeAutomatically = Boolean(automaticCompletionReason) && !automaticCompletionHandled;
+    collectorState.sessionTiming = updateSessionTiming(
+      collectorState.sessionTiming,
+      context?.session || normalized.session || {},
+      collectorState.lapHistory || [],
+      context?.collectedAt || new Date().toISOString()
+    );
     try { updateAndWriteGapMemory(settings, context, analysisRows); } catch (error) { addError(error, 'updateAndWriteGapMemory'); }
     let stintState = collectorState.stintState;
     let analyticsSummary = collectorState.analyticsSummary;
@@ -1288,6 +1317,8 @@ async function pollLivePage() {
       message: newLapCount ? `${normalized.message} Stored ${newLapCount} new completed lap(s).` : normalized.message,
       lastSuccessAt: new Date().toISOString(), headers: normalized.headers, rows: analysisRows, session: normalized.session, diagnostics: normalized.diagnostics,
       storage: storageInfo(settings), analyticsSummary, lapPredictionsByCar, pitstopPlansByCar, gapMemory: gapMemoryState, stintState,
+      sessionTiming: collectorState.sessionTiming,
+      finishCountdown,
       lapPrediction: lapPredictionsByCar?.[primaryCar] || null,
       pitstopPlan: pitstopPlansByCar?.[primaryCar] || null,
       pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS),
@@ -1302,7 +1333,9 @@ async function pollLivePage() {
         liveWindow.close();
       }
       collectorState.status = 'finished';
-      collectorState.message = 'All cars in the followed class have finished.';
+      collectorState.message = automaticCompletionReason === 'all-class-cars-finished'
+        ? 'All cars in the followed class have finished.'
+        : 'Finish countdown elapsed after the primary car average lap plus 25% buffer.';
       await showReportGeneratedMessage(stintState || {}, true);
     }
   } catch (error) {
@@ -1346,9 +1379,13 @@ async function startCollector(url) {
   latestPitStateByCar.clear();
   automaticCompletionHandled = false;
   gapMemoryState = null;
-  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, lapPrediction: null, lapPredictionsByCar: {}, pitstopPlan: null, pitstopPlansByCar: {}, gapMemory: null, stintState: null, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
+  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, lapPrediction: null, lapPredictionsByCar: {}, pitstopPlan: null, pitstopPlansByCar: {}, gapMemory: null, stintState: null, sessionTiming: null, finishCountdown: null, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
   collectorState = { ...collectorState, lapHistory: loadExistingHistory(settings), storage: storageInfo(settings) };
-  collectorState.stintState = buildStintState(collectorState.lapHistory, normalizeFollowedCars(settings), startedAt);
+  collectorState.sessionTiming = updateSessionTiming(null, {}, collectorState.lapHistory, startedAt);
+  collectorState.stintState = buildStintState(collectorState.lapHistory, normalizeFollowedCars(settings), startedAt, {
+    timerRunning: collectorState.sessionTiming.started,
+    sessionStartedAt: collectorState.sessionTiming.startedAt
+  });
   loadExistingPitStates(settings);
   loadExistingGapMemory(settings);
   broadcastState();
@@ -1417,10 +1454,15 @@ ipcMain.handle('settings:set', (_event, settings) => {
     const lapHistory = loadExistingHistory(merged);
     loadExistingPitStates(merged);
     loadExistingGapMemory(merged);
+    const sessionTiming = updateSessionTiming(null, {}, lapHistory);
     collectorState = {
       ...collectorState,
       lapHistory,
-      stintState: buildStintState(lapHistory, normalizeFollowedCars(merged)),
+      sessionTiming,
+      stintState: buildStintState(lapHistory, normalizeFollowedCars(merged), new Date().toISOString(), {
+        timerRunning: sessionTiming.started,
+        sessionStartedAt: sessionTiming.startedAt
+      }),
       storage: storageInfo(merged),
       snapshots: []
     };

@@ -271,10 +271,10 @@ function canonicalStint(stint, session, gapSamples, driverStats, history, refere
       averageLapMs: driver.averageLapMs,
       bestLapMs: driver.bestLapMs,
       averageDeltaMs: Number.isFinite(stats.averageLapMs) && Number.isFinite(driver.averageLapMs)
-        ? stats.averageLapMs - driver.averageLapMs
+        ? driver.averageLapMs - stats.averageLapMs
         : null,
       bestDeltaMs: Number.isFinite(stats.bestLapMs) && Number.isFinite(driver.bestLapMs)
-        ? stats.bestLapMs - driver.bestLapMs
+        ? driver.bestLapMs - stats.bestLapMs
         : null
     }));
   const classComparisons = classComparisonsForStint(history, stint.laps || [], stint.carNumber, legacy.session.className);

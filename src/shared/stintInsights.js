@@ -216,8 +216,8 @@ function classComparisonsForStint(history = [], stintLaps = [], ourCarNumber = '
       paceLapCount: stats.paceLapCount,
       averageLapMs: stats.averageLapMs,
       bestLapMs: stats.bestLapMs,
-      averageDeltaMs: Number.isFinite(ourStats.averageLapMs) && Number.isFinite(stats.averageLapMs) ? ourStats.averageLapMs - stats.averageLapMs : null,
-      bestDeltaMs: Number.isFinite(ourStats.bestLapMs) && Number.isFinite(stats.bestLapMs) ? ourStats.bestLapMs - stats.bestLapMs : null
+      averageDeltaMs: Number.isFinite(ourStats.averageLapMs) && Number.isFinite(stats.averageLapMs) ? stats.averageLapMs - ourStats.averageLapMs : null,
+      bestDeltaMs: Number.isFinite(ourStats.bestLapMs) && Number.isFinite(stats.bestLapMs) ? stats.bestLapMs - ourStats.bestLapMs : null
     };
   }).sort((a, b) => (a.averageLapMs ?? Infinity) - (b.averageLapMs ?? Infinity));
 }
