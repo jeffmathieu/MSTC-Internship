@@ -1,5 +1,6 @@
 const { parseLapTimeToMs } = require('./parser');
 const { normalizeTrackCondition, deriveLapCondition } = require('./trackConditions');
+const { preferStableSessionName } = require('./sessionName');
 
 // Provider adapters/parsers may have different raw column names, but before
 // writing anything to disk they must produce this storage schema. Future timing
@@ -55,6 +56,8 @@ const LAP_HISTORY_COLUMNS = [
   'sector1Flag',
   'sector2Flag',
   'sector3Flag',
+  'lapPhase',
+  'isPitLap',
   'manualLapStatus',
   'paceEligible',
   'sector1Eligible',
@@ -115,7 +118,11 @@ function valueAt(row, ...keys) {
 // Picks the best available session label for storage metadata.
 function normalizedSessionName(context = {}) {
   const session = context.session || {};
-  return normalizeStorageField(session.sessionName || session.statusText || session.pageTitle || context.sessionName || '');
+  return normalizeStorageField(preferStableSessionName(
+    session.sessionName,
+    context.sessionName,
+    session.pageTitle
+  ));
 }
 
 // Converts one parsed live row into the provider-independent latest-row schema.
@@ -219,6 +226,8 @@ function lapRecordFromNormalizedRow(row) {
     sector1Flag: normalizeStorageField(row.sector1Flag),
     sector2Flag: normalizeStorageField(row.sector2Flag),
     sector3Flag: normalizeStorageField(row.sector3Flag),
+    lapPhase: normalizeStorageField(row.lapPhase),
+    isPitLap: normalizeStorageField(row.isPitLap),
     manualLapStatus: normalizeStorageField(row.manualLapStatus),
     paceEligible: normalizeStorageField(row.paceEligible),
     sector1Eligible: normalizeStorageField(row.sector1Eligible),
@@ -297,6 +306,18 @@ function completedLapRowFromLiveRow(row, previousRow) {
   if (neutralizedSectorFlag) {
     completed.lapFlag = neutralizedSectorFlag;
     completed.paceEligible = 'false';
+  }
+  const pitStatus = [row.state, row.eta, row.pitStatus, row.pitInfoText]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(' ');
+  if (/\bout\s*lap\b/i.test(pitStatus)) {
+    completed.lapPhase = 'outlap';
+    completed.isPitLap = 'true';
+    completed.paceEligible = 'false';
+    completed.sector1Eligible = 'false';
+    completed.sector2Eligible = 'false';
+    completed.sector3Eligible = 'false';
   }
   completed.lapCondition = deriveLapCondition(completed, completed.trackCondition);
   return completed;

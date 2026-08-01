@@ -7,10 +7,10 @@ const graphData = require('../shared/graphData');
 const { buildStintInsights, classComparisonsForStint, classRankingForStint } = require('../shared/stintInsights');
 const { normalizeMode } = require('../shared/sessionMode');
 
-const REPORT_LAYOUT_VERSION = 'canonical-reportlab-landscape-v6-race-graphs';
+const REPORT_LAYOUT_VERSION = 'canonical-reportlab-landscape-v7-session-summaries';
 
-// Practice and qualifying still produce a full pace/sector stint overview, but
-// pitstop analysis and end-of-race summary pages only make sense in race mode.
+// Every session mode gets an end-of-session overview. Pitstop analysis remains
+// race-only, while practice and qualifying summaries contain pace/sector data.
 // Keeping this decision in one policy prevents the live trigger, JSON payload
 // and PDF renderer from quietly disagreeing about what belongs in a report.
 function reportPolicyForSessionMode(value) {
@@ -19,7 +19,7 @@ function reportPolicyForSessionMode(value) {
   return {
     sessionMode,
     includePitstops: isRace,
-    writeEventSummaries: isRace
+    writeEventSummaries: true
   };
 }
 
@@ -337,7 +337,7 @@ function buildCanonicalReportPayload({
     schemaVersion: 2,
     reportLayoutVersion: REPORT_LAYOUT_VERSION,
     reportMode: reportPolicy.sessionMode,
-    reportScope: reportPolicy.includePitstops ? 'race-and-stints' : 'stints-only',
+    reportScope: reportPolicy.includePitstops ? 'race-and-stints' : 'session-and-stints',
     generatedAt: new Date().toISOString(),
     race: {
       sessionName: session.sessionName || session.pageTitle || 'Race session',
@@ -694,8 +694,15 @@ async function writeEventSummaryArtifacts({
   if (!closed.length) return [];
   const carFolder = path.join(sessionFolder, 'stints', `car-${safeFilePart(carNumber, 'unknown')}`);
   fs.mkdirSync(carFolder, { recursive: true });
+  const summaryPrefix = reportPolicy.sessionMode === 'race'
+    ? 'RACE'
+    : reportPolicy.sessionMode === 'qualifying'
+      ? 'QUALIFYING'
+      : reportPolicy.sessionMode === 'practice'
+        ? 'PRACTICE'
+        : 'SESSION';
   const groups = [
-    { baseName: 'RACE_SUMMARY', title: `${session.sessionName || 'Race'} · car #${carNumber}`, stints: closed, includeSummary: true }
+    { baseName: `${summaryPrefix}_SUMMARY`, title: `${session.sessionName || 'Session'} · car #${carNumber}`, stints: closed, includeSummary: true }
   ];
   const byDriver = new Map();
   closed.forEach((stint) => {
@@ -726,20 +733,14 @@ async function writeEventSummaryArtifacts({
     payload.legacyPayloads = payloads;
     const jsonPath = path.join(carFolder, `${group.baseName}.json`);
     const pdfPath = path.join(carFolder, `${group.baseName}.pdf`);
-    let previousPayload = null;
-    try {
-      if (fs.existsSync(jsonPath)) previousPayload = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-    } catch (_error) {
-      previousPayload = null;
-    }
     fs.writeFileSync(jsonPath, JSON.stringify(payload, null, 2));
-    if (!fs.existsSync(pdfPath) || previousPayload?.reportLayoutVersion !== REPORT_LAYOUT_VERSION) {
-      const result = await renderPdf(jsonPath, pdfPath, { includeSummary: Boolean(group.includeSummary) });
-      if (!result?.rendered) {
-        payload.renderFallbackReason = result?.reason || 'unknown-renderer-error';
-        fs.writeFileSync(jsonPath, JSON.stringify(payload, null, 2));
-        await printHtmlToPdf(BrowserWindow, buildEventSummaryHtml(group.title, payloads), pdfPath);
-      }
+    // Finalization deliberately refreshes summaries, including when reopening
+    // an old session folder whose full overview did not exist yet.
+    const result = await renderPdf(jsonPath, pdfPath, { includeSummary: Boolean(group.includeSummary) });
+    if (!result?.rendered) {
+      payload.renderFallbackReason = result?.reason || 'unknown-renderer-error';
+      fs.writeFileSync(jsonPath, JSON.stringify(payload, null, 2));
+      await printHtmlToPdf(BrowserWindow, buildEventSummaryHtml(group.title, payloads), pdfPath);
     }
     results.push({ jsonPath, pdfPath });
   }

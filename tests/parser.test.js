@@ -204,6 +204,35 @@ assert.strictEqual(getRaceResultsSession.timeToGo, '01:45:00');
 assert.strictEqual(getRaceResultsSession.sessionName, 'Spa Test - Practice');
 assert.strictEqual(getRaceResultsSession.flag, 'Green flag');
 
+// GetRaceResults pages can retain historical FCY text after returning to
+// green. The explicitly extracted top-page flag must always win.
+const getRaceResultsGreenAfterFcy = parseSessionInfo({
+  bodyText: 'Full Course Yellow Race control history Green flag Cup und Tourenwagen Trophy - Qualifying',
+  sessionFields: { currentFlag: 'Green flag' }
+});
+assert.strictEqual(getRaceResultsGreenAfterFcy.flag, 'Green flag');
+
+// Without a current banner, mixed historical states are ambiguous. Treating
+// the first match as current would incorrectly exclude fully green laps.
+const ambiguousHistoricalFlags = parseSessionInfo({
+  bodyText: 'Full Course Yellow Race control history Green flag'
+});
+assert.strictEqual(ambiguousHistoricalFlags.flag, '');
+
+// Even one stale body message is unsafe on GetRaceResults. The provider must
+// supply the separately extracted current top-page banner instead.
+const getRaceResultsStaleFcyOnly = parseSessionInfo({
+  location: 'https://livetiming.getraceresults.com/zolder#screen-results',
+  bodyText: 'Full Course Yellow old race-control history'
+});
+assert.strictEqual(getRaceResultsStaleFcyOnly.flag, '');
+
+const finishedCurrentFlag = parseSessionInfo({
+  bodyText: 'Old Full Course Yellow message',
+  sessionFields: { currentFlag: 'Finish' }
+});
+assert.strictEqual(finishedCurrentFlag.flag, 'Finished flag');
+
 const simpleToGoSession = parseSessionInfo({
   bodyText: 'To go: 00:42:15  Timing server connected'
 });

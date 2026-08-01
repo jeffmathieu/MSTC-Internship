@@ -193,7 +193,7 @@ const fallbackContextRow = normalizeForStorage({
   sessionFlag: 'Safety car'
 });
 assert.strictEqual(fallbackContextRow.sourceProvider, 'unknown');
-assert.strictEqual(fallbackContextRow.sessionName, 'Waiting for race');
+assert.strictEqual(fallbackContextRow.sessionName, '', 'transient connection/status text is not stored as a session name');
 assert.strictEqual(fallbackContextRow.state, 'up');
 assert.strictEqual(fallbackContextRow.carNumber, '007');
 assert.strictEqual(fallbackContextRow.teamName, 'Team, With "Quotes"');

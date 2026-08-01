@@ -35,12 +35,12 @@ assert.strictEqual(htmlEscape('<MSTC & "team">'), '&lt;MSTC &amp; &quot;team&quo
 assert.deepStrictEqual(reportPolicyForSessionMode('practice'), {
   sessionMode: 'practice',
   includePitstops: false,
-  writeEventSummaries: false
+  writeEventSummaries: true
 });
 assert.deepStrictEqual(reportPolicyForSessionMode('quali'), {
   sessionMode: 'qualifying',
   includePitstops: false,
-  writeEventSummaries: false
+  writeEventSummaries: true
 });
 assert.strictEqual(payload.stint.laps[0].status, 'valid');
 assert.strictEqual(payload.stint.laps[1].status, 'neutralized');
@@ -98,7 +98,7 @@ for (const sessionMode of ['practice', 'qualifying']) {
     sessionMode
   });
   assert.strictEqual(stintOnly.reportMode, sessionMode);
-  assert.strictEqual(stintOnly.reportScope, 'stints-only');
+  assert.strictEqual(stintOnly.reportScope, 'session-and-stints');
   assert.deepStrictEqual(stintOnly.raceSummary.pitStops, [], `${sessionMode} does not expose pitstops`);
   assert.strictEqual(stintOnly.raceSummary.pitAnalysis.stopCount, 0);
   assert.strictEqual(stintOnly.raceSummary.totalPitTimeMs, null);
@@ -255,7 +255,7 @@ module.exports = (async () => {
   const storedPractice = JSON.parse(fs.readFileSync(practice.jsonPath, 'utf8'));
   assert.strictEqual(practice.pdfCreated, true);
   assert.strictEqual(storedPractice.reportMode, 'practice');
-  assert.strictEqual(storedPractice.reportScope, 'stints-only');
+  assert.strictEqual(storedPractice.reportScope, 'session-and-stints');
   assert.deepStrictEqual(storedPractice.raceSummary.pitStops, []);
   assert.strictEqual(storedPractice.stints[0].endPitStop, null);
   assert.strictEqual(printCount, 6);
@@ -270,8 +270,9 @@ module.exports = (async () => {
     sessionMode: 'practice',
     renderPdf: fakeCanonicalRenderer
   });
-  assert.deepStrictEqual(practiceSummaries, [], 'practice only writes individual stint overviews');
-  assert.strictEqual(printCount, 6);
+  assert.strictEqual(practiceSummaries.length, 2, 'practice writes session and driver summaries without pit analysis');
+  assert.strictEqual(practiceSummaries.every((summary) => fs.existsSync(summary.pdfPath)), true);
+  assert.strictEqual(printCount, 8);
 
   const migrationOutput = path.join(output, 'old-layout');
   const oldPaths = artifactPaths(migrationOutput, closedStint);
@@ -287,7 +288,7 @@ module.exports = (async () => {
     renderPdf: fakeCanonicalRenderer
   });
   assert.strictEqual(migrated.pdfCreated, true, 'old automatic reports are regenerated once');
-  assert.strictEqual(printCount, 7);
+  assert.strictEqual(printCount, 9);
   assert.strictEqual(fs.readFileSync(oldPaths.pdfPath, 'utf8'), '%PDF-canonical-fake');
 
   const openStint = stintsForCar(history, 33).at(-1);

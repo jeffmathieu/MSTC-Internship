@@ -49,6 +49,7 @@ const {
   updateGapMemory
 } = require('../shared/gapMemory');
 const { normalizeMode, buildComparisonView, qualifyingAdjacentView } = require('../shared/sessionMode');
+const { preferStableSessionName } = require('../shared/sessionName');
 const { stintsForCar, buildStintState } = require('../shared/stintTracker');
 const { followedClassCompletion } = require('../shared/sessionCompletion');
 const { buildTimingHighlights } = require('../shared/timingHighlights');
@@ -430,8 +431,30 @@ const pageExtractionScript = String.raw`(() => {
       ? clean(parentText.slice(label.length))
       : parentText;
   };
+  // GetRaceResults has no labelled "Status:" field. Read the small current
+  // race-control banner near the top of the page instead. Historical messages
+  // can contain the same words lower down, so they must never be selected as
+  // the live flag.
+  const currentFlagElement = Array.from(document.querySelectorAll('body *'))
+    .map((element) => ({
+      element,
+      text: clean(element.innerText || element.textContent || ''),
+      rect: element.getBoundingClientRect()
+    }))
+    .filter(({ element, text, rect }) => {
+      if (!/^(?:green(?: flag)?|full course yellow|fcy|safety car|red(?: flag)?|yellow(?: flag)?|code 60|finish(?:ed)?(?: flag)?)$/i.test(text)) return false;
+      const style = window.getComputedStyle(element);
+      return style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && rect.width > 0
+        && rect.height > 0
+        && rect.top >= 0
+        && rect.top <= Math.max(260, window.innerHeight * 0.3);
+    })
+    .sort((a, b) => a.rect.top - b.rect.top || a.rect.left - b.rect.left)[0];
   const sessionHeading = document.querySelector('h1');
   const sessionFields = {
+    currentFlag: currentFlagElement ? currentFlagElement.text : '',
     status: labelledValue('Status:'),
     elapsed: labelledValue('Elapsed:'),
     remaining: labelledValue('Remaining:'),
@@ -699,10 +722,18 @@ function writeParserDebug(settings, debugInfo) {
 // folder is self-describing.
 function writeSessionMetadata(settings, context) {
   const folder = ensureStorage(settings);
+  const metadataPath = path.join(folder, 'session_metadata.json');
+  let previousMetadata = {};
+  try {
+    if (fs.existsSync(metadataPath)) previousMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+  } catch (error) {
+    addError(error, 'readSessionMetadata');
+  }
+  const currentSessionName = normalizeForStorage({}, context).sessionName;
   fs.writeFileSync(path.join(folder, 'session_metadata.json'), JSON.stringify({
     timingUrl: context.timingUrl || '',
     sourceProvider: context.sourceProvider || 'unknown',
-    sessionName: normalizeForStorage({}, context).sessionName,
+    sessionName: preferStableSessionName(currentSessionName, previousMetadata.sessionName),
     startedAt: context.startedAt || '',
     lastUpdatedAt: context.collectedAt || '',
     followedCar: context.followedCar || '',
@@ -911,7 +942,7 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
         pendingStintReports.delete(reportKey);
       }
     }
-    if (sessionFinished && closedStints.length && reportSessionMode === 'race') {
+    if (sessionFinished && closedStints.length) {
       const summaries = await writeEventSummaryArtifacts({
         BrowserWindow,
         sessionFolder: folder,
@@ -936,10 +967,10 @@ async function showReportGeneratedMessage(result = {}, automatic = false) {
   const pdfs = eventPdfs.length ? eventPdfs : stintPdfs;
   await dialog.showMessageBox(mainWindow, {
     type: 'info',
-    title: automatic ? 'Race completed' : 'Session ended',
+    title: automatic ? 'Session completed' : 'Session ended',
     message: automatic ? 'Every car in the followed class has finished.' : 'Collection has been stopped.',
     detail: pdfs.length
-      ? `${eventPdfs.length ? 'Race overview' : 'Final stint'} PDF generated:\n${pdfs[0]}`
+      ? `${eventPdfs.length ? 'Session overview' : 'Final stint'} PDF generated:\n${pdfs[0]}`
       : 'No new PDF was required. Existing reports remain available in the session folder.',
     buttons: ['OK']
   });
@@ -960,7 +991,7 @@ async function finalizeCurrentSession({ automatic = false } = {}) {
   const session = {
     ...metadata,
     ...(collectorState.session || {}),
-    sessionName: collectorState.session?.sessionName || metadata.sessionName || ''
+    sessionName: preferStableSessionName(collectorState.session?.sessionName, metadata.sessionName)
   };
   const context = storageContext(settings, { session }, new Date().toISOString());
   const stintState = await writeStintStateAndReports(settings, context, collectorState.rows || [], { sessionFinished: true });
@@ -1229,11 +1260,13 @@ async function pollLivePage() {
     const settings = loadSettings();
     const snapshot = await liveWindow.webContents.executeJavaScript(pageExtractionScript, true);
     const normalized = normalizeSnapshot(snapshot);
+    normalized.session.sessionName = preferStableSessionName(
+      normalized.session?.sessionName,
+      collectorState.session?.sessionName
+    );
     const { storageRows, analysisRows, context } = saveLatestSnapshot(settings, normalized);
     const primaryCar = String(settings.followedCar || '');
-    const completion = normalizeMode(settings.sessionMode) === 'race'
-      ? followedClassCompletion(analysisRows, primaryCar)
-      : { complete: false };
+    const completion = followedClassCompletion(analysisRows, primaryCar);
     const shouldFinalizeAutomatically = completion.complete && !automaticCompletionHandled;
     const newLapCount = updateLapHistory(settings, storageRows);
     try { updateAndWriteGapMemory(settings, context, analysisRows); } catch (error) { addError(error, 'updateAndWriteGapMemory'); }

@@ -85,6 +85,21 @@ const spaCompletedLapFlags = captureSectorFlags({ lastLap: '3:30.000', sector1: 
 assert.strictEqual(spaCompletedLapFlags.sector1Flag, 'Green flag');
 assert.strictEqual(spaCompletedLapFlags.sector2Flag, 'Full Course Yellow');
 assert.strictEqual(spaCompletedLapFlags.sector3Flag, 'Full Course Yellow');
+
+// A completely new green lap after FCY must not inherit the previous lap's
+// neutralization when all newly observed sector values differ.
+const freshGreenLapAfterFcy = captureSectorFlags({
+  lastLap: '2:09.104',
+  sector1: '42.196',
+  sector2: '48.155',
+  sector3: '38.753'
+}, spaCompletedLapFlags, 'Green flag');
+assert.strictEqual(freshGreenLapAfterFcy.sector1Flag, 'Green flag');
+assert.strictEqual(freshGreenLapAfterFcy.sector2Flag, 'Green flag');
+assert.strictEqual(freshGreenLapAfterFcy.sector3Flag, 'Green flag');
+assert.strictEqual(freshGreenLapAfterFcy.sector1Eligible, 'true');
+assert.strictEqual(freshGreenLapAfterFcy.sector2Eligible, 'true');
+assert.strictEqual(freshGreenLapAfterFcy.sector3Eligible, 'true');
 const fcyDuringS1 = captureSectorFlags({ lastLap: '3:01.000', sector1: '', sector2: '', sector3: '' }, null, 'Full Course Yellow');
 assert.strictEqual(fcyDuringS1.sector1Flag, 'Full Course Yellow');
 assert.strictEqual(fcyDuringS1.sector1Eligible, 'false');
