@@ -183,7 +183,47 @@ function pitAffectedLap(lap) {
 }
 
 function isOpeningRaceLap(lap) {
-  return numberOrNull(lap?.lapNumber) === 1;
+  const providerLapNumber = numberOrNull(lap?.lapNumber);
+  return providerLapNumber === 1 || (providerLapNumber === null && numberOrNull(lap?.historySequence) === 1);
+}
+
+// Some timing tables omit LAPS entirely. Their records are still append-only,
+// so assign a per-car observed sequence after chronological sorting. This keeps
+// the opening lap excluded from pace statistics without inventing or persisting
+// an official provider lap number.
+function annotateHistorySequences(laps) {
+  const countByCar = new Map();
+  return laps.map((lap) => {
+    const key = [lap.sourceProvider || '', lap.timingUrl || '', lap.carNumber].join('|');
+    const historySequence = (countByCar.get(key) || 0) + 1;
+    countByCar.set(key, historySequence);
+    return { ...lap, historySequence };
+  });
+}
+
+// Repairs already-saved finish/reconnect duplicates from providers without a
+// LAPS column. A repeated snapshot normally arrives one poll later, whereas two
+// real completed laps are separated by roughly a full lap duration. Keep the
+// latter even when both laps happen to have exactly the same time.
+function deduplicateRepeatedLiveSnapshots(laps, maximumSnapshotGapMs = 30000) {
+  const previousByCar = new Map();
+  return laps.filter((lap) => {
+    const key = [lap.sourceProvider || '', lap.timingUrl || '', lap.carNumber].join('|');
+    const previous = previousByCar.get(key);
+    previousByCar.set(key, lap);
+    if (!previous) return true;
+
+    const currentLapNumber = numberOrNull(lap.lapNumber);
+    const previousLapNumber = numberOrNull(previous.lapNumber);
+    if (currentLapNumber !== null || previousLapNumber !== null) {
+      return currentLapNumber !== previousLapNumber || lap.lapTimeMs !== previous.lapTimeMs;
+    }
+    if (lap.driverName !== previous.driverName || lap.lapTimeMs !== previous.lapTimeMs) return true;
+    const currentRecordedAt = recordedTimeMs(lap);
+    const previousRecordedAt = recordedTimeMs(previous);
+    if (currentRecordedAt === null || previousRecordedAt === null) return true;
+    return currentRecordedAt - previousRecordedAt > maximumSnapshotGapMs;
+  });
 }
 
 function pitStatusText(lap) {
@@ -372,7 +412,7 @@ function completedLaps(history) {
     .map(normalizeLap)
     .filter((lap) => lap.carNumber && lap.lapTimeMs !== null)
     .sort(compareLapsChronologically);
-  return annotatePitPhases(sorted);
+  return annotatePitPhases(annotateHistorySequences(deduplicateRepeatedLiveSnapshots(sorted)));
 }
 
 // Convenience filter for all completed laps of one car.

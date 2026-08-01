@@ -174,6 +174,35 @@ assert.strictEqual(manualTrackLimitsStats.averageLapMs, 102000);
 assert.strictEqual(manualTrackLimitsStats.bestLapMs, 102000);
 assert.deepStrictEqual(manualTrackLimitsStats.selection.lap.excludedLaps.map((lapEntry) => lapEntry.reasons), [['first-lap'], ['track-limits']]);
 
+// GetRaceResults race tables can omit the LAPS column. The first observed lap
+// must still be stored but excluded from both lap and sector pace statistics.
+const noProviderLapNumbers = completedLaps([
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:00:00.000Z', lapTimeMs: 107114, sector1Ms: 34000, sector2Ms: 40000, sector3Ms: 33114 }),
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:02:00.000Z', lapTimeMs: 104311, sector1Ms: 33000, sector2Ms: 39000, sector3Ms: 32311 }),
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:04:00.000Z', lapTimeMs: 104220, sector1Ms: 32900, sector2Ms: 38900, sector3Ms: 32420 })
+]);
+const noProviderLapNumberStats = statsForLaps(noProviderLapNumbers);
+assert.strictEqual(isOpeningRaceLap(noProviderLapNumbers[0]), true);
+assert.strictEqual(lapPaceEligible(noProviderLapNumbers[0]), false);
+assert.strictEqual(sectorPaceEligible(noProviderLapNumbers[0], 1), false);
+assert.strictEqual(noProviderLapNumberStats.paceLapCount, 2);
+assert.strictEqual(noProviderLapNumberStats.averageLapMs, (104311 + 104220) / 2);
+assert.strictEqual(noProviderLapNumberStats.bestSector1Ms, 32900);
+assert.strictEqual(noProviderLapNumberStats.selection.lap.excludedByReason['first-lap'], 1);
+
+const finishSnapshotHistory = completedLaps([
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:10:00.000Z', lapTimeMs: 102830 }),
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:10:05.000Z', lapTimeMs: 102830, sessionName: 'Finish' }),
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:11:50.000Z', lapTimeMs: 101676 })
+]);
+assert.deepStrictEqual(finishSnapshotHistory.map((entry) => entry.lapTimeMs), [102830, 101676]);
+
+const genuinelyEqualConsecutiveLaps = completedLaps([
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:20:00.000Z', lapTimeMs: 102830 }),
+  lap({ carNumber: 46, driverName: 'Marcel Biehl', lapNumber: '', recordedAt: '2026-08-01T09:21:43.000Z', lapTimeMs: 102830 })
+]);
+assert.strictEqual(genuinelyEqualConsecutiveLaps.length, 2, 'equal real laps separated by a lap duration must both remain');
+
 const noisyHistory = [
   { carNumber: '', lapTimeMs: '100000', lapNumber: '1' },
   { carNumber: '33', lapTimeMs: '--', lapNumber: '2' },

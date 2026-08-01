@@ -323,11 +323,19 @@ function completedLapRowFromLiveRow(row, previousRow) {
   return completed;
 }
 
-// Builds a duplicate-detection key for completed laps. Lap number is preferred;
-// when missing, driver + last lap is the fallback because some providers do not
-// expose lap numbers reliably.
+// Identifies one live car inside the selected session folder. Session names are
+// deliberately excluded: timing providers can replace the real title with a
+// finish/reconnect message while the same car row remains on screen.
+function liveRowIdentity(row) {
+  return [row.sourceProvider, row.timingUrl, row.carNumber].join('|');
+}
+
+// Builds a duplicate-detection key for completed laps. The selected data folder
+// is the session boundary, so volatile provider session text must not be part of
+// this key. Lap number is preferred; when missing, driver + last lap is the best
+// available fallback for providers that do not expose a lap counter.
 function lapIdentity(row) {
-  const base = [row.sourceProvider, row.timingUrl, row.sessionName, row.carNumber];
+  const base = [row.sourceProvider, row.timingUrl, row.carNumber];
   if (row.lapNumber) return [...base, row.lapNumber, row.lastLap].join('|');
   return [...base, row.driverName || row.driver || '', row.lastLap].join('|');
 }
@@ -341,6 +349,7 @@ module.exports = {
   lapRecordFromNormalizedRow,
   currentSectorsMatchCompletedLap,
   completedLapRowFromLiveRow,
+  liveRowIdentity,
   lapIdentity,
   toCsvRows,
   detectSourceProvider

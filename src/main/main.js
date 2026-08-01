@@ -16,6 +16,7 @@ const {
   analysisRowsFromParsedRows,
   lapRecordFromNormalizedRow,
   completedLapRowFromLiveRow,
+  liveRowIdentity,
   lapIdentity,
   toCsvRows,
   detectSourceProvider
@@ -630,7 +631,7 @@ function normalizeRowsForStorage(rows, context) {
 function annotateLiveSectorFlags(storageRows, context) {
   const currentFlag = String(context?.session?.flag || context?.sessionFlag || '');
   return storageRows.map((row) => {
-    const previous = latestLiveRowByCar.get(liveRowKey(row));
+    const previous = latestLiveRowByCar.get(liveRowIdentity(row));
     const flagged = captureSectorFlags(row, previous, currentFlag);
     return captureSectorConditions(
       flagged,
@@ -1090,10 +1091,6 @@ function loadExistingPitStates(settings) {
   });
 }
 
-function liveRowKey(row) {
-  return [row.sourceProvider, row.timingUrl, row.sessionName, row.carNumber].join('|');
-}
-
 function currentPitTargetDurationMs(settings = {}) {
   const value = Number(settings.pitRules?.pitStopDurationMs);
   return Number.isFinite(value) && value >= 0 ? String(Math.round(value)) : '';
@@ -1105,7 +1102,7 @@ function updateLapHistory(settings, storageRows) {
   const pitTargetDurationMs = currentPitTargetDurationMs(settings);
   storageRows.forEach((row) => {
     if (!row.carNumber || !row.lastLap) return;
-    const carKey = liveRowKey(row);
+    const carKey = liveRowIdentity(row);
     const previousRow = latestLiveRowByCar.get(carKey);
     latestLiveRowByCar.set(carKey, row);
 

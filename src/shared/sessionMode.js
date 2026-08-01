@@ -67,6 +67,29 @@
     return Number.isFinite(value) ? value : null;
   }
 
+  // Comparison tabs follow the official class order. Some providers omit PIC
+  // temporarily, so overall position and finally car number provide stable
+  // fallbacks instead of moving our car to an artificial first position.
+  function sortablePosition(value) {
+    const position = Number(value);
+    return Number.isFinite(position) && position > 0 ? position : Number.POSITIVE_INFINITY;
+  }
+
+  function compareClassCars(left, right) {
+    const leftClassPosition = sortablePosition(left.classPosition);
+    const rightClassPosition = sortablePosition(right.classPosition);
+    if (leftClassPosition !== rightClassPosition) return leftClassPosition < rightClassPosition ? -1 : 1;
+
+    const leftOverallPosition = sortablePosition(left.position);
+    const rightOverallPosition = sortablePosition(right.position);
+    if (leftOverallPosition !== rightOverallPosition) return leftOverallPosition < rightOverallPosition ? -1 : 1;
+
+    return String(left.carNumber).localeCompare(String(right.carNumber), undefined, {
+      numeric: true,
+      sensitivity: 'base'
+    });
+  }
+
   function isRunningClassRow(row, classLeaderLap) {
     const state = String(row?.state || row?.status || '').trim().toLowerCase();
     if (/\b(ret|dnf|dns|out|stop|finished|finish|disq|dq)\b/.test(state)) return false;
@@ -78,6 +101,37 @@
 
   function statsForCar(history, rows, carNumber, conditionFilter = 'combined') {
     return lapAnalytics.carStatsWithProviderBest(history, rows, carNumber, { conditionFilter });
+  }
+
+  // The benchmark column normally shows the best-average car in class. When
+  // that is our own car, showing it again would create a useless duplicate of
+  // the first column. In that case use the next-fastest other car. During the
+  // opening laps, before another car has a valid average, fall back to the
+  // first other car in the official live class order so the column still
+  // identifies the intended comparison target.
+  function classBenchmarkForComparison(history, rows, ourCarNumber, className, conditionFilter = 'combined') {
+    if (!className) return { car: null, isActualBic: false };
+    const paceCars = lapAnalytics.carsInClass(history, className, { conditionFilter })
+      .filter((car) => Number.isFinite(car.averageLapMs))
+      .sort((left, right) => left.averageLapMs - right.averageLapMs);
+    const actualBic = paceCars[0] || null;
+    const benchmarkReference = String(actualBic?.carNumber || '') === String(ourCarNumber)
+      ? paceCars.find((car) => String(car.carNumber) !== String(ourCarNumber)) || null
+      : actualBic;
+    if (benchmarkReference) {
+      return {
+        car: statsForCar(history, rows, benchmarkReference.carNumber, conditionFilter),
+        isActualBic: String(benchmarkReference.carNumber) === String(actualBic?.carNumber)
+      };
+    }
+
+    const fallbackRow = (rows || [])
+      .filter((row) => row.className === className && String(row.carNumber) !== String(ourCarNumber))
+      .sort(compareClassCars)[0];
+    return {
+      car: fallbackRow ? statsForCar(history, rows, fallbackRow.carNumber, conditionFilter) : null,
+      isActualBic: false
+    };
   }
 
   function classCarsForComparison(history, rows, ourCarNumber, ourReference, conditionFilter = 'combined') {
@@ -98,6 +152,7 @@
       return {
         carNumber: String(row.carNumber || stats.carNumber || ''),
         classPosition: row.classPosition || '',
+        position: row.position || '',
         teamName: row.team || row.teamName || stats.teamName || '',
         isOurCar: String(row.carNumber) === String(ourCarNumber),
         isBic: bic && String(row.carNumber) === String(bic.carNumber),
@@ -112,13 +167,7 @@
         sectors: sectorAverages(stats, ourCar)
       };
     });
-    return cars.sort((left, right) => {
-      if (left.isOurCar !== right.isOurCar) return left.isOurCar ? -1 : 1;
-      return String(left.carNumber).localeCompare(String(right.carNumber), undefined, {
-        numeric: true,
-        sensitivity: 'base'
-      });
-    });
+    return cars.sort(compareClassCars);
   }
 
   function averageRows(stats = [], comparisonMs = null, comparisonFirst = true) {
@@ -136,8 +185,8 @@
     const ourCar = statsForCar(history, rows, ourCarNumber, conditionFilter);
     const current = driverStatsForName(history, ourCarNumber, liveDriver(rows, ourCarNumber, history));
     const best = lapAnalytics.bestDriverByAverage(history, ourCarNumber);
-    const bicReference = ourCar.className ? lapAnalytics.bestCarInClassByAverage(history, ourCar.className) : null;
-    const bic = bicReference ? statsForCar(history, rows, bicReference.carNumber, conditionFilter) : null;
+    const benchmark = classBenchmarkForComparison(history, rows, ourCarNumber, ourCar.className, conditionFilter);
+    const bic = benchmark.car;
     const xic = selectedCarNumber ? statsForCar(history, rows, selectedCarNumber, conditionFilter) : null;
     const ourDrivers = lapAnalytics.driverStats(history, ourCarNumber);
     const column = (target, kind) => ({
@@ -176,7 +225,7 @@
       xic: xicColumn,
       averageCars: [
         { ...teammate, carNumber: String(ourCarNumber || ''), isOurCar: true, isBic: false },
-        { ...bicColumn, carNumber: String(bic?.carNumber || ''), isOurCar: String(bic?.carNumber || '') === String(ourCarNumber), isBic: true },
+        { ...bicColumn, carNumber: String(bic?.carNumber || ''), isOurCar: false, isBic: benchmark.isActualBic },
         { ...xicColumn, carNumber: String(xic?.carNumber || selectedCarNumber || ''), isOurCar: String(xic?.carNumber || '') === String(ourCarNumber), isBic: false, isXic: true }
       ],
       classCars: classCarsForComparison(history, rows, ourCarNumber, ourCar, conditionFilter)
@@ -216,8 +265,7 @@
     const ourCar = statsForCar(history, rows, ourCarNumber, conditionFilter);
     const current = driverStatsForName(history, ourCarNumber, liveDriver(rows, ourCarNumber, history));
     const best = lapAnalytics.bestDriverByAverage(history, ourCarNumber);
-    const bicReference = ourCar.className ? lapAnalytics.bestCarInClassByAverage(history, ourCar.className) : null;
-    const bic = bicReference ? statsForCar(history, rows, bicReference.carNumber, conditionFilter) : null;
+    const bic = classBenchmarkForComparison(history, rows, ourCarNumber, ourCar.className, conditionFilter).car;
     const xic = selectedCarNumber ? statsForCar(history, rows, selectedCarNumber, conditionFilter) : null;
     const bicDriver = targetCurrentDriverStats(history, rows, bic);
     const xicDriver = targetCurrentDriverStats(history, rows, xic);

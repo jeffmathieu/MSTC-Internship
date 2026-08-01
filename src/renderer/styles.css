@@ -615,8 +615,14 @@ button:disabled { cursor: not-allowed; opacity: .38; }
 .comparison-tab-controls button:hover { background: var(--control-hover); }
 #comparison-tab-laps,
 #comparison-tab-sectors {
-  grid-template-rows: 18px repeat(auto-fit, 22px);
+  grid-template-rows: 18px;
+  grid-auto-rows: 22px;
   row-gap: 2px;
+}
+.comparison-tab.comparison-tab-scrollable {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 .comparison-row {
   min-width: 0;
@@ -642,6 +648,12 @@ button:disabled { cursor: not-allowed; opacity: .38; }
   line-height: 1;
 }
 .comparison-car-label.is-bic {
+  color: var(--green);
+}
+.comparison-car-label.is-our-car {
+  color: var(--blue);
+}
+.comparison-car-label.is-our-car small {
   color: var(--green);
 }
 .comparison-car-label small {

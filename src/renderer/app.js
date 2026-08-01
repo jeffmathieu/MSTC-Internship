@@ -10,6 +10,7 @@ let configuredFollowedCars = [];
 const DEFAULT_POLL_INTERVAL_MS = 5000;
 const MAX_FOLLOWED_CARS = 3;
 const COMPARISON_TABS = ['laps', 'averages', 'sectors'];
+const COMPARISON_SCROLL_THRESHOLD = 13;
 let currentComparisonTab = 0;
 let lapEditMode = false;
 const dashboardQuery = new URLSearchParams(window.location?.search || '');
@@ -717,7 +718,8 @@ function comparisonCarLabel(car, fallback = '—') {
   const label = document.createElement('strong');
   label.className = [
     'comparison-car-label',
-    car?.isBic ? 'is-bic' : ''
+    car?.isBic ? 'is-bic' : '',
+    car?.isOurCar ? 'is-our-car' : ''
   ].filter(Boolean).join(' ');
   const number = document.createElement('span');
   number.textContent = car?.carNumber ? `#${car.carNumber}` : fallback;
@@ -766,6 +768,8 @@ function setComparisonTab(index) {
 function renderComparisonLapRows(cars) {
   const container = $('comparison-tab-laps');
   if (!container) return;
+  const previousScrollTop = container.scrollTop || 0;
+  container.classList.toggle('comparison-tab-scrollable', (cars || []).length >= COMPARISON_SCROLL_THRESHOLD);
   container.innerHTML = '';
   appendComparisonRow(container, '', [
     Object.assign(document.createElement('span'), { textContent: 'Best lap' }),
@@ -779,6 +783,7 @@ function renderComparisonLapRows(cars) {
       comparisonMetricCell(comparisonMetricByLabel(car.metrics, 'Last 10'))
     ], 'comparison-data-row', comparisonCarLabel(car));
   });
+  container.scrollTop = previousScrollTop;
 }
 
 function comparisonAverageChip(item) {
@@ -858,6 +863,8 @@ function comparisonSectorCell(item, showDelta) {
 function renderComparisonSectorRows(cars) {
   const container = $('comparison-tab-sectors');
   if (!container) return;
+  const previousScrollTop = container.scrollTop || 0;
+  container.classList.toggle('comparison-tab-scrollable', (cars || []).length >= COMPARISON_SCROLL_THRESHOLD);
   container.innerHTML = '';
   appendComparisonRow(container, '', [
     (() => {
@@ -887,6 +894,7 @@ function renderComparisonSectorRows(cars) {
       comparisonSectorCell(sectors[2], !car.isOurCar)
     ], 'comparison-sector-row', comparisonCarLabel(car));
   });
+  container.scrollTop = previousScrollTop;
 }
 
 function renderComparisonMatrix(matrix) {
