@@ -290,7 +290,7 @@ select:focus-visible {
   min-height: 64px;
   padding: 8px 12px;
   display: grid;
-  grid-template-columns: 1.1fr .75fr .5fr 1.35fr .7fr .65fr auto;
+  grid-template-columns: 1.65fr .65fr .45fr 1.25fr .65fr .58fr auto;
   gap: 12px;
   align-items: center;
 }

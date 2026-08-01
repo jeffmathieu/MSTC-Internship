@@ -542,17 +542,38 @@ function compactSessionStatus(session = {}, hasTimingRows = false) {
   return raw ? raw.toUpperCase() : '—';
 }
 
+// Formats the already-calculated automatic-stop countdown for the header.
+// Math.ceil prevents the display from showing 0:00 before the deadline passes.
+function formatFinishCountdown(remainingMs) {
+  const numeric = Number(remainingMs);
+  if (!Number.isFinite(numeric)) return '—';
+  const totalSeconds = Math.max(0, Math.ceil(numeric / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    : `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
 // Updates the session summary card in the top information strip.
-function updateSession(session = {}, hasTimingRows = false) {
+function updateSession(session = {}, hasTimingRows = false, finishCountdown = null) {
+  const finishing = Boolean(finishCountdown?.active);
   setText('session-name', session.sessionName || session.pageTitle || '—');
-  setText('session-time', session.timeToGo || session.pageUpdated || '—');
+  setText('session-time-label', finishing ? 'Auto stop' : 'Time left');
+  setText(
+    'session-time',
+    finishing
+      ? formatFinishCountdown(finishCountdown.remainingMs)
+      : session.timeToGo || session.pageUpdated || '—'
+  );
   const statusBlock = $('session-status-block');
-  setText('status-text', compactSessionStatus(session, hasTimingRows));
+  setText('status-text', finishing ? '🏁 FINISH' : compactSessionStatus(session, hasTimingRows));
   if (statusBlock) {
     const raceControl = String(session.flag || session.statusText || '').toLowerCase();
     statusBlock.classList.remove('flag-caution', 'flag-red');
-    if (/red flag|\bred\b/.test(raceControl)) statusBlock.classList.add('flag-red');
-    else if (/safety\s*car|full\s*course\s*yellow|\bfcy\b|code\s*60|yellow/.test(raceControl)) statusBlock.classList.add('flag-caution');
+    if (!finishing && /red flag|\bred\b/.test(raceControl)) statusBlock.classList.add('flag-red');
+    else if (!finishing && /safety\s*car|full\s*course\s*yellow|\bfcy\b|code\s*60|yellow/.test(raceControl)) statusBlock.classList.add('flag-caution');
   }
 }
 
@@ -1235,7 +1256,7 @@ function render(state) {
   if ($('analysis-condition')) $('analysis-condition').value = normalizeAnalysisSelectValue($('analysis-condition').value);
   syncConditionControlTitles();
   setStatus(currentState.status, currentState.message);
-  updateSession(currentState.session || {}, rows.length > 0);
+  updateSession(currentState.session || {}, rows.length > 0, currentState.finishCountdown);
   $('row-count').textContent = String(rows.length);
   $('history-count').textContent = String(history.length);
   $('last-update').textContent = currentState.lastSuccessAt ? new Date(currentState.lastSuccessAt).toLocaleTimeString() : '—';

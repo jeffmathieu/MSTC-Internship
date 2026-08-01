@@ -10,7 +10,7 @@ const {
   updateGapMemory
 } = require('../src/shared/gapMemory');
 
-assert.strictEqual(DEFAULT_PACE_WINDOW, 5);
+assert.strictEqual(DEFAULT_PACE_WINDOW, 3);
 assert.strictEqual(DEFAULT_PIT_SUPPRESSION_LAPS, 5);
 assert.strictEqual(carKey(null), '');
 assert.strictEqual(carKey(33), '33');
