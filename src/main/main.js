@@ -25,6 +25,7 @@ const {
   completedLaps,
   lapPaceEligible,
   representativePaceLaps,
+  sectorCaptureTransition,
   captureSectorFlags,
   driverStats,
   carStats,
@@ -58,6 +59,7 @@ const { buildTimingHighlights } = require('../shared/timingHighlights');
 const { resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalReportSettings } = require('../shared/storageSession');
 const { setupAutoUpdates } = require('./autoUpdater');
 const { setupAppLifecycle } = require('./appLifecycle');
+const { haltCollectorForCompletion } = require('./collectorCompletion');
 const { writeClosedStintArtifacts, writeEventSummaryArtifacts } = require('./stintReports');
 const {
   normalizeTrackCondition,
@@ -74,6 +76,7 @@ let liveWindow;
 const additionalDashboardWindows = new Map();
 const graphWindowsByCar = new Map();
 let pollTimer;
+let pollInFlight = false;
 let shouldCloseLiveWindow = false;
 let gapMemoryState = null;
 const pendingStintReports = new Set();
@@ -100,6 +103,10 @@ const knownLapKeys = new Set();
 // lap. When LAST changes, the previous row's sector values are the best sector
 // evidence we have for the lap that just completed.
 const latestLiveRowByCar = new Map();
+// A changed LAST value needs the previous snapshot exactly once to finish the
+// old lap. The next poll clears that evidence so FCY/SC sector flags cannot
+// leak into a new green lap when a provider temporarily repeats sector values.
+const sectorCaptureResetPendingByCar = new Set();
 const latestPitStateByCar = new Map();
 const latestFcyGapStateByCar = new Map();
 
@@ -634,11 +641,19 @@ function normalizeRowsForStorage(rows, context) {
 function annotateLiveSectorFlags(storageRows, context) {
   const currentFlag = String(context?.session?.flag || context?.sessionFlag || '');
   return storageRows.map((row) => {
-    const previous = latestLiveRowByCar.get(liveRowIdentity(row));
-    const flagged = captureSectorFlags(row, previous, currentFlag);
+    const carKey = liveRowIdentity(row);
+    const previous = latestLiveRowByCar.get(carKey);
+    const transition = sectorCaptureTransition(
+      previous,
+      row,
+      sectorCaptureResetPendingByCar.has(carKey)
+    );
+    if (transition.resetPending) sectorCaptureResetPendingByCar.add(carKey);
+    else sectorCaptureResetPendingByCar.delete(carKey);
+    const flagged = captureSectorFlags(row, transition.previousForCapture, currentFlag);
     return captureSectorConditions(
       flagged,
-      previous,
+      transition.previousForCapture,
       context?.trackCondition || 'unknown',
       context?.conditionPhaseId || ''
     );
@@ -1065,6 +1080,7 @@ function parserDebugFromNormalized(normalized, storageRows, context, lastError =
 function loadExistingHistory(settings) {
   knownLapKeys.clear();
   latestLiveRowByCar.clear();
+  sectorCaptureResetPendingByCar.clear();
   latestPitStateByCar.clear();
   latestFcyGapStateByCar.clear();
   const folder = ensureStorage(settings);
@@ -1260,7 +1276,10 @@ function saveLatestSnapshot(settings, normalized) {
 // Reads the hidden live timing page once, normalizes the data, updates history,
 // writes latest exports, and broadcasts state to the renderer.
 async function pollLivePage() {
-  if (!liveWindow || liveWindow.isDestroyed()) return;
+  // setInterval does not wait for an async callback. Prevent a slow page read
+  // or PDF build from allowing another poll to start concurrently.
+  if (pollInFlight || !liveWindow || liveWindow.isDestroyed()) return;
+  pollInFlight = true;
   collectorState.lastPollAt = new Date().toISOString();
   try {
     const settings = loadSettings();
@@ -1289,6 +1308,37 @@ async function pollLivePage() {
         ? 'finish-countdown-expired'
         : '';
     const shouldFinalizeAutomatically = Boolean(automaticCompletionReason) && !automaticCompletionHandled;
+    if (shouldFinalizeAutomatically) {
+      automaticCompletionHandled = true;
+      const completionMessage = automaticCompletionReason === 'all-class-cars-finished'
+        ? 'All cars in the followed class have finished.'
+        : 'Finish countdown elapsed after the primary car average lap plus 25% buffer.';
+
+      // Stop and publish first. Report generation and the native OK dialog can
+      // take an arbitrary amount of time and must never keep collection alive.
+      const haltErrors = haltCollectorForCompletion({
+        clearPolling: () => {
+          if (pollTimer) clearInterval(pollTimer);
+          pollTimer = null;
+        },
+        closeLiveSource: () => {
+          if (liveWindow && !liveWindow.isDestroyed()) {
+            shouldCloseLiveWindow = true;
+            liveWindow.close();
+          }
+        },
+        markFinished: () => {
+          collectorState = {
+            ...collectorState,
+            status: 'finished',
+            message: completionMessage,
+            finishCountdown
+          };
+        },
+        publishState: broadcastState
+      });
+      haltErrors.forEach(({ name, error }) => addError(error, `automaticCompletion:${name}`));
+    }
     collectorState.sessionTiming = updateSessionTiming(
       collectorState.sessionTiming,
       context?.session || normalized.session || {},
@@ -1313,8 +1363,12 @@ async function pollLivePage() {
     collectorState = {
       ...collectorState,
       mode: 'live',
-      status: normalized.status,
-      message: newLapCount ? `${normalized.message} Stored ${newLapCount} new completed lap(s).` : normalized.message,
+      status: shouldFinalizeAutomatically ? 'finished' : normalized.status,
+      message: shouldFinalizeAutomatically
+        ? collectorState.message
+        : newLapCount
+          ? `${normalized.message} Stored ${newLapCount} new completed lap(s).`
+          : normalized.message,
       lastSuccessAt: new Date().toISOString(), headers: normalized.headers, rows: analysisRows, session: normalized.session, diagnostics: normalized.diagnostics,
       storage: storageInfo(settings), analyticsSummary, lapPredictionsByCar, pitstopPlansByCar, gapMemory: gapMemoryState, stintState,
       sessionTiming: collectorState.sessionTiming,
@@ -1325,23 +1379,20 @@ async function pollLivePage() {
       snapshots: [{ at: new Date().toISOString(), checksum: hashObject(analysisRows), rowCount: analysisRows.length, newLapCount }, ...collectorState.snapshots].slice(0, 20)
     };
     if (shouldFinalizeAutomatically) {
-      automaticCompletionHandled = true;
-      if (pollTimer) clearInterval(pollTimer);
-      pollTimer = null;
-      if (liveWindow && !liveWindow.isDestroyed()) {
-        shouldCloseLiveWindow = true;
-        liveWindow.close();
+      try {
+        await showReportGeneratedMessage(stintState || {}, true);
+      } catch (error) {
+        // A failed or unanswered informational dialog must not change the
+        // already-finished collector state.
+        addError(error, 'showAutomaticReportGeneratedMessage');
       }
-      collectorState.status = 'finished';
-      collectorState.message = automaticCompletionReason === 'all-class-cars-finished'
-        ? 'All cars in the followed class have finished.'
-        : 'Finish countdown elapsed after the primary car average lap plus 25% buffer.';
-      await showReportGeneratedMessage(stintState || {}, true);
     }
   } catch (error) {
     collectorState.status = 'error'; collectorState.message = 'Could not read the live timing page. See Debug for details.'; addError(error, 'pollLivePage');
+  } finally {
+    pollInFlight = false;
+    broadcastState();
   }
-  broadcastState();
 }
 
 // Returns user-facing paths for the Debug/Storage UI. Add new exported files

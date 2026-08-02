@@ -65,6 +65,22 @@ function isGreenFlag(value) {
   return !text || /green/.test(text);
 }
 
+// Decides which previous live snapshot may still contribute sector metadata.
+// On the poll where LAST changes, the previous snapshot belongs to the lap that
+// just finished and must remain available so an FCY/SC sector is not lost. On
+// the following poll, that same snapshot is stale evidence from the old lap and
+// must be ignored, even when the timing provider is still showing identical
+// sector values. `resetPending` is stored per car by the main process.
+function sectorCaptureTransition(previous = null, row = {}, resetPending = false) {
+  const previousLastLap = String(previous?.lastLap || '');
+  const currentLastLap = String(row?.lastLap || '');
+  const completedLapChanged = Boolean(previous && currentLastLap && currentLastLap !== previousLastLap);
+  return {
+    previousForCapture: resetPending ? null : previous,
+    resetPending: completedLapChanged
+  };
+}
+
 // Captures the global race-control flag when a sector value first appears in a
 // live row. Unchanged values keep their original flag until the completed lap
 // is stored, even if race control changes later in the same lap.
@@ -680,6 +696,7 @@ return {
   median,
   isNeutralizedFlag,
   normalizedManualLapStatus,
+  sectorCaptureTransition,
   captureSectorFlags,
   lapPaceEligible,
   representativePaceLaps,

@@ -4,6 +4,7 @@ const {
   average,
   median,
   isNeutralizedFlag,
+  sectorCaptureTransition,
   captureSectorFlags,
   lapPaceEligible,
   representativePaceLaps,
@@ -100,6 +101,63 @@ assert.strictEqual(freshGreenLapAfterFcy.sector3Flag, 'Green flag');
 assert.strictEqual(freshGreenLapAfterFcy.sector1Eligible, 'true');
 assert.strictEqual(freshGreenLapAfterFcy.sector2Eligible, 'true');
 assert.strictEqual(freshGreenLapAfterFcy.sector3Eligible, 'true');
+
+// GetRaceResults regression: after an FCY lap, the provider can keep showing
+// the same completed sector values for one or more green polls. The boundary
+// poll may use the old snapshot to close lap 7, but the next poll must drop it
+// so laps 8 and 9 cannot inherit FCY flags and disappear from averages/graphs.
+const fcyLap7Snapshot = captureSectorFlags({
+  lastLap: '3:01.747',
+  sector1: '55.000',
+  sector2: '1:20.000',
+  sector3: '46.747'
+}, null, 'Full Course Yellow');
+const lap8Boundary = {
+  lastLap: '1:50.821',
+  sector1: '55.000',
+  sector2: '1:20.000',
+  sector3: '46.747'
+};
+const boundaryTransition = sectorCaptureTransition(fcyLap7Snapshot, lap8Boundary, false);
+assert.strictEqual(boundaryTransition.previousForCapture, fcyLap7Snapshot);
+assert.strictEqual(boundaryTransition.resetPending, true);
+const capturedBoundary = captureSectorFlags(
+  lap8Boundary,
+  boundaryTransition.previousForCapture,
+  'Green flag'
+);
+assert.strictEqual(capturedBoundary.sector1Flag, 'Full Course Yellow');
+
+const heldGreenPollTransition = sectorCaptureTransition(capturedBoundary, lap8Boundary, true);
+assert.strictEqual(heldGreenPollTransition.previousForCapture, null);
+assert.strictEqual(heldGreenPollTransition.resetPending, false);
+const greenLap8Snapshot = captureSectorFlags(
+  lap8Boundary,
+  heldGreenPollTransition.previousForCapture,
+  'Green flag'
+);
+assert.strictEqual(greenLap8Snapshot.sector1Flag, 'Green flag');
+assert.strictEqual(greenLap8Snapshot.sector2Flag, 'Green flag');
+assert.strictEqual(greenLap8Snapshot.sector3Flag, 'Green flag');
+assert.strictEqual(greenLap8Snapshot.sector1Eligible, 'true');
+assert.strictEqual(greenLap8Snapshot.sector2Eligible, 'true');
+assert.strictEqual(greenLap8Snapshot.sector3Eligible, 'true');
+
+const lap9Boundary = {
+  lastLap: '1:48.268',
+  sector1: '34.993',
+  sector2: '39.507',
+  sector3: '33.768'
+};
+const lap9Transition = sectorCaptureTransition(greenLap8Snapshot, lap9Boundary, false);
+const greenLap9Snapshot = captureSectorFlags(
+  lap9Boundary,
+  lap9Transition.previousForCapture,
+  'Green flag'
+);
+assert.strictEqual(greenLap9Snapshot.sector1Flag, 'Green flag');
+assert.strictEqual(greenLap9Snapshot.sector2Flag, 'Green flag');
+assert.strictEqual(greenLap9Snapshot.sector3Flag, 'Green flag');
 const fcyDuringS1 = captureSectorFlags({ lastLap: '3:01.000', sector1: '', sector2: '', sector3: '' }, null, 'Full Course Yellow');
 assert.strictEqual(fcyDuringS1.sector1Flag, 'Full Course Yellow');
 assert.strictEqual(fcyDuringS1.sector1Eligible, 'false');
