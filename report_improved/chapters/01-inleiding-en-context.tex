@@ -1,0 +1,44 @@
+% !TeX root = ../main.tex
+
+\chapter{Inleiding en context}
+\label{chap:context}
+
+\section{Motorsport en Endurancewedstrijden}
+Motorsport is een van de meest complexe en dynamische wedstrijdomgevingen. Een endurancewedstrijd maakt dit nog complexer door de lange duur, meerdere piloten per wagen, verplichte pitstops binnen bepaalde tijdsvensters, neutralisaties van de race, wisselde weersomstandigheden, verschillende klasses van wagens die tegelijk op de baan zijn, de gevreesde referentietijd\footnote{Binnen het \emph{Belcar Endurance Championship} geldt per klasse een minimale referentierondetijd die niet onderschreden mag worden. Wanneer een wagen sneller rijdt dan deze limiet, kan dit leiden tot een tijdstraf of, in ernstigere gevallen, tot diskwalificatie. Daarnaast kan de wagen verplicht worden om in een hogere klasse uit te komen, wat competitief nadelig is omdat er dan tegen snellere wagens gereden moet worden.} en de noodzaak om tijdens de race een voorbepaalde strategie te volgen en aan te moeten passen naarmate de race vordert. Dit laatste aspect maakt endurancewedstrijden, ook voor mij persoonlijk, zeer interessant aangezien beslissingen in real-time tijdens de race genomen moeten worden.
+
+Het Belcar Endurance Championship is een Belgische endurancecompetitie waarin teams gedurende langere races niet alleen op snelheid, maar ook op strategie, betrouwbaarheid en consistente rondetijden worden beoordeeld. Omdat verschillende klassen tegelijk op hetzelfde circuit rijden, is het voor een team belangrijk om vooral de relevante tegenstanders binnen de eigen klasse correct op te volgen. Voor MSTC, dat met wagen 33 uitkomt in de Club Challenge-klasse, betekent dit dat live informatie over positie in klasse, rondetijden, sectortijden, pitstops en verschillen met klassegenoten cruciaal is om tijdens de race onderbouwde beslissingen te nemen.
+
+Wat het nu dus moeilijk maakt is hoe de timinginformatie van de officiële timingpaginas van de endurancewedstrijden een globaal overzicht geven van de race en dus niet enkel van de klasse die we volgen. Zoals we in voorbeeld~\ref{fig:timingdata1} kunnen zien, zitten alle klasses door elkaar en is het dus moeilijk om te volgen waar de directe concurrenten zich bevinden. De timingpagina is dan ook ontworpen voor een algemeen publiek en voor het wedstrijdverloop als geheel. Maar voor het team is het belangrijk om te vergelijken hoe de huidige piloot het doet ten opzichte van zijn teamgenoten, hoe het tempo van de andere auto's in de klasse evolueert, waar de wagen vermoedelijk zal uitkomen na een pitstop en of een voorspelde rondetijd de opgelegde referentietijd nadert. Om deze informatie allemaal handmatig uit deze algemene timingpagina te halen is bijna onmogelijk.
+
+
+\section{Stageplaats en opdracht}
+Jan Wouters, mijn dagelijkse begeleider tijdens deze stage, is de oprichter van MotorSport Training Center (MSTC). MSTC is een bedrijf dat zich richt op het trainen van piloten en teams in de motorsport. Naast het aanbieden van trainingen en coaching, ondersteunt MSTC ook teams tijdens (endurance)wedstrijden. 
+
+Jan zelf is al jarenlang een vaste waarde binnen de Belcar-omgeving en het Belgische racecircuit. Tijdens raceweekends neemt hij een brede rol op: hij bereidt de organisatie mee voor, stemt af met stewards en race control, coacht piloten tijdens de wedstrijd en neemt strategische beslissingen op basis van de beschikbare timinginformatie. Die ervaring en reputatie maken hem tot een belangrijke figuur binnen de Belgische endurancewereld. Zelf kijk ik al lang op naar wat Jan binnen de Belgische motorsport heeft opgebouwd, onder meer met meerdere klasseoverwinningen in de \emph{24 Hours of Zolder} en sterke resultaten in het \emph{Belcar Endurance Championship}. Het was daarom een grote eer om mijn stage bij hem te mogen doen en met deze opdracht een concrete bijdrage te leveren aan de werking van MSTC en het team.
+
+Door zijn ervaring werd Jan ook benaderd door Bert Longin, eveneens een bekende naam in de Belgische motorsport, om mee een team van bekende Vlamingen te begeleiden in de voorbereiding op en tijdens de \emph{24 Hours of Zolder 2026}. Voor die race zal Jan niet alleen wagen 33 van MSTC opvolgen, maar dus ook deze tweede wagen coachen. Het gelijktijdig opvolgen van meerdere wagens tijdens een endurancewedstrijd is bijzonder moeilijk wanneer men enkel beschikt over de standaard timingpagina. De timingpagina bevat wel de officiële tijden en posities, maar biedt weinig ondersteuning voor teamgerichte vergelijkingen, stintopvolging, pitstopplanning en strategische interpretatie. Vanuit die praktische nood ontstond de vraag om een dashboard te ontwikkelen dat deze live timingdata omzet in bruikbare informatie voor Jan zelf.
+
+Het concrete doel van de opdracht was dus om een desktopdashboard te ontwikkelen dat tijdens raceweekends naast de officiële timingpagina kan worden gebruikt. De applicatie moest live timingdata opvolgen, relevante racehistoriek lokaal bewaren en deze informatie vertalen naar inzichten die specifiek nuttig zijn voor het eigen team. Daarbij ging het niet enkel om het tonen van tijden, maar vooral om het ondersteunen van beslissingen rond tempo, stintopvolging, klassevergelijkingen en pitstopstrategie. Omdat het dashboard tijdens wedstrijden voornamelijk op Windows gebruikt zal worden, maar tijdens de stage hoofdzakelijk op macOS werd ontwikkeld, waren platformonafhankelijkheid, eenvoudige installatie en betrouwbaar herstel na een onderbreking vanaf het begin belangrijke aandachtspunten.
+
+\section{Positie van MSTC binnen de Belgische motorsport}
+
+MSTC combineert pilotenbegeleiding en training met ondersteuning tijdens raceweekends. De mogelijke klanten bestaan voornamelijk uit amateur- en semiprofessionele piloten en kleinere raceteams die nood hebben aan coaching en strategische ondersteuning.
+
+Mogelijke concurrenten zijn andere raceopleidingen, zelfstandige pilootcoaches en teams die zelf vergelijkbare begeleiding aanbieden. MSTC onderscheidt zich vooral door de combinatie van training en directe ondersteuning tijdens wedstrijden. De domeinkennis van Jan Wouters en zijn ervaring binnen het \emph{Belcar Endurance Championship} zorgen ervoor dat de begeleiding nauw aansluit bij concrete situaties op het circuit.
+
+De regionale context speelt daarbij een belangrijke rol. MSTC is sterk verbonden met Circuit Zolder en de Belgische endurancewereld, met de \emph{24 Hours of Zolder} als het belangrijkste evenement. Ook wedstrijden op circuits zoals Spa-Francorchamps maken deel uit van deze omgeving. Deze lokale aanwezigheid zorgt voor korte communicatielijnen en gespecialiseerde ondersteuning, maar betekent tegelijk dat veel kennis bij een beperkt aantal personen zit.
+
+\section{Doelstellingen}
+De uiteindelijke opdracht bestond uit de volgende hoofddoelen:
+
+\begin{itemize}
+  \item Live timingdata van meerdere websites\footnote{Aangezien de races van de Belcar Endurance Championship op meerdere circuits gereden worden, zijn er circuitafhankelijke timingpaginas die gebruikt worden. Het is dus belangrijk dat het niet uitmaakt welke timingpagina gebruikt word voor het dashboard zelf.} betrouwbaar lezen en naar één intern formaat vertalen.
+  \item Een historiek van rondes, sectortijden en sessiecontext lokaal opslaan.
+  \item Meerdere wagens kunnen volgen zonder de timingwebsite meerdere keren te bewaren.
+  \item Analyses berekenen voor race, kwalificatie en vrije training.
+  \item Actuele rondevoorspellingen en configureerbare referentietijden tonen.
+  \item Een pitstopvenster en een projectie van de positie na een pitstop aanbieden.
+  \item Neutralisaties, pitstops, outlaps en onvolledige data correct behandelen.
+  \item De logica modulair en automatisch testbaar maken.
+  \item Installaties en updates voor macOS en Windows via GitHub Releases ondersteunen.
+\end{itemize}

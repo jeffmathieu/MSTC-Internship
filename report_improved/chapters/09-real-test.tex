@@ -1,0 +1,132 @@
+% !TeX root = ../main.tex
+
+\chapter{Praktijktesten op het circuit}
+\label{chap:spa}
+
+\section{Context van het eerste raceweekend}
+Het dashboard werd tijdens een volledig raceweekend in Spa gebruikt met "RIS Timing" als timingprovider. Dit was de
+eerste en enige officiële praktijktest tijdens een raceweekend vóór de \emph{24 Hours of Zolder}.
+Vrijdag kon de
+vrije training succesvol worden gevolgd en werd de ondersteuning voor een tweede timingprovider in
+een echte omgeving getest. De kwalificatie verliep anders dan gepland: door motorschade kon de
+voorziene wagen niet verder worden gebruikt. Het team bouwde gedurende de nacht een ouder Mazda
+MX-5-model op om toch aan de race deel te nemen. Deze wagen had ongeveer 50 pk minder vermogen en
+reed op oude banden uit noodzaak. De omstandigheden waren daardoor niet geschikt om de absolute prestaties van
+de oorspronkelijk geplande wagen te beoordelen, maar leverden wel waardevolle circuitervaring voor
+de nieuwe piloot en een realistische stresstest voor de applicatie.
+
+Deze test was relevant met het oog op de 24 uur van Zolder, waarvoor het dashboard meerdere teams
+moet kunnen volgen. Samen met Jan ondersteunde ik enkele strategische afwegingen. Daarnaast gaf hij
+gerichte feedback over de gebruikersinterface, die ik na het raceweekend meteen kon verwerken.
+
+\section{Uitgevoerde tests en verzamelde data}
+Tijdens practice, pre-qualifying, qualifying en race werden afzonderlijke sessiemappen bijgehouden. De opgeslagen data bestond uit rondehistoriek, analytics,
+rondevoorspellingen, pitstopplannen en sessiemetadata. Tijdens de race werden onder andere de
+volgende onderdelen gebruikt:
+
+\begin{itemize}
+  \item parsing van RIS Timing, inclusief sessiegegevens, pilootnamen, sectoren, GAP en INT
+  \item langdurige opslag en hervatting van rondehistoriek
+  \item piloot-, team- en klassevergelijkingen
+  \item rondevoorspelling en referentietijden
+  \item gaps naar klassewagens en catchindicaties
+  \item verplichte pitstops en de voorspelde positie na een pitstop
+  \item grafieken en meerdere gevolgde wagens
+\end{itemize}
+
+De test bewees dat de volledige keten gedurende een echte sessie data kon verzamelen en bewaren. Ze
+bracht tegelijk fouten aan het licht die niet voldoende zichtbaar waren in demo's en zelfgeschreven unit tests. De Spa-data wordt daarom niet alleen als resultaat bewaard, maar ook als regressiedataset voor volgende versies.
+
+\section{Belangrijkste bevindingen}
+\subsection{Vlagcontext en geldige rondes}
+De belangrijkste datakwaliteitsfout was het moment waarop FCY-status aan een ronde
+en sector wordt gekoppeld. Wanneer FCY begint terwijl een wagen in sector 2 rijdt, moet sector 2
+onmiddellijk als geneutraliseerd worden gemarkeerd. Sector 1 blijft geldig wanneer die volledig
+onder groen werd gereden maar de volledige ronde mag niet meer meetellen als representatieve rondetijd.
+
+Een concreet voorbeeld kwam in ronde 2. In \code{lap_history.jsonl} staat de afgeronde ronde
+met \code{lapFlag = Green flag}, terwijl de opgeslagen sectorflags FCY aangaven. De sectoren werden
+hierdoor al uitgesloten, maar de rondecontext is intern niet consistent. Daarnaast moeten pit-in- en
+outlaps en duidelijke tempo-outliers door exact dezelfde centrale selectieregel worden uitgesloten.
+De test toonde dus dat een globale sessieflag op het moment van afronden niet volstaat maar dat de applicatie
+ook de sector waarin iedere gevolgde wagen zich bevindt moet onthouden wanneer de vlag verandert.
+
+\subsection{Gemiddelden en vergelijkingseenheden}
+De getoonde gemiddelden waren op enkele momenten hoger dan een handmatige controle deed verwachten.
+Waarschijnlijke oorzaken zijn onvolledige vlagcontext en pitgerelateerde ronden die niet overal
+identiek gefilterd werden. Bovendien kon dezelfde wagen tegelijk als beste wagen in de klasse en als
+geselecteerde vergelijkingswagen verschijnen, terwijl beide vakken toch een ander gemiddelde
+toonden. Dat verschil ontstaat wanneer het ene vak een volledige wagenhistoriek gebruikt en het
+andere een actuele piloot of stint, zonder dit duidelijk te benoemen.
+De gewenste oplossing is één volledig analyticsdocument met benoemde statistieken en
+selectiecriteria. Dashboard, grafieken en rapportage moeten dezelfde waarden uit dat document
+gebruiken.
+
+\subsection{Gaps en pitstopprojectie}
+Gaps naar de voorliggende en achterliggende klassewagen veranderden tijdens de race te sterk om
+operationeel betrouwbaar te zijn. RIS Timing werkte met GAP tot de leider en INT tot de vorige
+wagen dus tussenliggende wagens uit andere klassen moesten in de intervalketen worden opgenomen.
+Rondeachterstanden maakten een directe omzetting bovendien grof en gevoelig voor het meetmoment.
+Voor volgende iteraties is een gapgeheugen nodig. Een gap wordt pas als nieuwe stabiele waarde
+gepubliceerd wanneer de betrokken wagen een nieuw meetpunt passeert, bij voorkeur de
+start-finishlijn. De UI moet groot de laatst bevestigde gap tonen, met daaronder het verschil tussen
+de recentste rondetijden en een afzonderlijke catchtrend. Een wagen die al enige tijd (5 van onze rondes hebben we voor nu gekozen) in de pits staat, moet tijdelijk als niet-actieve tegenstander worden gemarkeerd in
+plaats van een misleidende catchtijd te krijgen. Dezelfde stabiele gapreeks kan later de
+pitstopprojectie en een gap-over-timegrafiek voeden.
+
+
+\section{Nieuwe requirements uit de praktijktest}
+De test leverde naast correcties ook drie nieuwe uitbreidingswensen op:
+
+\begin{enumerate}
+  \item Een piloottimer met duur van de huidige stint en totale rijtijd per piloot. Want ook dit is belangrijk tijdens endurance races, piloten mogen niet langer dan een bepaalde periode in de auto zitten volgens de regels. Pilootwissels
+        vormen hier de stintgrens, sessietijd en timestamps leveren de duur.
+  \item Een scrollbare recente-rondenstrook met rondenummer en kleurstatus: pit-in met rode
+        markering en letter P, outlap rood, FCY/SC geel, snelste eigenronde groen en als deze de snelste ronde van alle auto's in de klasse is deze paars (dit zijn conventies uit alle niveaus in de motorsport). De volledige historie blijft beschikbaar,
+        terwijl standaard slechts de laatste tien tot twintig ronden zichtbaar zijn.
+  \item Automatische PDF-rapportage per stint en na de race. Een stintdocument bevat ronde- en
+        sectortijden, geldige gemiddelden, vergelijking met teamgenoten en de gapevolutie. Bij een
+        pilootwissel kan automatisch een map zoals bijvoorbeeld \code{STINT_2_JANSSENS_Robbe} worden gemaakt. Een
+        raceoverzicht combineert de stintresultaten per piloot en voor het team.
+\end{enumerate}
+
+Deze rapportage is technisch haalbaar omdat de onderliggende gegevens al lokaal worden opgeslagen.
+Voor betrouwbare automatische generatie moeten eerst stintdetectie, vlagcontext en centrale
+analytics eenduidig zijn, anders zou een verzorgd PDF-document dezelfde foutieve selectie
+reproduceren.
+
+\section{Prioriteiten na Spa}
+De vervolgvolgorde wordt bepaald door databetrouwbaarheid, niet door zichtbaarheid in de interface:
+
+\begin{enumerate}
+  \item vlagtransities per wagen en sector correct registreren en alle pacefilters centraliseren
+  \item één persistent analyticsmodel invoeren
+  \item stabiele gaps op meetpunten bewaren en gebruiken voor catch- en pitstopprojecties
+  \item stintdetectie, pilootduur en recente-rondenstrook toevoegen
+  \item automatische stint- en racerapporten genereren
+  \item pas daarna de geplande UI-herwerking uitvoeren op basis van dezelfde opgeslagen
+        viewmodellen
+\end{enumerate}
+
+\section{Aanvullende tests tussen Spa en Zolder}
+Omdat Spa de enige officiële praktijktest was, konden nieuwe functies die daarna werden toegevoegd
+niet meer tijdens een vergelijkbaar raceweekend worden getest. Dat maakte het moeilijk om met
+zekerheid te bepalen of nieuwe berekeningen en interfacewijzigingen ook onder echte racedruk correct
+zouden blijven werken. De opgeslagen Spa-data bleef bruikbaar voor regressietests, maar bevatte
+uiteraard niet elke situatie die tijdens een 24-uursrace kan voorkomen.
+Om toch voortdurend met veranderende timingdata te testen, gebruikte ik daarom veelvuldig de live
+demo van GetRaceResults\footnote{https://livetiming.getraceresults.com/demo\#screen-results}. Die demo maakte het mogelijk om de parser, de live updates en de
+dashboardweergave herhaaldelijk te controleren zonder op een volgend officieel raceweekend te moeten
+wachten. Ze vervangde echter geen volledige praktijktest want de demo bood uiteraard niet dezelfde combinatie van
+meerdere teams, pitstops, neutralisaties, pilootwissels en operationele tijdsdruk als tijdens een
+echte endurancewedstrijd.
+Daarnaast werden gerichte unit tests gebruikt om zoveel mogelijk edge cases af te dekken. Daarbij
+werd onder meer gecontroleerd hoe de applicatie omgaat met ontbrekende of onvolledige sectoren,
+pit-in- en outlaps, vlagovergangen, rondeachterstanden, wisselende piloten en tegenstanders die
+langdurig in de pits staan. Deze tests vergrootten het vertrouwen in afzonderlijke berekeningen,
+maar konden niet volledig aantonen hoe alle componenten gedurende 24 uur samen zouden functioneren.
+Juist daardoor bleef er voor de \emph{24 Hours of Zolder} de nodige spanning want het was tegelijk het
+einddoel van de stage en de eerste keer dat de nieuwste functies in hun volledige gebruikscontext
+zouden worden ingezet.
+
+\input{chapters/11-24h-zolder}

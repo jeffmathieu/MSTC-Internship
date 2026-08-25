@@ -1,0 +1,56 @@
+# Report TODO
+
+Gebruik dit bestand als snelle checklist voor dingen die nog moeten worden
+aangevuld of nagekeken in het stageverslag.
+
+Syntax:
+- `[ ]` = nog te doen
+- `[x]` = klaar
+- Voeg korte notities onder een punt toe als je later details wil onthouden.
+
+## Inleiding
+
+- [ ] Belcar Endurance Championship kort introduceren als concrete racecontext.
+- [ ] Duidelijk maken waarom gewone timingwebsites niet genoeg zijn voor een
+      race-engineer.
+- [ ] Link leggen tussen MSTC, endurancewedstrijden en de nood aan live analyse.
+
+## Praktijkvalidatie Spa
+
+- [ ] Exact invullen wat tijdens Spa getest werd.
+- [ ] Screenshots of voorbeelden toevoegen indien nuttig.
+- [ ] Duidelijk maken welke fouten uit Spa later tot verbeteringen hebben geleid.
+
+## Technische Beschrijving
+
+- [ ] Controleren of RIS Timing en GetRaceResults allebei duidelijk uitgelegd zijn.
+- [ ] Nakijken of data-opslag, analytics en renderer goed gescheiden beschreven zijn.
+- [ ] Vermelden dat averages, pitstops, stints en rapportage modulair opgebouwd zijn.
+
+## Tests En Oplevering
+
+- [ ] Teststrategie korter en duidelijker maken indien nodig.
+- [ ] GitHub Actions/releaseproces nakijken op correcte versie-informatie.
+- [ ] Vermelden welke zaken nog niet volledig automatisch getest zijn.
+
+## Taal En Layout
+
+- [ ] Alle TODO's in de hoofdstukken zoeken en oplossen.
+- [ ] Lange zinnen korter maken.
+- [ ] Figuren, tabellen en appendix-verwijzingen controleren.
+- [ ] PDF opnieuw builden en visueel nakijken.
+
+## Voor indienen
+
+- [ ] Zorgen dat alle hoofdstukken niet meer uitgecomment zijn (ook abstract als we die houden in 00-frontmatter).
+
+
+## Stukjes tekst die ergens toegevoegd moeten worden
+
+Jan Wouters, de race-engineer van het MSTC-team, heeft mij tijdens deze stage veel bijgeleerd over de complexiteit van deze endurancewedstrijden en de noodzaak van een goed dashboard dat hem kan ondersteunen bij het nemen van de juiste beslissingen tijdens de race. Ook heb ik zeer veel bewondering gekregen voor Jan in hoe hij voor het dashboard alle raceinformatie zelf bijhield en analyseerde, en hoe hij dit allemaal in zijn hoofd bijhield tijdens de race. Het was dan ook een zeer interessante uitdaging om een dashboard te ontwikkelen dat hem kan ondersteunen bij het nemen van de juiste beslissingen tijdens de race, en dat hem kan helpen om de race-informatie op een overzichtelijke manier te presenteren. 
+
+
+## Start Zaterdag 11 juli met dit
+
+- [ ] lees 10-conclusie en 11- na
+- [ ] beslissen of 06 en 07 in document moeten of weg mogen

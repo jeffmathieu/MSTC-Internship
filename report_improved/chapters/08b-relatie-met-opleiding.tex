@@ -1,0 +1,74 @@
+% !TeX root = ../main.tex
+
+\chapter{Relatie met de opleiding}
+\label{chap:opleiding}
+
+\section{Objectgericht programmeren: \emph{H01P1A}}
+Objectgericht programmeren uit de bachelor, dit vak noemt nu "modulair programmeren",
+was vooral belangrijk voor het denken in duidelijke modules met een afgebakende interface. Hoewel de
+applicatie in JavaScript en niet in Java geschreven is, bleef hetzelfde principe gelden: elk onderdeel
+moet een duidelijk doel hebben en via een beperkte API gebruikt kunnen worden. Daardoor kan een module
+zoals de pitstopplanner of de lapanalyse getest worden zonder de volledige Electron-app op te starten. Dit maakt het ook makkelijker om de applicatie uit te breiden met nieuwe functionaliteit, zoals een extra dashboard of een nieuwe timingprovider.
+
+Ook het idee van abstractie kwam sterk terug. Timingproviders leveren niet exact dezelfde kolommen of
+betekenissen op, maar de rest van de applicatie mag daar zo weinig mogelijk (of liefst geen) last van hebben. Daarom
+worden live rijen eerst genormaliseerd naar een uniform model. De verdere berekeningen werken dan op
+die abstractie in plaats van rechtstreeks op de HTML of CSV-structuur van een specifieke website. De
+aandacht uit het vak voor randgevallen, specificaties en systematisch testen was daarbij nuttig,
+zeker omdat veel bugs net ontstonden door uitzonderlijke situaties zoals ontbrekende sectoren,
+rondeachterstanden, safety-car-ronden of pit-in/outlaps.
+
+\section{Software-ontwerp: \emph{G0Q40C}}
+Dit bachelorvak was heel herkenbaar in de dagelijkse ontwikkeling van het dashboard. In dit vak lag
+de nadruk op objectgerichte ontwerpprincipes, ontwerppatronen, refactoring en testbaarheid. Tijdens de stage kwam dit vooral terug in de manier waarop de berekeningen uit de
+gebruikersinterface werden gehaald. De renderer mocht uiteindelijk enkel data tonen en interacties
+doorgeven, terwijl de echte domeinlogica in aparte modules terechtkwam. Door deze scheiding kon de logica onafhankelijk van de Electron-app afzonderlijk getest worden.
+
+Ook het iteratieve aspect van het vak sloot goed aan bij dit project. De applicatie groeide door
+feedback van de opdrachtgever en door praktijktesten. Regelmatig moest bestaande code worden
+herwerkt omdat een regel anders bleek te zijn dan eerst gedacht, bijvoorbeeld bij pitstops,
+rondeachterstanden of een andere timing-site. De principes rond refactoring en testen hielpen om zulke aanpassingen
+door te voeren zonder telkens het volledige systeem onoverzichtelijker te maken.
+
+
+\section{Software Architecture: \emph{H07Z9B}}
+Dit vervolgvak op software-ontwerp was nuttig omdat dit project al snel meer werd dan een verzameling losse
+scripts. De applicatie moest live timingdata ophalen, die data normaliseren, lokaal opslaan,
+berekeningen uitvoeren, een dashboard tonen, grafieken openen en achteraf PDF-rapporten genereren.
+Daarbij waren niet alleen de functionele eisen belangrijk, maar vooral ook de kwaliteitseisen:
+betrouwbaarheid tijdens een race, uitbreidbaarheid voor nieuwe timingproviders, leesbare opslag en
+herstel na een onderbreking.
+
+Het vak hielp me vooral om vooruit te denken over de architectuur van de applicatie en niet zomaar code te schrijven zonder idee. De keuze om parsing, opslag, analyses, pitstoplogica, voorspellingen en renderer-code van elkaar te scheiden
+komt rechtstreeks voort uit het idee dat architectuur de verdere levenscyclus van software bepaalt.
+Ook de trade-off tussen eenvoudige JSON/CSV-bestanden en een database werd niet enkel technisch
+bekeken, maar als architecturale keuze. De inspecteerbaarheid en herstelbaarheid waren voor deze
+toepassing belangrijker dan maximale databankfunctionaliteit.
+
+Nog een belangrijke les die ik geleerd heb in dit vak is dat het bijna onmogelijk is om voor elke mogelijke edge case voorbereid te zijn. Daarom is het belangrijk om een systeem te ontwerpen dat makkelijk aanpasbaar is en dat je makkelijk kan testen. Dit was ook een van de redenen waarom ik gekozen heb om de data lokaal op te slaan in plaats van in een database. Zo kon ik makkelijk de data inspecteren en testen zonder dat ik telkens een database moest opstarten.
+
+
+\section{Fundamentals of Human-Machine Interaction: \emph{H0V14A}}
+De raceomgeving stelt specifieke HCI-eisen. Een gebruiker heeft geen tijd om meerdere menu's
+te doorlopen of lange uitleg te lezen. Informatiehiërarchie, stabiele boxafmetingen en
+kleurstatussen moesten daarom samen worden ontworpen. Zo bleek het verschil tussen een dunne rode rand en een
+volledig lichtrood predictionvak operationeel relevant: de tweede variant trekt sneller
+aandacht.
+
+Tegelijk mag kleur niet de enige informatiedrager zijn. Labels, delta's en statustekst blijven
+zichtbaar. De keuze om grafieken in een afzonderlijk venster te plaatsen is eveneens een
+HCI-afweging. Detailanalyse blijft beschikbaar zonder het primaire racescherm permanent te belasten.
+
+Het vak was ook nuttig omdat het benadrukt dat interfaces moeten vertrekken vanuit gebruikers en
+taken, niet vanuit de interne datastructuur. De opdrachtgever had tijdens een race vooral nood aan
+snelle beslissingsinformatie: welke auto wordt gevolgd, wat is de huidige pace, hoeveel marge is er
+voor een pitstop en welke informatie vraagt onmiddellijk aandacht? Daarom werden veel onderdelen
+opnieuw ontworpen nadat bleek dat ze visueel te druk waren of tijdens de race niet snel genoeg
+begrepen werden. De opeenvolgende UI-versies waren dus in feite kleine cycli van ontwerpen, testen,
+feedback verzamelen en herwerken.
+
+
+\section{Bedrijfservaring: Computerwetenschappen: \emph{H04G0A}}
+Na mijn stage van vorige zomer bij Nyrstar, heb ik gezien hoe iteratieve processen in een echte bedrijfsomgeving te werk gaan. Hier heb ik geleerd om kleine deadlines te zetten voor kleine delen van het project. Door al deze kleine bijdragen ergens bij te houden, hou je een duidelijk overzicht van wat al gedaan is en wat nog moet gebeuren. Daarom heb ik hiervoor Github Project gebruikt. Hiermee hou je automatisch een \textit{Status Board} bij waarin duidelijk te zien is wat er al gebeurd is en wat er nog moet gebeuren. Ook kan je hier makkelijk een \textit{Roadmap} maken om een tijdlijn te geven van wat je wanneer wilt gaan doen. Ik vond dit een zeer handige tool aangezien voor een project als dit heel veel kleine TODO's heeft die als je ze nergens bijhoudt snel kunt vergeten.
+
+Ook heb ik tijdens mijn vorige stage veel geleerd over hoe ik feedback moet vragen en verwerken. Aangezien ik het dashboard niet voor mezelf heb gemaakt, was het zeer belangrijk dat ookal vond ik sommige aanpassingen niet nuttig, luisteren naar wat de klant wilt is in dit geval belangrijker. Maar bij Nyrstar heb ik ook geleerd dat ik mijn eigen input altijd mag geven aan de klant. Zo heb ik een aantal features kunnen toevoegen waar de klant nog niet aan gedacht had maar toch zeer handig vond eens ze er waren. Daarom zou ik iedereen aanmoedigen om beide stages te doen omdat je hier zoveel leert over hoe je in een echte bedrijfsomgeving te werk gaat en hoe je bijvoorbeeld met klanten moet omgaan. Het is een zeer waardevolle ervaring die je niet tijdens de lessen leert.

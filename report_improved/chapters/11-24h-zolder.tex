@@ -1,0 +1,77 @@
+% !TeX root = ../main.tex
+
+\section{Het einddoel: \emph{24 Hours of Zolder}}
+\label{chap:24hofZolder}
+
+\pending{Na de \emph{24 Hours of Zolder}: vervang het voorlopige racescenario door de werkelijke gebeurtenissen en resultaten. Beschrijf ook welke functies tijdens de race zijn gebruikt, welke beslissingen het dashboard ondersteunde, welke fouten of beperkingen zichtbaar werden en welke feedback Jan en de piloten gaven.}
+
+\subsection{Verwachte meerwaarde tijdens de race}
+De grootste meerwaarde tijdens de 24 uur van Zolder lag in het combineren van informatie die op de
+timingpagina verspreid of impliciet aanwezig is. Het dashboard toont niet alleen de actuele positie,
+maar vertaalt die naar teamgerichte vragen:
+
+\begin{itemize}
+  \item Hoe snel rijdt de huidige piloot tegenover zijn teamgenoten?
+  \item Hoe evolueert het tempo tegenover de beste wagen in de klasse?
+  \item Hoeveel marge is er tegenover de referentietijd?
+  \item Wanneer wordt een pitstop reglementair mogelijk of net riskant?
+  \item Waar komt de wagen vermoedelijk terug op de baan na een pitstop?
+  \item Welke rondes of sectoren zijn representatief genoeg om in gemiddelden te gebruiken?
+\end{itemize}
+
+Deze vragen zijn vooral belangrijk omdat Jan tijdens de race meerdere rollen tegelijk opneemt:
+strategie, coaching, communicatie en opvolging van het wedstrijdverloop. Een dashboard dat
+herhalende berekeningen automatisch uitvoert, verkleint de kans dat belangrijke details worden
+gemist wanneer er veel tegelijk gebeurt. De applicatie neemt geen beslissingen in de plaats van de
+race-engineer, maar maakt de beschikbare informatie sneller interpreteerbaar.
+
+\subsection{Wat tijdens de 24 uur getest moest worden}
+Hoewel de applicatie voor de race klaar was als werkende basis, moest de 24 uur van Zolder nog
+aantonen hoe goed ze standhield in haar uiteindelijke context. De belangrijkste validatiepunten
+waren:
+
+\begin{itemize}
+  \item Langdurige stabiliteit gedurende een volledige 24-uursrace.
+  \item Correcte opvolging van meerdere wagens tegelijk.
+  \item Betrouwbare stintdetectie bij alle pilootwissels.
+  \item Correcte behandeling van FCY, Safety Car, rode vlag en pitgerelateerde rondes.
+  \item Bruikbaarheid van de pitstopplanner wanneer snel beslist moet worden.
+  \item Leesbaarheid van het dashboard in een drukke raceomgeving.
+  \item Nut van de automatische stint- en racerapporten na de wedstrijd.
+\end{itemize}
+
+Vooral de combinatie van een lange looptijd, meerdere pitstops, wisselende wedstrijdsituaties en
+menselijke werkdruk kon niet volledig met korte tests worden nagebootst. De 24 uur van Zolder was
+daarom niet alleen het einddoel van de applicatie, maar ook de belangrijkste test van de
+ontwerpkeuzes.
+
+\begingroup
+\color{pendingred}
+\subsection{Voorlopig racescenario -- na de race te verifiëren}
+
+\textbf{De onderstaande tekst is een voorlopig scenario. Alle resultaten, gebeurtenissen en
+conclusies moeten na de race worden gecontroleerd en vervangen of bevestigd met de werkelijke
+gegevens.}
+\pending{TODO!!!}
+
+In dit voorlopige scenario startte de wagen vanaf poleposition. Enkele fouten tijdens de eerste uren
+kostten het team echter posities, waardoor de race al vroeg minder vanzelfsprekend verliep dan de
+startpositie deed vermoeden. De analyses in de applicatie bleven gedurende die fase een duidelijk
+overzicht geven van het eigen tempo, de relevante klassewagens en de verwachte gevolgen van
+strategische keuzes.
+
+Op een belangrijk moment liet de pitstopprojectie zien dat een pitstop een gunstige keuze was. De
+verwachting was dat de wagen na de stop net vóór de achterliggende concurrent opnieuw op het circuit
+zou komen. Daardoor kon het team de beslissing niet alleen op gevoel nemen, maar ook ondersteunen
+met de actuele gaps, rondetijden en de berekende rejoinpositie uit het dashboard.
+
+Het tempo lag uiteindelijk lager dan dat van enkele andere wagens en eerdere fouten bleven invloed
+hebben op het resultaat. Door het uitvallen van een concurrent eindigde het team volgens dit
+scenario toch op de derde plaats. Vanuit poleposition was dat niet het oorspronkelijk gehoopte
+resultaat, maar gezien het wedstrijdverloop kon het team tevreden terugkijken op een podiumplaats.
+
+Het raceweekend was bovendien belangrijk voor de zichtbaarheid van MSTC en Mazda. Het BV-team, mede
+onder leiding van Bert Longin, zorgde voor extra publieke aandacht. Daardoor bood de wedstrijd niet
+alleen sportieve en technische validatie voor de applicatie, maar ook publicitaire meerwaarde voor
+de betrokken organisaties.
+\endgroup

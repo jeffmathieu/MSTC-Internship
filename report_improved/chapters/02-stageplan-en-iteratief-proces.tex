@@ -1,0 +1,100 @@
+% !TeX root = ../main.tex
+
+\chapter{Van stageplan naar iteratieve ontwikkeling}
+\label{chap:requirements}
+
+Het oorspronkelijke stageplan beschreef een grotendeels opeenvolgend stappen van analyse,
+dataverwerking, dashboardontwikkeling, simulatie, voorspelling en testen. In de praktijk werd
+deze weekplanning slechts beperkt gevolgd. De algemene doelstelling bleef wel behouden: een lokaal
+dashboard ontwikkelen dat live timingdata omzet in bruikbare informatie voor een race-engineer.
+De concrete requirements, technische keuzes en prioriteiten veranderden wel tijdens de stage.
+
+\section{Oorspronkelijke planning en requirements}
+De eerste week was voorzien voor requirementsanalyse en onderzoek naar de beschikbare timingdata.
+Daarna zouden lokale opslag en replay worden ontwikkeld, gevolgd door het dashboard en de
+basisanalyses. De vierde week legde de nadruk op robuustheid en simulatie. Voor de vijfde week was
+een AI- of ML-gebaseerd voorspellingsmodel gepland en de laatste week was bestemd voor testing,
+documentatie en oplevering.
+
+De initiële requirements volgden dezelfde indeling. De app moest timingdata verzamelen en
+lokaal bewaren, historische of gesimuleerde sessies kunnen afspelen, rondetijden en sectoren
+analyseren, voorspellingen maken en de resultaten overzichtelijk tonen. Voor de opslag werd aan
+SQLite gedacht en voor de voorspelling aan een rolling average of regressiemodel.
+Deze requirements beschreven vooral het gewenste eindresultaat. De precieze schermindeling, de
+betekenis van verschillende timingvelden en de regels voor geldige analyses waren bij de start nog
+niet volledig bepaald. Het stageplan kon daardoor als vertrekpunt dienen, maar niet als volledige
+technische specificatie.
+
+\section{Werkelijke iteratieve werkwijze}
+
+De ontwikkeling zelf verliep als een herhaalde cyclus van overleg, implementatie, testen en bijsturen.
+Een concrete vraag van de opdrachtgever werd eerst vertaald naar een prototype of een
+kleine technische oplossing. Vervolgens werd gecontroleerd of de oplossingen werkten met synthetische data,
+historische racedata en/of een live timingdemo. De bevindingen uit die controle
+bepaalden welke aanpassing daarna de hoogste prioriteit kreeg.
+
+De requirements bleven daardoor gedurende de volledige stage evolueren. Sommige wensen konden pas
+worden beoordeeld wanneer ze zichtbaar waren op het dashboard. Andere vereisten veranderden omdat
+realistische timingdata meer uitzonderingen bevatte dan de eerste testscenario's. Een afwijking
+leidde daarom niet alleen tot een correctie in de code, maar soms ook tot het opnieuw
+formuleren wat de applicatie precies moest berekenen of tonen.
+
+Deze werkwijze betekende dat de geplande weekfasen sterk door elkaar liepen. Analyse, implementatie
+en validatie gebeurden vaak binnen dezelfde iteratie. Vooral na de praktijktest in
+Spa-Francorchamps kregen betrouwbaarheid en correctheid voorrang op uitbreidingen die oorspronkelijk
+voor die bepaalde week waren voorzien.
+
+\section{Begeleiding en feedbackmomenten}
+
+Omdat de begeleider vaak op verplaatsing werkte, gebeurde het grootste deel van de technische ontwikkeling zelfstandig van thuis uit. De begeleiding bestond daarom niet uit dagelijks fysiek overleg. De voortgang werd regelmatig besproken via e-mail, telefoon, met fysieke overlegmomenten en feedback tijdens raceweekends.
+Tijdens deze contactmomenten leverde Jan vooral domeinkennis vanuit zijn ervaring als race-engineer en coach. Hij verduidelijkte onder meer welke informatie tijdens een race belangrijk was, hoe bepaalde reglementen geïnterpreteerd moesten worden en welke weergave praktisch bruikbaar was. De technische implementatie en feedback werd vervolgens zelfstandig uitgewerkt.
+
+Werkende versies, schermafbeeldingen en concrete racescenario's bleken het meest geschikt om feedback te verzamelen. Een zichtbaar dashboard maakte sneller duidelijk welke informatie ontbrak of verwarrend werd weergegeven dan een, al dan niet verwarrende, technische beschrijving.
+
+\section{Vergelijking met het stageplan}
+
+Deze tabel vat de belangrijkste afwijkingen samen. Ze toont dat vooral de
+gekozen methoden en de uitvoeringsvolgorde veranderden, terwijl de kern van de opdracht hetzelfde
+bleef.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{2cm}XX@{}}
+\toprule
+\textbf{Onderdeel} & \textbf{Stageplan} & \textbf{Werkelijke uitvoering} \\
+\midrule
+Requirements &
+Voornamelijk analyseren in week 1. &
+Bleven tijdens de volledige stage evolueren door prototypes, overleg en tests. \\
+
+\addlinespace
+Opslag &
+Een lokale SQLite-database. &
+Inspecteerbare JSONL-, JSON- en CSV-bestanden met herstel vanuit een sessiemap. \\
+
+\addlinespace
+Replay en simulatie &
+Replay als onderdeel van de applicatie. &
+Historische data en live demo's als testmiddelen. \\
+
+\addlinespace
+Voorspelling &
+Een AI- of ML-model in week 5. &
+Een eenvoudig en uitlegbaar model op basis van recente sectortijden. \\
+
+\addlinespace
+Tests &
+Voornamelijk voorzien in week 6. &
+Doorlopend uitgevoerd met verschillende databronnen en praktijktests. \\
+\bottomrule
+\end{tabularx}
+\label{tab:stageplan-uitvoering}
+\end{table}
+
+De oorspronkelijke weekplanning werd dus maar beperkt gevolgd. Dat betekende niet dat de
+belangrijkste doelstellingen niet gehaald zijn. Timingdata werd lokaal opgeslagen, geanalyseerd en in
+een bruikbaar dashboard weergegeven. De geplande methoden voor opslag, replay en voorspelling
+werden aangepast aan wat binnen zes weken betrouwbaar realiseerbaar en testbaar bleek.
+De technische gevolgen van deze keuzes worden beschreven in de hoofdstukken over architectuur,
+dataverwerking en analyse. 
