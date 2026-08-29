@@ -18,28 +18,38 @@
   \node[
     anchor=north west,
     inner sep=0pt
-  ] at ([xshift=1.2cm,yshift=-1.2cm]current page.north west) {%
+  ] at ([xshift=1.2cm,yshift=-.2cm]current page.north west) {%
     \includegraphics[
       width=5.2cm
     ]{figures/kuleuven-logo.png}
   };
 
+  % MSTC logo rechtsboven
+  \node[
+    anchor=north east,
+    inner sep=0pt
+  ] at ([xshift=-1.2cm, yshift=-2.15cm]current page.north east) {%
+    \includegraphics[
+      width=3cm
+    ]{figures/MSTC.png}
+  };
+
   \end{tikzpicture}
 
   \centering
-  \vspace*{2cm}
-  \vspace{2.5cm}
+  \vspace*{2.5cm}
+  %\vspace{2.5cm}
   {\Huge\bfseries Ontwikkeling van een live race-engineeringdashboard\par}
   \vspace{2cm}
   {\Huge Jeff Mathieu\par} \vfill
 
   {\Large KU Leuven\\Faculty of Engineering Science\\Master of Engineering: Computer Science \\Option: Human-Machine Communication\par}
-  \vfill
+  \vspace{5cm}
   \begin{tabular}{ll}
     \textbf{Administratieve gegevens}\\ \\
     Opleidingsonderdeel: & Industriële Stage: \\ &Computerwetenschappen (\emph{H04I9A})\\
     Stageplaats: & MotorSport Training Center (MSTC)\\
-    Adres: & Lierselei 54b \-- 2390 Malle\\
+    Adres: & Rerum Novarumlei 19 \-- 2930 Brasschaat\\
     Dagelijkse begeleider: & Jan Wouters \\& info@motorsport-trainingcenter.be \\& +32 475 39 41 16 \\
     Stageperiode: & 22 juni \-- 31 juli 2026 \\
     Academiejaar: & 2026--2027 \\
