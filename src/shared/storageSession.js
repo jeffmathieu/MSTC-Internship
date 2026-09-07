@@ -5,14 +5,37 @@ function resolveSessionFolder(configuredFolder, fallbackFolder) {
   return String(configuredFolder || '').trim() || String(fallbackFolder || '').trim();
 }
 
-function loadSessionHistory({ fs, jsonlPath, identityForLap, limit = 20000 }) {
+// Recover fields the old parser missed, without modifying the source archive.
+// A wrapped absolute count is unambiguous evidence for this rotating schema.
+function recoverStoredTiming(entries) {
+  const schema = (row) => Object.keys(row.raw || {}).join('|');
+  const wrappedCount = (value) => String(value || '').match(/^--\s*(\d+)\s+laps?\s*--$/i);
+  const rotating = new Set(entries.filter((row) => wrappedCount(row.gap)
+    && !row.lapNumber && !row.diff && !row.interval).map(schema));
+  return entries.map((row) => {
+    const raw = row.raw || {};
+    const recovered = { ...row };
+    if (!row.lastPit && raw['PIT TIME']) recovered.lastPit = raw['PIT TIME'];
+    if (!row.state && /^[FP]$/i.test(raw.column_1 || '')) recovered.state = raw.column_1;
+    if (!row.gapRole && rotating.has(schema(row))) {
+      const count = wrappedCount(row.gap);
+      Object.assign(recovered, { gapRaw: row.gap, gap: count ? '' : row.gap,
+        gapRole: count ? 'completed-laps' : 'time-gap', gapSemantics: 'alternating-adjacent',
+        interval: count ? '' : row.gap, diff: count ? '' : row.gap,
+        observedProviderLapNumber: count?.[1] || '', lapNumberSource: 'observed-sequence' });
+    }
+    return recovered;
+  });
+}
+
+function loadSessionHistory({ fs, jsonlPath, identityForLap, limit = Infinity }) {
   if (!fs.existsSync(jsonlPath)) return { entries: [], knownKeys: new Set() };
   const allEntries = fs.readFileSync(jsonlPath, 'utf8')
     .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => JSON.parse(line));
-  const entries = allEntries.slice(-Math.max(0, limit));
-  const knownKeys = new Set(entries
+  const entries = recoverStoredTiming(limit === Infinity ? allEntries : limit > 0 ? allEntries.slice(-limit) : []);
+  const knownKeys = new Set(allEntries
     .filter((entry) => entry?.carNumber && entry?.lastLap)
     .map(identityForLap));
   return { entries, knownKeys };
@@ -55,4 +78,4 @@ function resolveFinalReportSettings(settings = {}, metadata = {}, history = []) 
   };
 }
 
-module.exports = { resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalReportSettings };
+module.exports = { resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalReportSettings, recoverStoredTiming };

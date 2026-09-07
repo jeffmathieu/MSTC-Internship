@@ -17,7 +17,7 @@ const testFiles = fs
     await require(path.join(testDir, file));
   }
 
-  console.log("\nAll tests passed.");
+  console.log(process.exitCode ? "\nTests failed (see errors above)." : "\nAll tests passed.");
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

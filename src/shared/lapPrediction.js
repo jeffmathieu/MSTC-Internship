@@ -7,7 +7,7 @@
 // code or the storage layer.
 const { parseLapTimeToMs } = require('./parser');
 const {
-  completedLaps,
+  lapsForCar,
   currentDriverName,
   sectorPaceEligible,
   average,
@@ -36,21 +36,12 @@ function currentSectorUsable(row, sectorNumber, condition = 'combined') {
   return condition === 'combined' || sectorMatchesCondition(row, sectorNumber, condition);
 }
 
-function sortLapsChronologically(laps) {
-  return [...laps].sort((a, b) => {
-    const aLap = numberOrNull(a.lapNumber) ?? 0;
-    const bLap = numberOrNull(b.lapNumber) ?? 0;
-    if (aLap !== bLap) return aLap - bLap;
-    return new Date(a.recordedAt || a.collectedAt || 0) - new Date(b.recordedAt || b.collectedAt || 0);
-  });
-}
-
 // Returns the most recent valid sector values for one driver. Sector validity is
 // checked per sector, so an FCY in sector 3 does not throw away sector 1 and 2.
 function recentDriverSectorValues(history, carNumber, driverName, sectorNumber, sampleSize = DEFAULT_OPTIONS.sampleSize, options = {}) {
   const condition = options.condition || 'combined';
-  return sortLapsChronologically(completedLaps(history))
-    .filter((lap) => lap.carNumber === String(carNumber) && lap.driverName === driverName)
+  return lapsForCar(history, carNumber)
+    .filter((lap) => lap.driverName === driverName)
     .filter((lap) => sectorPaceEligible(lap, sectorNumber, {
       conditionFilter: condition,
       allowOpeningPredictionSector: true
@@ -70,8 +61,7 @@ function weightedAverage(values) {
 }
 
 function recentCarSectorValues(history, carNumber, sectorNumber, sampleSize, condition) {
-  return sortLapsChronologically(completedLaps(history))
-    .filter((lap) => lap.carNumber === String(carNumber))
+  return lapsForCar(history, carNumber)
     .filter((lap) => sectorPaceEligible(lap, sectorNumber, {
       conditionFilter: condition,
       allowOpeningPredictionSector: true

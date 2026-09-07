@@ -9,6 +9,9 @@ let currentState = {};
 let followedCarNumber = '';
 let sessionMode = 'race';
 let resizeTimer = null;
+let graphHistory = null;
+let graphKey = '';
+const datasetCache = new Map();
 
 function themeColor(variable, fallback) {
   const styles = typeof window.getComputedStyle === 'function'
@@ -100,16 +103,17 @@ function paddedRange(values) {
 
 function drawLineChart(context, width, height, chart, viewport = { start: 0, end: 1 }) {
   const bounds = { left: 72, top: 10, right: Math.max(90, width - 12), bottom: Math.max(40, height - 30) };
-  const allPoints = chart.series.flatMap((series) => series.points.map((point) => ({ ...point, series })));
-  const xValues = finiteValues(allPoints.map((point) => point.x));
-  let fullXMin = xValues.length ? Math.min(...xValues) : 0;
-  let fullXMax = xValues.length ? Math.max(...xValues) : 1;
+  const endpoints = chart.series.flatMap((series) => series.points.length ? [series.points[0].x, series.points.at(-1).x] : []);
+  let fullXMin = endpoints.length ? Math.min(...endpoints) : 0;
+  let fullXMax = endpoints.length ? Math.max(...endpoints) : 1;
   if (fullXMin === fullXMax) { fullXMin -= 1; fullXMax += 1; }
   const normalizedViewport = graphApi.normalizeViewport(viewport);
   const fullSpan = fullXMax - fullXMin;
   const xMin = fullXMin + fullSpan * normalizedViewport.start;
   const xMax = fullXMin + fullSpan * normalizedViewport.end;
-  const visiblePoints = allPoints.filter((point) => point.x >= xMin && point.x <= xMax);
+  const visibleBySeries = chart.series.map((series) => graphApi.visibleSeries(series.points, xMin, xMax,
+    Math.max(16, Math.min(width, 1200 / Math.max(1, chart.series.length)))));
+  const visiblePoints = visibleBySeries.flat().filter((point) => point.x >= xMin && point.x <= xMax);
   const scalePoints = visiblePoints.filter((point) => point.eligible !== false);
   const yRange = paddedRange((scalePoints.length ? scalePoints : visiblePoints).map((point) => point.y));
   drawAxes(context, bounds, yRange.min, yRange.max, chart.yFormat);
@@ -119,7 +123,7 @@ function drawLineChart(context, width, height, chart, viewport = { start: 0, end
 
   chart.series.forEach((series, seriesIndex) => {
     const color = colorForSeries(series, seriesIndex);
-    const valid = series.points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y) && point.x >= xMin && point.x <= xMax);
+    const valid = visibleBySeries[seriesIndex].filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y) && point.x >= xMin && point.x <= xMax);
     context.strokeStyle = color;
     context.lineWidth = series.highlight ? 3 : 2;
     context.beginPath();
@@ -233,13 +237,20 @@ function renderLegend(panel, chart) {
 
 function wireTooltip(panel, canvas, hitPoints) {
   const tooltip = panel.querySelector('.chart-tooltip');
+  const ordered = [...hitPoints].sort((a, b) => a.x - b.x);
+  const radius = Math.max(12, ...ordered.map((point) => point.radius || 12));
   canvas.onmousemove = (event) => {
     const rect = canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
-    const nearest = hitPoints
-      .map((point) => ({ point, distance: Math.hypot(point.x - x, point.y - y) }))
-      .sort((a, b) => a.distance - b.distance)[0];
+    let low = 0, high = ordered.length;
+    while (low < high) { const mid = (low + high) >>> 1; if (ordered[mid].x < x - radius) low = mid + 1; else high = mid; }
+    let nearest = null;
+    for (let i = low; i < ordered.length && ordered[i].x <= x + radius; i++) {
+      const point = ordered[i];
+      const distance = Math.hypot(point.x - x, point.y - y);
+      if (!nearest || distance < nearest.distance) nearest = { point, distance };
+    }
     const allowedDistance = nearest?.point?.radius || 12;
     if (!nearest || nearest.distance > allowedDistance) {
       tooltip.style.display = 'none';
@@ -257,8 +268,17 @@ function renderPanel(panel) {
   const type = panel.querySelector('select').value;
   const resolvedCondition = currentState.analyticsSummary?.resolvedConditionFilter
     || conditionApi.resolveAnalysisCondition(currentState.analyticsSummary?.analysisConditionFilter, currentState.analyticsSummary?.trackCondition);
-  const history = conditionApi.conditionFilteredHistory(currentState.lapHistory || [], resolvedCondition || 'combined');
-  const chart = graphApi.buildGraph(type, history, followedCarNumber, { mode: sessionMode });
+  const key = `${followedCarNumber}|${sessionMode}|${resolvedCondition}`;
+  if (graphHistory !== currentState.lapHistory || graphKey !== key) {
+    datasetCache.clear();
+    graphHistory = currentState.lapHistory;
+    graphKey = key;
+  }
+  if (!datasetCache.has(type)) {
+    const history = conditionApi.conditionFilteredHistory(currentState.lapHistory || [], resolvedCondition || 'combined');
+    datasetCache.set(type, graphApi.buildGraph(type, history, followedCarNumber, { mode: sessionMode }));
+  }
+  const chart = datasetCache.get(type);
   panel.querySelector('h1').textContent = chart.title;
   panel.querySelector('p').textContent = chart.subtitle;
   const canvas = panel.querySelector('canvas');
@@ -280,10 +300,19 @@ function renderPanel(panel) {
   wireTooltip(panel, canvas, hitPoints);
 }
 
-function renderGraphs(state) {
+function renderGraphs(state, force = false) {
+  const changed = force || state.lapHistory !== currentState.lapHistory
+    || state.analyticsSummary?.resolvedConditionFilter !== currentState.analyticsSummary?.resolvedConditionFilter
+    || state.analyticsSummary?.sessionMode !== currentState.analyticsSummary?.sessionMode;
   currentState = state || {};
   sessionMode = currentState.analyticsSummary?.sessionMode || sessionMode;
-  document.querySelectorAll('.chart-panel').forEach(renderPanel);
+  if (changed && !document.hidden) document.querySelectorAll('.chart-panel').forEach(renderPanel);
+}
+
+function schedulePanel(panel) {
+  if (panel._scheduled) return;
+  panel._scheduled = true;
+  requestAnimationFrame(() => { panel._scheduled = false; renderPanel(panel); });
 }
 
 async function initGraphs() {
@@ -315,7 +344,7 @@ async function initGraphs() {
         if (action === 'left') panel._viewport = graphApi.panViewport(panel._viewport, -1);
         if (action === 'right') panel._viewport = graphApi.panViewport(panel._viewport, 1);
         if (action === 'reset') panel._viewport = { start: 0, end: 1 };
-        renderPanel(panel);
+        schedulePanel(panel);
       });
     });
     const canvas = panel.querySelector('canvas');
@@ -325,20 +354,21 @@ async function initGraphs() {
         const rect = canvas.getBoundingClientRect();
         const anchor = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0.5;
         panel._viewport = graphApi.zoomViewport(panel._viewport, event.deltaY < 0 ? 0.8 : 1.25, anchor);
-        renderPanel(panel);
+        schedulePanel(panel);
       }
     }, { passive: false });
   });
   window.liveTiming.onCollectorUpdate(renderGraphs);
   window.liveTiming.onThemeUpdate?.((theme) => {
     applyGraphTheme(theme);
-    renderGraphs(currentState);
+    renderGraphs(currentState, true);
   });
   renderGraphs(await window.liveTiming.getCollectorState());
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => renderGraphs(currentState), 80);
+    resizeTimer = setTimeout(() => renderGraphs(currentState, true), 80);
   });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) renderGraphs(currentState, true); });
 }
 
 initGraphs();

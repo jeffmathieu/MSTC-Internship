@@ -2,6 +2,7 @@ node_modules/
 dist/
 release/
 out/
+race kopie/
 .vscode/
 report/
 report_improved/

@@ -140,6 +140,8 @@ function normalizeLap(entry) {
     className: String(entry.className ?? ''),
     teamName: String(entry.teamName ?? entry.team ?? ''),
     driverName: String(entry.driverName ?? entry.driver ?? ''),
+    lastPit: entry.lastPit || entry.raw?.['PIT TIME'] || '',
+    state: entry.state || (/^[FP]$/i.test(entry.raw?.column_1 || '') ? entry.raw.column_1 : ''),
     lapNumber: numberOrNull(entry.lapNumber),
     lapTimeMs,
     lastLapMs: lapTimeMs,
@@ -172,10 +174,15 @@ function normalizeLap(entry) {
   };
 }
 
+const recordedTimes = new WeakMap();
 function recordedTimeMs(lap) {
   const timestamp = lap?.recordedAt || lap?.collectedAt || '';
+  const cached = lap && recordedTimes.get(lap);
+  if (cached?.timestamp === timestamp) return cached.ms;
   const ms = new Date(timestamp).getTime();
-  return Number.isFinite(ms) ? ms : null;
+  const result = Number.isFinite(ms) ? ms : null;
+  if (lap) recordedTimes.set(lap, { timestamp, ms: result });
+  return result;
 }
 
 function compareLapsChronologically(a, b) {
@@ -211,9 +218,10 @@ function annotateHistorySequences(laps) {
   const countByCar = new Map();
   return laps.map((lap) => {
     const key = [lap.sourceProvider || '', lap.timingUrl || '', lap.carNumber].join('|');
-    const historySequence = (countByCar.get(key) || 0) + 1;
+    const historySequence = numberOrNull(lap.historySequence) ?? (countByCar.get(key) || 0) + 1;
     countByCar.set(key, historySequence);
-    return { ...lap, historySequence };
+    return { ...lap, historySequence, displayLapNumber: lap.lapNumber ?? historySequence,
+      lapNumberSource: lap.lapNumberSource || (lap.lapNumber == null ? 'observed-sequence' : 'provider') };
   });
 }
 
@@ -250,7 +258,7 @@ function pitStatusText(lap) {
 }
 
 function rowShowsInPit(lap) {
-  return /(?:^|\b)(?:in\s*pit|in-pit|pit|in)(?:\b|$)/i.test(pitStatusText(lap));
+  return /(?:^|\b)(?:in\s*pit|in-pit|pit|in|p|f|fuel)(?:\b|$)/i.test(pitStatusText(lap));
 }
 
 function rowShowsOutlap(lap) {
@@ -433,6 +441,7 @@ function sectorPaceEligible(lap, sectorNumber, options = {}) {
 // Returns all completed laps sorted chronologically enough for averages and
 // "last lap" values. Invalid/no-car rows are dropped here.
 function completedLaps(history) {
+  if (preparedHistories.has(history)) return preparedHistories.get(history).laps;
   const sorted = (history || [])
     .map(normalizeLap)
     .filter((lap) => lap.carNumber && lap.lapTimeMs !== null)
@@ -442,7 +451,71 @@ function completedLaps(history) {
 
 // Convenience filter for all completed laps of one car.
 function lapsForCar(history, carNumber) {
+  if (preparedHistories.has(history)) return preparedHistories.get(history).byCar.get(String(carNumber)) || EMPTY_LAPS;
   return completedLaps(history).filter((lap) => lap.carNumber === String(carNumber));
+}
+
+const EMPTY_LAPS = Object.freeze([]);
+const preparedHistories = new WeakMap();
+const preparedStats = new WeakMap();
+const preparedDrivers = new WeakMap();
+const preparedConditions = new WeakMap();
+
+// Only explicitly prepared immutable snapshots are cached. Legacy callers may
+// still mutate their arrays. New laps invalidate only their car's derived data.
+function prepareHistory(history, previousHistory = null, appended = null) {
+  if (preparedHistories.has(history)) return history;
+  trackConditions.markImmutableHistory(history);
+  const previous = previousHistory && preparedHistories.get(previousHistory);
+  const rawByCar = previous && appended ? new Map(previous.rawByCar) : new Map();
+  const additions = new Map();
+  (previous && appended ? appended : history).forEach((lap) => {
+    const key = String(lap.carNumber || '');
+    if (!additions.has(key)) additions.set(key, []);
+    additions.get(key).push(lap);
+  });
+  const byCar = previous && appended ? new Map(previous.byCar) : new Map();
+  additions.forEach((entries, car) => {
+    const raw = [...(rawByCar.get(car) || []), ...entries];
+    const laps = completedLaps(raw);
+    rawByCar.set(car, raw);
+    byCar.set(car, laps);
+    preparedStats.set(laps, new Map());
+    trackConditions.markImmutableHistory(laps);
+  });
+  const laps = [...byCar.values()].flat().sort(compareLapsChronologically);
+  const byClass = new Map();
+  byCar.forEach((entries, car) => {
+    for (const className of new Set(entries.map((lap) => lap.className))) {
+      if (!byClass.has(className)) byClass.set(className, new Set());
+      byClass.get(className).add(car);
+    }
+  });
+  preparedStats.set(laps, new Map());
+  preparedHistories.set(history, { laps, byCar, rawByCar, byClass });
+  return history;
+}
+
+// Condition views reuse already normalized, numbered laps and unchanged cars.
+// Do not normalize the whole 24h archive again merely to mask wet sectors.
+function prepareConditionHistory(history, filter = 'combined') {
+  prepareHistory(history);
+  const normalized = trackConditions.normalizeAnalysisFilter(filter, 'combined');
+  if (normalized === 'combined' || normalized === 'current') return history;
+  const cache = preparedConditions.get(history) || new Map();
+  if (cache.has(normalized)) return cache.get(normalized);
+  const base = preparedHistories.get(history);
+  const byCar = new Map([...base.byCar].map(([car, laps]) => {
+    const filtered = trackConditions.conditionFilteredHistory(laps, normalized);
+    if (!preparedStats.has(filtered)) preparedStats.set(filtered, new Map());
+    return [car, filtered];
+  }));
+  const laps = [...byCar.values()].flat().sort(compareLapsChronologically);
+  preparedStats.set(laps, new Map());
+  preparedHistories.set(laps, { laps, byCar, byClass: base.byClass, rawByCar: byCar });
+  cache.set(normalized, laps);
+  preparedConditions.set(history, cache);
+  return laps;
 }
 
 // Convenience filter for one driver's laps in one car.
@@ -453,6 +526,9 @@ function lapsForDriver(history, carNumber, driverName) {
 // Calculates all lap/sector statistics from a set of laps. Full-lap averages
 // use only pace-eligible laps; sector averages use sector-level eligibility.
 function statsForLaps(laps, options = {}) {
+  const cache = preparedStats.get(laps);
+  const cacheKey = cache ? JSON.stringify(options) : '';
+  if (cache?.has(cacheKey)) return cache.get(cacheKey);
   const conditionFilter = trackConditions.normalizeAnalysisFilter(options.conditionFilter, 'combined');
   const sortedAll = [...laps].sort(compareLapsChronologically);
   const lapCandidates = conditionFilter === 'combined'
@@ -482,7 +558,7 @@ function statsForLaps(laps, options = {}) {
       excludedCount: sortedAll.length - included.length
     };
   };
-  return {
+  const result = {
     lapCount: lapCandidates.length,
     conditionFilter,
     conditionCounts: trackConditions.conditionCounts(sortedAll),
@@ -512,6 +588,8 @@ function statsForLaps(laps, options = {}) {
     },
     laps: lapCandidates
   };
+  cache?.set(cacheKey, result);
+  return result;
 }
 
 // Returns separate pace summaries without blending wet and dry performance.
@@ -526,18 +604,28 @@ function statsByCondition(laps) {
 
 // Groups one car's laps by driver name and returns stats for each driver/stint.
 function driverStats(history, carNumber, options = {}) {
+  const carLaps = lapsForCar(history, carNumber);
+  const cacheKey = JSON.stringify(options);
+  const cached = preparedDrivers.get(carLaps);
+  if (cached?.has(cacheKey)) return cached.get(cacheKey);
   const groups = new Map();
-  lapsForCar(history, carNumber).forEach((lap) => {
+  carLaps.forEach((lap) => {
     const driver = lap.driverName || 'Unknown';
     if (!groups.has(driver)) groups.set(driver, []);
     groups.get(driver).push(lap);
   });
 
-  return [...groups.entries()].map(([driverName, laps]) => ({
+  const result = [...groups.entries()].map(([driverName, laps]) => ({
     driverName,
     carNumber: String(carNumber),
     ...statsForLaps(laps, options)
   }));
+  if (preparedStats.has(carLaps)) {
+    const cache = cached || new Map();
+    cache.set(cacheKey, result);
+    preparedDrivers.set(carLaps, cache);
+  }
+  return result;
 }
 
 // Chooses the current driver from the explicit live row when available, or from
@@ -618,7 +706,8 @@ function carStatsWithProviderBest(history, rows, carNumber, options = {}) {
 
 // Returns stats for every car with at least one completed lap in the class.
 function carsInClass(history, className, options = {}) {
-  const carNumbers = new Set(completedLaps(history).filter((lap) => lap.className === className).map((lap) => lap.carNumber));
+  const carNumbers = preparedHistories.get(history)?.byClass.get(className)
+    || new Set(completedLaps(history).filter((lap) => lap.className === className).map((lap) => lap.carNumber));
   return [...carNumbers].map((carNumber) => carStats(history, carNumber, options));
 }
 
@@ -691,6 +780,8 @@ function buildDashboardAnalysis(history, options = {}) {
 }
 
 return {
+  prepareHistory,
+  prepareConditionHistory,
   numberOrNull,
   average,
   median,

@@ -203,8 +203,9 @@
           ? parseStintDurationMs(options.liveRow?.stint) ?? providerProgress.latestSegmentMs
           : providerProgress.latestSegmentMs,
         timerObservedAt: isLatest ? options.generatedAt || null : completionTime(lastLap),
-        startLap: firstLap?.lapNumber ?? null,
-        endLap: lastLap?.lapNumber ?? null,
+        startLap: firstLap?.displayLapNumber ?? firstLap?.lapNumber ?? null,
+        endLap: lastLap?.displayLapNumber ?? lastLap?.lapNumber ?? null,
+        lapNumberSource: firstLap?.lapNumberSource || 'provider',
         startedAt: isLatest && Number.isFinite(stintTimeMs) && options.generatedAt
           ? new Date(new Date(options.generatedAt).getTime() - stintTimeMs).toISOString()
           : estimatedStartTime(firstLap),
@@ -243,7 +244,7 @@
     [...new Set((carNumbers || []).map((car) => String(car || '').trim()).filter(Boolean))].forEach((carNumber) => {
       const liveRow = (options.liveRows || []).find((row) => String(row.carNumber) === carNumber);
       const previousCarState = options.previousState?.cars?.[carNumber] || null;
-      const fullStints = stintsForCar(history, carNumber, {
+      const fullStints = (options.drivingTimeOnly ? drivingStintsForCar : stintsForCar)(history, carNumber, {
         ...options,
         liveRow,
         generatedAt,
@@ -269,7 +270,81 @@
     return { schemaVersion: 1, generatedAt, cars };
   }
 
+  function drivingStintsForCar(history = [], carNumber = '', options = {}) {
+    const stints = stintsForCar(history, carNumber, options);
+    const events = options.pitEvents || options.pitEventsByCar?.[String(carNumber)] || [];
+    const now = Date.parse(options.closeFinalAt || options.generatedAt || '')
+      || Date.parse(completionTime(stints.at(-1)?.laps?.at(-1)) || '');
+    const intervals = events.filter((event) => event.entryAt).map((event) => ({
+      start: Date.parse(event.entryAt), end: Date.parse(event.exitAt || '') || now,
+      approximate: Boolean(event.partial), stopNumber: event.stopNumber
+    }));
+    // Old lap-only archives have no exact pit exit timestamps. Exclude the
+    // observed service window conservatively and label the result estimated.
+    let pending = null;
+    for (const lap of lapAnalytics.lapsForCar(history, carNumber)) {
+      const at = Date.parse(completionTime(lap) || '');
+      if (lapAnalytics.rowShowsInPit(lap) && !pending) pending = { start: at, stopNumber: lapAnalytics.pitCountFromLap(lap) };
+      if (pending && !lapAnalytics.rowShowsInPit(lap)) {
+        if (!events.some((event) => event.stopNumber === pending.stopNumber ||
+          (Date.parse(event.entryAt) <= at && Date.parse(event.exitAt || '') >= pending.start))) {
+          intervals.push({ ...pending, end: at, approximate: true });
+        }
+        pending = null;
+      }
+    }
+    if (pending && !events.some((event) => event.stopNumber === pending.stopNumber)) intervals.push({ ...pending, end: now, approximate: true });
+    const bounds = stints.map((stint, i) => {
+      const previous = options.previousCurrentStint;
+      let start = Date.parse(estimatedStartTime(stint.laps[0]) || '')
+        || (previous && driverKey(previous.driverName) === driverKey(stint.driverName) ? Date.parse(previous.startedAt) : NaN)
+        || (i === 0 ? Date.parse(options.sessionStartedAt || '') : NaN) || now;
+      let end = i + 1 < stints.length ? Date.parse(estimatedStartTime(stints[i + 1].laps[0]) || '') || now : now;
+      // Match transitions by time too: returning drivers can change repeatedly.
+      const incoming = events.filter((e) => driverKey(e.driverAfter) === driverKey(stint.driverName)
+        && e.exitAt && Date.parse(e.exitAt) <= Date.parse(completionTime(stint.laps[0]) || options.generatedAt)
+        && (i === 0 || driverKey(e.driverBefore) === driverKey(stints[i - 1].driverName)))
+        .sort((a, b) => Date.parse(b.exitAt) - Date.parse(a.exitAt))[0];
+      if (incoming && i > 0) start = Date.parse(incoming.exitAt);
+      const outgoing = events.find((e) => Date.parse(e.entryAt) >= start
+        && driverKey(e.driverBefore) === driverKey(stint.driverName)
+        && ((e.driverAfter && i + 1 < stints.length && driverKey(e.driverAfter) === driverKey(stints[i + 1].driverName))
+          || (!e.closed && i + 1 < stints.length)));
+      if (outgoing) end = Date.parse(outgoing.entryAt);
+      if (!stint.laps.length && i > 0) {
+        const active = events.find((e) => !e.closed);
+        if (active) start = Date.parse(active.entryAt);
+      }
+      return { start, end: Math.max(start, end) };
+    });
+    const net = stints.map((stint, i) => {
+      const { start, end } = bounds[i];
+      const clipped = intervals.map((p) => ({ ...p, start: Math.max(start, p.start), end: Math.min(end, p.end) }))
+        .filter((p) => Number.isFinite(p.start) && p.end > p.start).sort((a, b) => a.start - b.start);
+      let excluded = 0, coveredUntil = start;
+      for (const p of clipped) { excluded += Math.max(0, p.end - Math.max(p.start, coveredUntil)); coveredUntil = Math.max(coveredUntil, p.end); }
+      const gross = Number.isFinite(end - start) ? end - start : sumLapTimes(stint.laps);
+      const active = events.some((e) => !e.closed && Date.parse(e.entryAt) <= end);
+      return { ...stint, startedAt: Number.isFinite(start) ? new Date(start).toISOString() : null,
+        closedAt: stint.closed && Number.isFinite(end) ? new Date(end).toISOString() : null,
+        elapsedTimeMs: gross, excludedPitTimeMs: excluded,
+        stintTimeMs: options.timerRunning === false ? 0 : Math.max(0, gross - excluded),
+        drivingTimeEstimated: clipped.some((p) => p.approximate) || !events.length,
+        drivingTimePaused: i === stints.length - 1 && (active || lapAnalytics.rowShowsInPit(options.liveRow)),
+        timerSource: options.timerRunning === false ? 'session-not-started' : 'net-driving-time' };
+    });
+    const totals = new Map();
+    net.forEach((s) => totals.set(driverKey(s.driverName), (totals.get(driverKey(s.driverName)) || 0) + s.stintTimeMs));
+    return net.map((s) => ({ ...s, totalDriverTimeMs: totals.get(driverKey(s.driverName)) }));
+  }
+
+  function buildDrivingStintState(history, carNumbers, generatedAt, options = {}) {
+    return buildStintState(history, carNumbers, generatedAt, { ...options, drivingTimeOnly: true });
+  }
+
   return {
+    drivingStintsForCar,
+    buildDrivingStintState,
     normalizeDriverName,
     driverKey,
     sumLapTimes,

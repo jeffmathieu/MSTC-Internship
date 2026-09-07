@@ -77,6 +77,7 @@ function parseLapGap(value) {
 // RIS can expose only GAP, where every value is cumulative to the overall
 // leader. In that layout GAP must be subtracted, never added row by row.
 function usesCumulativeGap(rows) {
+  if (rows.some((row) => row.gapSemantics === 'alternating-adjacent')) return false;
   const ordered = overallSortedRows(rows);
   const hasAdjacentIntervals = ordered.slice(1).some((row) =>
     parseGapToMs(row.diff) !== null || parseGapToMs(row.interval) !== null ||
@@ -89,6 +90,7 @@ function usesCumulativeGap(rows) {
 // exact. A lap deficit is necessarily approximate and uses a representative
 // lap time; completed-lap counters win over provider text when available.
 function cumulativeGapToLeaderMs(rows, row, averageLapMs = null) {
+  if (row?.gapRole === 'completed-laps' || row?.gapRole === 'ambiguous') return null;
   const ordered = overallSortedRows(rows);
   const index = ordered.findIndex((candidate) => String(candidate.carNumber) === String(row?.carNumber));
   if (index < 0) return null;

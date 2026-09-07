@@ -178,11 +178,13 @@ select:focus-visible {
   color: var(--ink);
 }
 .lap-strip-list {
+  overflow-anchor: none;
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
 .lap-strip-row {
+  height: 42px;
   min-height: 42px;
   padding: 7px 7px;
   display: grid;
@@ -897,6 +899,17 @@ input {
   gap: 9px;
   align-items: center;
 }
+.service-timers { display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 6px 0; font-size: 11px; font-variant-numeric: tabular-nums; }
+.service-timers strong { margin-left: 5px; }
+#fuel-warning { flex-basis: 100%; color: var(--bad); }
+#fuel-warning:empty { display: none; }
+#fuel-setup { margin: 12px 0; }
+#fuel-setup summary { cursor: pointer; font-weight: 700; }
+#fuel-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+#fuel-fields:disabled { opacity: 0.5; }
+.fuel-enable { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.fuel-enable input { width: auto; }
+.pit-setup-card { max-height: 92vh; overflow-y: auto; }
 .pit-header div,
 .pit-header label { min-width: 0; }
 .pit-header span {

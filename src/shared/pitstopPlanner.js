@@ -197,7 +197,7 @@ function pitStatusText(row) {
 }
 
 function rowShowsInPit(row = {}) {
-  return /(?:^|\b)(?:in\s*pit|in-pit|pit|in)(?:\b|$)/i.test(pitStatusText(row));
+  return /(?:^|\b)(?:in\s*pit|in-pit|pit|in|p)(?:\b|$)/i.test(pitStatusText(row));
 }
 
 function rowShowsOutlap(row = {}) {
@@ -287,8 +287,10 @@ function nextPitStateFromRow({ previous = {}, row = {}, session = {}, rules = {}
   const isFirstPitSample = previousState.rawPitCount === null || previousState.rawPitCount === undefined;
   const pitCountIncreased = !isFirstPitSample && nextCount > (previousState.rawPitCount || 0);
   const measuredPitRawDuration = row.lastPit || row.lastPitDuration || row.lPit || '';
-  const hasProviderPitDuration = String(measuredPitRawDuration || '').trim() !== '';
   const measuredPitDurationMs = parseTimeToMs(measuredPitRawDuration);
+  const runningServiceClock = Object.keys(row.raw || {}).some((key) => key.toUpperCase().replace(/[^A-Z]/g, '') === 'PITTIME')
+    && (rowShowsInPit(row) || /\bf(?:uel)?\b/i.test(pitStatusText(row)));
+  const hasProviderPitDuration = Number.isFinite(measuredPitDurationMs) && !runningServiceClock;
   const nowMs = collectedAtMs(collectedAt);
   const fallbackPitTimingActive = !hasProviderPitDuration;
   const fallbackPitStartedAtMs = numberOrNull(previousState.fallbackPitStartedAtMs);
@@ -358,7 +360,7 @@ function nextPitStateFromRow({ previous = {}, row = {}, session = {}, rules = {}
     next.lastPitTargetDurationMs = normalizedRules.pitStopDurationMs;
     next.fallbackPitStartedAtMs = null;
     next.fallbackPitStartedElapsedMs = null;
-  } else if (isFirstPitSample && nextCount > 0 && (Number.isFinite(measuredPitDurationMs) || measuredPitRawDuration)) {
+  } else if (isFirstPitSample && nextCount > 0 && hasProviderPitDuration) {
     // If the app is opened mid-race, L. PIT still tells us the most recent
     // measured stop. Show it without pretending a new pitstop just happened.
     next.lastPitDurationMs = measuredPitDurationMs;
@@ -371,6 +373,7 @@ function nextPitStateFromRow({ previous = {}, row = {}, session = {}, rules = {}
 // Normalizes lap numbers from live rows. Null means "unknown", which is safer
 // than assuming two cars are on the same lap.
 function lapNumber(row = {}) {
+  if (row.lapNumber === null || row.lapNumber === undefined || row.lapNumber === '') return null;
   const n = Number(row.lapNumber);
   return Number.isFinite(n) ? n : null;
 }
@@ -427,6 +430,7 @@ function intervalForRow(row) {
 // Detects a provider layout with only cumulative GAP-to-leader information.
 // In this mode adding GAP values would multiply the distance incorrectly.
 function usesCumulativeGap(rows) {
+  if (rows.some((row) => row.gapSemantics === 'alternating-adjacent')) return false;
   const ordered = overallSortedRows(rows);
   const hasAdjacentIntervals = ordered.slice(1).some((row) =>
     parseGapToMs(row.interval) !== null || parseGapToMs(row.diff) !== null ||
@@ -443,6 +447,7 @@ function parseLapGap(value) {
 // Places every car on one cumulative time-behind-leader axis. Lap deficits are
 // estimates because a lap counter does not include the car's position in-lap.
 function cumulativeGapToLeaderMs(rows, row, averageLapMs) {
+  if (row?.gapRole === 'completed-laps' || row?.gapRole === 'ambiguous') return null;
   const ordered = overallSortedRows(rows);
   const index = ordered.findIndex((candidate) => String(candidate.carNumber) === String(row?.carNumber));
   if (index < 0) return null;

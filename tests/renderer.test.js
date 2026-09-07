@@ -367,6 +367,10 @@ let themeUpdate = null;
 let lastLapStatusPayload = null;
 const liveTiming = {
   getSettings: async () => settings,
+  updateFuel: async ({ carNumber, config }) => {
+    settings.fuelByCar = { ...settings.fuelByCar, [carNumber]: config };
+    return { settings, state: updatedState };
+  },
   setSettings: async (patch) => {
     lastSettingsPatch = patch;
     Object.assign(settings, patch);
@@ -440,7 +444,7 @@ module.exports = (async () => {
   collectorUpdate(updatedState);
   await flushAsync();
 
-  assert.strictEqual(document.getElementById('info-stint').textContent, 'Driver stint 2 · 1u05 / total 2u14');
+  assert.strictEqual(document.getElementById('info-stint').textContent, 'Driver stint 2 · 1u05 driving / total 2u14');
   assert.strictEqual(document.getElementById('info-car-stint').textContent, 'Car stint 3');
   const lapRows = document.getElementById('lap-strip-list').children;
   assert.strictEqual(lapRows.length, 4, 'all stored laps are rendered in the vertical strip');

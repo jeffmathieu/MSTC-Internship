@@ -89,7 +89,10 @@
           && finiteMs(lap.lapTimeMs) !== null
           && finiteMs(lap.lapTimeMs) === bestLap.valueMs;
         return {
+          lapId: lap.lapId,
           lapNumber: lap.lapNumber,
+          displayLapNumber: lap.displayLapNumber,
+          historySequence: lap.historySequence,
           lapTimeMs: finiteMs(lap.lapTimeMs),
           collectedAt: lap.collectedAt || lap.recordedAt || '',
           manualLapStatus: lap.manualLapStatus || '',
@@ -98,7 +101,7 @@
           driverInitials: driverInitials(lap.driverName, driverCodes),
           status,
           highlight: isPersonalBest ? (bestLap.isClassBest ? 'class-best' : 'personal-best') : 'none',
-          marker: status === 'pit-in' ? 'P' : '',
+          marker: status === 'pit-in' ? (/^(f|fuel)$/i.test(lap.state || '') || /fuel/i.test(lap.eta || '') ? 'F' : 'P') : '',
           tooltip: `${lap.driverName || 'Unknown driver'} · ${lap.sessionFlag || lap.lapFlag || status}`
         };
       })

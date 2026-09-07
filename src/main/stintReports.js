@@ -6,8 +6,9 @@ const lapAnalytics = require('../shared/lapAnalytics');
 const graphData = require('../shared/graphData');
 const { buildStintInsights, classComparisonsForStint, classRankingForStint } = require('../shared/stintInsights');
 const { normalizeMode } = require('../shared/sessionMode');
+const { numberOrNull, driverChange } = require('../shared/pitEvents');
 
-const REPORT_LAYOUT_VERSION = 'canonical-reportlab-landscape-v7-session-summaries';
+const REPORT_LAYOUT_VERSION = 'canonical-reportlab-landscape-v9-net-driving';
 
 // Every session mode gets an end-of-session overview. Pitstop analysis remains
 // race-only, while practice and qualifying summaries contain pace/sector data.
@@ -103,17 +104,23 @@ function buildStintReportPayload(stint, session = {}, gapSamples = []) {
     stint: {
       stintNumber: stint.stintNumber,
       driverStintNumber: stint.driverStintNumber,
+      lapNumberSource: stint.lapNumberSource || 'provider',
       detectionSource: stint.detectionSource,
       startLap: stint.startLap,
       endLap: stint.endLap,
       startedAt: stint.startedAt,
       closedAt: stint.closedAt,
       stintTimeMs: stint.stintTimeMs,
+      timerSource: stint.timerSource,
+      drivingTimeEstimated: stint.drivingTimeEstimated,
+      excludedPitTimeMs: stint.excludedPitTimeMs,
       totalDriverTimeMs: stint.totalDriverTimeMs,
       lapCount: stint.lapCount,
       stats: stint.stats,
       laps: (stint.laps || []).map((lap) => ({
-        lapNumber: lap.lapNumber,
+        lapNumber: lap.displayLapNumber ?? lap.lapNumber ?? lap.historySequence,
+        officialLapNumber: lap.lapNumber,
+        lapNumberSource: lap.lapNumberSource || 'provider',
         lapTimeMs: lap.lapTimeMs,
         sector1Ms: lap.sector1Ms,
         sector2Ms: lap.sector2Ms,
@@ -181,12 +188,12 @@ function durationMs(value) {
 }
 
 function expectedPitDurationMsFromRules(pitRules = {}) {
-  const value = Number(pitRules.pitStopDurationMs ?? pitRules.expectedPitDurationMs ?? pitRules.pitTimeMs);
+  const value = numberOrNull(pitRules.pitStopDurationMs ?? pitRules.expectedPitDurationMs ?? pitRules.pitTimeMs);
   return Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function storedPitTargetDurationMs(lap = {}) {
-  const value = Number(lap.pitTargetDurationMs ?? lap.pitTargetMs ?? lap.expectedPitDurationMs ?? lap.pitStopDurationMs);
+  const value = numberOrNull(lap.pitTargetDurationMs ?? lap.pitTargetMs ?? lap.expectedPitDurationMs ?? lap.pitStopDurationMs);
   return Number.isFinite(value) && value >= 0 ? value : null;
 }
 
@@ -194,24 +201,37 @@ function storedPitTargetDurationMs(lap = {}) {
 // stop. A counter increase therefore identifies one unique completed pitstop.
 function pitStopsFromHistory(history = [], carNumber = '') {
   const laps = lapAnalytics.lapsForCar(history, carNumber);
-  const byLap = new Map(laps.map((lap) => [Number(lap.lapNumber), lap]));
   const stops = [];
   let previousCount = 0;
-  laps.forEach((lap) => {
-    const count = Number.parseInt(String(lap.pitInfo || lap.pit || ''), 10);
+  laps.forEach((lap, index) => {
+    const count = lapAnalytics.pitCountFromLap(lap);
     if (!Number.isFinite(count) || count <= previousCount) return;
-    const lapNumber = Number(lap.lapNumber);
-    const before = byLap.get(lapNumber - 1);
+    const lapNumber = index === 0 ? null : lap.displayLapNumber ?? lap.lapNumber ?? lap.historySequence;
+    const before = laps[index - 1];
+    // L. PIT can arrive a few polls/laps after the counter. Limit lookup to
+    // this stop's counter; never borrow the next stop's measured duration.
+    const nextStopIndex = laps.findIndex((candidate, i) => i > index && (lapAnalytics.pitCountFromLap(candidate) ?? 0) > count);
+    const sameStop = laps.slice(index, nextStopIndex < 0 ? undefined : nextStopIndex);
+    // PIT TIME is a running clock while Fuel/In Pit is displayed. Only an
+    // on-track reading can certify the final duration and outgoing driver.
+    const after = sameStop.find((candidate) => !lapAnalytics.rowShowsInPit(candidate)
+      && Number.isFinite(durationMs(candidate.lastPit)));
+    const exit = sameStop.find((candidate) => !lapAnalytics.rowShowsInPit(candidate));
     stops.push({
       stopNumber: count,
       lapNumber,
-      durationMs: durationMs(lap.lastPit),
+      durationMs: durationMs(after?.lastPit),
+      durationSource: after ? 'provider' : 'unavailable',
+      lapNumberSource: lap.lapNumberSource,
+      fuelDurationMs: null,
+      pitDurationMs: null,
+      totalDurationMs: null,
       rawDuration: lap.lastPit || '',
       targetDurationMs: storedPitTargetDurationMs(lap),
       driverBefore: before?.driverName || '',
-      driverAfter: lap.driverName || '',
-      positionAfter: lap.position || '',
-      classPositionAfter: lap.classPosition || '',
+      driverAfter: exit?.driverName || '',
+      positionAfter: exit?.position || '',
+      classPositionAfter: exit?.classPosition || '',
       gapAfterRaw: lap.gap || '',
       diffAfterRaw: lap.diff || lap.interval || ''
     });
@@ -222,22 +242,22 @@ function pitStopsFromHistory(history = [], carNumber = '') {
 
 function enrichPitStops(pitStops = [], expectedPitDurationMs = null) {
   return pitStops.map((stop) => {
-    const duration = Number(stop.durationMs);
-    const target = Number.isFinite(Number(stop.targetDurationMs)) ? Number(stop.targetDurationMs) : expectedPitDurationMs;
+    const duration = numberOrNull(stop.durationMs);
+    const target = numberOrNull(stop.targetDurationMs) ?? numberOrNull(expectedPitDurationMs);
     const hasDuration = Number.isFinite(duration);
     const hasTarget = Number.isFinite(target);
     return {
       ...stop,
       targetDurationMs: hasTarget ? target : null,
       deltaVsTargetMs: hasDuration && hasTarget ? duration - target : null,
-      driverChanged: Boolean(stop.driverBefore && stop.driverAfter && stop.driverBefore !== stop.driverAfter)
+      driverChanged: driverChange(stop.driverBefore, stop.driverAfter)
     };
   });
 }
 
 function pitstopAnalysis(pitStops = []) {
-  const measured = pitStops.filter((stop) => Number.isFinite(Number(stop.durationMs)));
-  const deltas = pitStops.map((stop) => Number(stop.deltaVsTargetMs)).filter(Number.isFinite);
+  const measured = pitStops.filter((stop) => Number.isFinite(numberOrNull(stop.durationMs)));
+  const deltas = pitStops.map((stop) => numberOrNull(stop.deltaVsTargetMs)).filter(Number.isFinite);
   const fastestStop = measured.reduce((best, stop) => (!best || stop.durationMs < best.durationMs ? stop : best), null);
   const slowestStop = measured.reduce((worst, stop) => (!worst || stop.durationMs > worst.durationMs ? stop : worst), null);
   return {
@@ -246,14 +266,19 @@ function pitstopAnalysis(pitStops = []) {
     averageDurationMs: measured.length ? measured.reduce((sum, stop) => sum + stop.durationMs, 0) / measured.length : null,
     fastestStop: fastestStop ? { stopNumber: fastestStop.stopNumber, durationMs: fastestStop.durationMs } : null,
     slowestStop: slowestStop ? { stopNumber: slowestStop.stopNumber, durationMs: slowestStop.durationMs } : null,
-    targetDurationMs: pitStops.find((stop) => Number.isFinite(Number(stop.targetDurationMs)))?.targetDurationMs ?? null,
+    targetDurationMs: pitStops.find((stop) => Number.isFinite(numberOrNull(stop.targetDurationMs)))?.targetDurationMs ?? null,
     averageDeltaVsTargetMs: deltas.length ? deltas.reduce((sum, value) => sum + value, 0) / deltas.length : null,
     totalDeltaVsTargetMs: deltas.length ? deltas.reduce((sum, value) => sum + value, 0) : null,
-    driverChangeCount: pitStops.filter((stop) => stop.driverChanged).length
+    driverChangeCount: pitStops.filter((stop) => stop.driverChanged === true).length,
+    unknownDriverChangeCount: pitStops.filter((stop) => stop.driverChanged == null).length
   };
 }
 
 function endPitStopForStint(stint = {}, pitStops = []) {
+  const timedStop = pitStops.find((stop) => stop.driverBefore && stop.driverAfter
+    && stop.driverBefore === stint.driverName && stop.driverAfter !== stint.driverName
+    && stop.exitAt && stint.closedAt && Math.abs(Date.parse(stop.exitAt) - Date.parse(stint.closedAt)) < 300000);
+  if (timedStop) return timedStop;
   const endLap = Number(stint.endLap ?? stint.laps?.at?.(-1)?.lapNumber);
   if (!Number.isFinite(endLap)) return null;
   return pitStops.find((stop) => Number(stop.lapNumber) === endLap + 1) || null;
@@ -284,9 +309,13 @@ function canonicalStint(stint, session, gapSamples, driverStats, history, refere
     stintNumber: legacy.stint.stintNumber,
     driverStintNumber: legacy.stint.driverStintNumber,
     driverName: legacy.session.driverName,
+    lapNumberSource: legacy.stint.lapNumberSource,
     startLap: legacy.stint.startLap ?? firstLap?.lapNumber ?? null,
     endLap: legacy.stint.endLap ?? lastLap?.lapNumber ?? null,
     stintTimeMs: legacy.stint.stintTimeMs,
+    timerSource: legacy.stint.timerSource,
+    drivingTimeEstimated: legacy.stint.drivingTimeEstimated,
+    excludedPitTimeMs: legacy.stint.excludedPitTimeMs,
     totalDriverTimeMs: legacy.stint.totalDriverTimeMs,
     stats: compactStats(stats),
     statsByCondition: Object.fromEntries(Object.entries(lapAnalytics.statsByCondition(stint.laps || []))
@@ -312,10 +341,14 @@ function buildCanonicalReportPayload({
   carNumber = '',
   referenceTimes = {},
   pitRules = {},
+  pitEvents = [],
   sessionMode = 'race'
 }) {
   const reportPolicy = reportPolicyForSessionMode(sessionMode);
   const followedCar = String(carNumber || stints[0]?.carNumber || '');
+  const invalidLegacyGaps = history.some((lap) => lap.gapSemantics === 'alternating-adjacent')
+    && gapSamples.some((sample) => /cumulative/.test(sample.source || ''));
+  if (invalidLegacyGaps) gapSamples = gapSamples.filter((sample) => !/cumulative/.test(sample.source || ''));
   const carLaps = lapAnalytics.lapsForCar(history, followedCar);
   const fallbackLaps = stints.flatMap((stint) => stint.laps || []);
   const raceLaps = carLaps.length ? carLaps : fallbackLaps;
@@ -328,8 +361,14 @@ function buildCanonicalReportPayload({
     }));
   const driverStats = rawDriverStats.map(compactStats);
   const expectedPitDurationMs = expectedPitDurationMsFromRules(pitRules);
+  const recordedStops = pitEvents.filter((stop) => String(stop.carNumber) === followedCar && stop.closed);
+  const legacyStops = pitStopsFromHistory(history, followedCar);
+  const representedCounts = new Set(recordedStops.map((stop) => stop.stopNumber).filter((count) => count != null));
   const pitStops = reportPolicy.includePitstops
-    ? enrichPitStops(pitStopsFromHistory(history, followedCar), expectedPitDurationMs)
+    ? enrichPitStops([...legacyStops.filter((stop) => !representedCounts.has(stop.stopNumber)
+      && !recordedStops.some((event) => event.lapNumber === stop.lapNumber)), ...recordedStops]
+      .sort((a, b) => a.stopNumber != null && b.stopNumber != null
+        ? a.stopNumber - b.stopNumber : (a.lapNumber ?? Infinity) - (b.lapNumber ?? Infinity)), expectedPitDurationMs)
     : [];
   const pitAnalysis = pitstopAnalysis(pitStops);
   const legacy = stints[0] ? buildStintReportPayload(stints[0], session, gapSamples) : null;
@@ -377,7 +416,12 @@ function buildCanonicalReportPayload({
         };
       })()
     },
-    caveats: [],
+    caveats: [
+      stints.some((s) => s.timerSource === 'net-driving-time') ? 'Driver times exclude observed fuel/pit intervals. Older lap-only histories provide estimated driving time, not certified driver-time compliance.' : '',
+      invalidLegacyGaps ? 'Legacy cumulative gaps from the rotating GAP layout were omitted: their original interpretation was incorrect.' : '',
+      raceLaps.some((lap) => lap.lapNumberSource === 'observed-sequence') ? 'Observed lap numbers count recorded passages, not official race laps; missed feed updates cannot be reconstructed.' : '',
+      pitStops.some((stop) => stop.durationSource === 'observed') ? 'Observed stop timers use feed transitions at polling resolution, not official timing loops.' : ''
+    ].filter(Boolean),
     stints: stints.map((stint) => canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes, pitStops)),
     // Keep the first automatic-report schema available to existing readers.
     session: legacy?.session || null,
@@ -490,7 +534,7 @@ function buildStintReportHtml(payload) {
     <p>${htmlEscape(session.teamName)}${session.className ? ` · ${htmlEscape(session.className)}` : ''} · car stint ${htmlEscape(stint.stintNumber)} · laps ${htmlEscape(stint.startLap)}–${htmlEscape(stint.endLap)}</p>
   </header>
   <section class="metrics">
-    <div class="metric"><span>Stint time</span><strong>${htmlEscape(formatMs(stint.stintTimeMs))}</strong></div>
+    <div class="metric"><span>${stint.timerSource === 'net-driving-time' ? 'Driving time' : 'Stint time'}</span><strong>${stint.drivingTimeEstimated ? '≈ ' : ''}${htmlEscape(formatMs(stint.stintTimeMs))}</strong></div>
     <div class="metric"><span>Average lap</span><strong>${htmlEscape(formatMs(stats.averageLapMs))}</strong></div>
     <div class="metric"><span>Best lap</span><strong>${htmlEscape(formatMs(stats.bestLapMs))}</strong></div>
     <div class="metric"><span>Average S1</span><strong>${htmlEscape(formatMs(stats.averageSector1Ms))}</strong></div>
@@ -547,21 +591,23 @@ function renderReportLabPdf(payloadPath, pdfPath, options = {}) {
   const python = options.python || findPdfPython();
   if (!python) return { rendered: false, reason: 'reportlab-unavailable' };
   const renderer = options.renderer || reportRendererPath();
+  const temporary = `${pdfPath}.pending.pdf`;
   const args = [
     renderer,
     '--input', payloadPath,
     '--output', path.dirname(pdfPath),
-    '--single-output', pdfPath
+    '--single-output', temporary
   ];
   if (options.includeSummary) args.push('--include-summary');
   const result = spawnSync(python, args, { encoding: 'utf8' });
-  if (result.error || result.status !== 0 || !fs.existsSync(pdfPath)) {
+  if (result.error || result.status !== 0 || !fs.existsSync(temporary)) {
     return {
       rendered: false,
       reason: 'reportlab-failed',
       error: result.error?.message || result.stderr || `renderer exited with status ${result.status}`
     };
   }
+  fs.renameSync(temporary, pdfPath);
   return { rendered: true, engine: 'reportlab' };
 }
 
@@ -579,7 +625,9 @@ async function printHtmlToPdf(BrowserWindow, html, pdfPath) {
       pageSize: 'A4',
       margins: { top: 0.35, bottom: 0.35, left: 0.35, right: 0.35 }
     });
-    fs.writeFileSync(pdfPath, pdf);
+    const temporary = `${pdfPath}.pending.pdf`;
+    await fs.promises.writeFile(temporary, pdf);
+    await fs.promises.rename(temporary, pdfPath);
   } finally {
     if (!reportWindow.isDestroyed()) reportWindow.destroy();
   }
@@ -594,6 +642,9 @@ async function writeClosedStintArtifacts({
   history = [],
   referenceTimes = {},
   pitRules = {},
+  pitEvents = [],
+  force = false,
+  printFallback = (html, pdfPath) => printHtmlToPdf(BrowserWindow, html, pdfPath),
   sessionMode = 'race',
   renderPdf = renderReportLabPdf
 }) {
@@ -611,7 +662,7 @@ async function writeClosedStintArtifacts({
   }
   const pdfExists = fs.existsSync(paths.pdfPath);
   const layoutIsCurrent = previousPayload?.reportLayoutVersion === REPORT_LAYOUT_VERSION;
-  if (previousPayload && pdfExists && layoutIsCurrent) {
+  if (!force && previousPayload && pdfExists && layoutIsCurrent) {
     return {
       ...paths,
       written: false,
@@ -626,11 +677,12 @@ async function writeClosedStintArtifacts({
     history,
     referenceTimes,
     pitRules,
+    pitEvents,
     sessionMode,
     carNumber: stint.carNumber
   });
   fs.writeFileSync(paths.jsonPath, JSON.stringify(payload, null, 2));
-  const needsPdf = !pdfExists || !layoutIsCurrent;
+  const needsPdf = force || !pdfExists || !layoutIsCurrent;
   if (needsPdf) {
     const result = await renderPdf(paths.jsonPath, paths.pdfPath, { includeSummary: false });
     if (!result?.rendered) {
@@ -639,11 +691,7 @@ async function writeClosedStintArtifacts({
       // Electron fallback still gives the engineer a readable report.
       payload.renderFallbackReason = result?.reason || 'unknown-renderer-error';
       fs.writeFileSync(paths.jsonPath, JSON.stringify(payload, null, 2));
-      await printHtmlToPdf(BrowserWindow, buildStintReportHtml({
-        session: payload.session,
-        stint: payload.stint,
-        gapHistory: payload.gapHistory
-      }), paths.pdfPath);
+      await printFallback(buildCanonicalFallbackHtml(payload), paths.pdfPath);
       return { ...paths, written: true, pdfCreated: true, engine: 'electron-fallback' };
     }
     return { ...paths, written: true, pdfCreated: true, engine: result.engine || 'reportlab' };
@@ -675,6 +723,36 @@ function buildEventSummaryHtml(title, payloads = []) {
   </style></head><body><header><h1>${htmlEscape(title)}</h1><p>${payloads.length} completed stint${payloads.length === 1 ? '' : 's'}</p></header>${sections}</body></html>`;
 }
 
+// Windows installations without Python still receive the same pit/fuel and
+// stint facts. Chromium paginates this table with repeating column headings.
+function buildCanonicalFallbackHtml(payload, includeSummary = false) {
+  const time = (value) => numberOrNull(value) === null ? '—' : formatMs(value);
+  const summary = payload.raceSummary || {};
+  const columns = ['Stop', 'Lap', 'Duration', 'Fuel*', 'Pit*', 'Total*', 'Target', 'Delta', 'Driver before', 'Driver after', 'Change'];
+  const stopRows = (summary.pitStops || []).map((stop) => [
+    stop.stopNumber ?? '—', stop.lapNumber ?? '—', time(stop.durationMs), time(stop.fuelDurationMs), time(stop.pitDurationMs),
+    time(stop.totalDurationMs), time(stop.targetDurationMs),
+    numberOrNull(stop.deltaVsTargetMs) === null ? '—' : `${stop.deltaVsTargetMs < 0 ? '-' : '+'}${time(Math.abs(stop.deltaVsTargetMs))}`,
+    stop.driverBefore || '—', stop.driverAfter || '—', stop.driverChanged == null ? 'unknown' : stop.driverChanged ? 'yes' : 'no'
+  ]).map((values) => `<tr>${values.map((value) => `<td>${htmlEscape(value)}</td>`).join('')}</tr>`).join('');
+  const overview = includeSummary ? `<section><h1>${htmlEscape(payload.race.sessionName)} · #${htmlEscape(payload.race.carNumber)}</h1>
+    <p>${summary.totalLaps || 0} recorded laps · average ${time(summary.stats?.averageLapMs)} · best ${time(summary.stats?.bestLapMs)}</p>
+    ${(summary.pitStops || []).length ? `<h2>Recorded pitstops and fuel</h2><table><thead><tr>${columns.map((label) => `<th>${label}</th>`).join('')}</tr></thead><tbody>${stopRows}</tbody></table>
+      <p>* Observed fuel/pit transitions at feed polling precision. Duration prefers provider L. PIT. Missing measurements stay unknown.</p>` : ''}
+    ${(payload.caveats || []).map((caveat) => `<p>${htmlEscape(caveat)}</p>`).join('')}</section>` : '';
+  const stints = payload.stints.map((stint) => {
+    const legacy = { session: { ...payload.race, driverName: stint.driverName }, stint: { ...stint, lapCount: stint.laps.length }, gapHistory: stint.gapHistory };
+    return buildStintReportHtml(legacy).match(/<body>([\s\S]*)<\/body>/)?.[1] || '';
+  });
+  const style = payload.stints.length ? buildStintReportHtml({ session: { ...payload.race, driverName: '' },
+    stint: { ...payload.stints[0], lapCount: payload.stints[0].laps.length } }).match(/<style>([\s\S]*)<\/style>/)?.[1] || '' : '';
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${style}
+    @page { size: A4 landscape; margin: 12mm; } table { width:100%; border-collapse:collapse; font-size:9px; }
+    th,td { border:1px solid #d8ddd7; padding:5px; } thead { display:table-header-group; }
+    tr { break-inside:avoid; } .stint-page { break-before:page; } section { break-inside:auto; }
+    </style></head><body>${overview}${stints.map((html, i) => `<div class="${includeSummary || i ? 'stint-page' : ''}">${html}</div>`).join('')}</body></html>`;
+}
+
 async function writeEventSummaryArtifacts({
   BrowserWindow,
   sessionFolder,
@@ -685,6 +763,8 @@ async function writeEventSummaryArtifacts({
   history = [],
   referenceTimes = {},
   pitRules = {},
+  pitEvents = [],
+  printFallback = (html, pdfPath) => printHtmlToPdf(BrowserWindow, html, pdfPath),
   sessionMode = 'race',
   renderPdf = renderReportLabPdf
 }) {
@@ -726,6 +806,7 @@ async function writeEventSummaryArtifacts({
       history,
       referenceTimes,
       pitRules,
+      pitEvents,
       sessionMode: reportPolicy.sessionMode,
       carNumber
     });
@@ -740,7 +821,7 @@ async function writeEventSummaryArtifacts({
     if (!result?.rendered) {
       payload.renderFallbackReason = result?.reason || 'unknown-renderer-error';
       fs.writeFileSync(jsonPath, JSON.stringify(payload, null, 2));
-      await printHtmlToPdf(BrowserWindow, buildEventSummaryHtml(group.title, payloads), pdfPath);
+      await printFallback(buildCanonicalFallbackHtml(payload, Boolean(group.includeSummary)), pdfPath);
     }
     results.push({ jsonPath, pdfPath });
   }
@@ -774,5 +855,6 @@ module.exports = {
   printHtmlToPdf,
   writeClosedStintArtifacts,
   buildEventSummaryHtml,
+  buildCanonicalFallbackHtml,
   writeEventSummaryArtifacts
 };

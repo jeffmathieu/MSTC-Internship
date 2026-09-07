@@ -3,6 +3,11 @@ const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { adaptTimingFeed } = require('../shared/timingFeed');
+const { updatePitEvents, serviceTimers } = require('../shared/pitEvents');
+const { normalizeFuelConfig, updateFuelState, fuelAction, fuelSummary } = require('../shared/fuelModel');
+const { createRendererChannel, compactView } = require('./rendererState');
+const { createSnapshotWriter } = require('./snapshotWriter');
 const {
   cleanText,
   parseTimingRow,
@@ -23,6 +28,8 @@ const {
 } = require('../shared/storageSchema');
 const {
   completedLaps,
+  prepareHistory,
+  prepareConditionHistory,
   lapPaceEligible,
   representativePaceLaps,
   sectorCaptureTransition,
@@ -52,7 +59,7 @@ const {
 } = require('../shared/gapMemory');
 const { normalizeMode, buildComparisonView, qualifyingAdjacentView } = require('../shared/sessionMode');
 const { preferStableSessionName } = require('../shared/sessionName');
-const { stintsForCar, buildStintState } = require('../shared/stintTracker');
+const { drivingStintsForCar: stintsForCar, buildDrivingStintState: buildStintState } = require('../shared/stintTracker');
 const { updateSessionTiming } = require('../shared/sessionTiming');
 const { followedClassCompletion, updateFinishCountdown } = require('../shared/sessionCompletion');
 const { buildTimingHighlights } = require('../shared/timingHighlights');
@@ -60,13 +67,13 @@ const { resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalRe
 const { setupAutoUpdates } = require('./autoUpdater');
 const { setupAppLifecycle } = require('./appLifecycle');
 const { haltCollectorForCompletion } = require('./collectorCompletion');
-const { writeClosedStintArtifacts, writeEventSummaryArtifacts } = require('./stintReports');
+const { printHtmlToPdf } = require('./stintReports');
+const { createReportQueue } = require('./reportQueue');
 const {
   normalizeTrackCondition,
   normalizeAnalysisFilter,
   resolveAnalysisCondition,
-  captureSectorConditions,
-  conditionFilteredHistory
+  captureSectorConditions
 } = require('../shared/trackConditions');
 
 // Main-process references. Electron keeps UI windows and timers alive through
@@ -77,10 +84,21 @@ const additionalDashboardWindows = new Map();
 const graphWindowsByCar = new Map();
 let pollTimer;
 let pollInFlight = false;
+let activePoll = Promise.resolve();
+let finishPoll = null;
 let shouldCloseLiveWindow = false;
 let gapMemoryState = null;
 const pendingStintReports = new Set();
 let automaticCompletionHandled = false;
+let feedState = {};
+const serviceStates = new Map();
+const fuelStates = new Map();
+const sequenceByCar = new Map();
+const checkedCsvHeaders = new Set();
+const rendererChannels = new Map();
+const snapshotWriter = createSnapshotWriter((error, context) => addError(error, context));
+const reportQueue = createReportQueue((html, pdfPath) => printHtmlToPdf(BrowserWindow, html, pdfPath));
+const completedReportKeys = new Set();
 
 // A real application quit must bypass the hidden live window's normal
 // close-to-hide behavior and stop the polling timer before Electron exits.
@@ -194,6 +212,7 @@ function normalizeSettings(settings) {
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     referenceTimesByMode,
     referenceTimes: referenceTimesByMode[sessionMode],
+    fuelByCar: Object.fromEntries(Object.entries(settings?.fuelByCar || {}).map(([car, config]) => [car, normalizeFuelConfig(config)])),
     pitRules: {
       ...DEFAULT_PIT_RULES,
       ...(settings?.pitRules || {}),
@@ -391,13 +410,23 @@ function createLiveWindow() {
 // Pushes the latest collector state to the renderer. Add new state fields to
 // collectorState first; the whole object is sent as-is.
 function broadcastState() {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('collector:update', collectorState);
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('collector:update', stateForRenderer(mainWindow.webContents));
   additionalDashboardWindows.forEach((win) => {
-    if (!win.isDestroyed()) win.webContents.send('collector:update', collectorState);
+    if (!win.isDestroyed()) win.webContents.send('collector:update', stateForRenderer(win.webContents));
   });
   graphWindowsByCar.forEach((win) => {
-    if (!win.isDestroyed()) win.webContents.send('collector:update', collectorState);
+    if (!win.isDestroyed()) win.webContents.send('collector:update', stateForRenderer(win.webContents));
   });
+}
+
+function stateForRenderer(contents, reset = false) {
+  if (!rendererChannels.has(contents.id)) {
+    rendererChannels.set(contents.id, createRendererChannel());
+    contents.once('destroyed', () => rendererChannels.delete(contents.id));
+  }
+  const url = new URL(contents.getURL() || 'file:///index.html');
+  const car = url.searchParams.get('car') || loadSettings().followedCar;
+  return rendererChannels.get(contents.id)(collectorState, car, url.pathname.endsWith('/graphs.html'), reset);
 }
 
 // Adds a compact error entry for the Debug panel. Only the latest 20 errors are
@@ -499,16 +528,19 @@ function normalizeSnapshot(snapshot) {
   if (!timingTable) {
     return { status: snapshot.bodyText?.includes('No active heat') ? 'waiting' : 'parser_error', message: 'No timing table with NR/TEAM/LAST/BEST-style headers detected yet.', headers: [], rows: [], session: parseSessionInfo(snapshot), diagnostics };
   }
-  const rows = applySingleClassFallback(timingTable.rows
+  const parsedRows = applySingleClassFallback(timingTable.rows
     .map((cells, rowIndex) => ({ rowIndex, ...parseTimingRow(timingTable.headers, cells), cells }))
     .filter((row) => row.carNumber !== null && row.carNumber !== undefined));
+  const adapted = adaptTimingFeed(feedState, timingTable.headers, parsedRows);
+  feedState = adapted.state;
+  const rows = adapted.rows;
   return {
     status: rows.length ? 'collecting' : 'waiting',
     message: rows.length ? `Collecting ${rows.length} live timing rows.` : 'Timing table detected, but no car rows parsed yet.',
     headers: timingTable.headers,
     rows,
     session: parseSessionInfo(snapshot),
-    diagnostics: { ...diagnostics, selectedTableIndex: timingTable.tableIndex, selectedHeaders: timingTable.headers, parsedCarNumbers: rows.map((row) => row.carNumber), firstParsedRows: rows.slice(0, 5) }
+    diagnostics: { ...diagnostics, gapLayout: feedState.alternating ? 'alternating-laps-and-adjacent-gap' : 'standard', selectedTableIndex: timingTable.tableIndex, selectedHeaders: timingTable.headers, parsedCarNumbers: rows.map((row) => row.carNumber), firstParsedRows: rows.slice(0, 5) }
   };
 }
 
@@ -549,7 +581,7 @@ function storageContext(settings, normalized, collectedAt = new Date().toISOStri
 // the fallback while stint data is still building.
 function averageLapForPitPlan(settings, carNumber = settings.followedCar) {
   const key = String(carNumber || '');
-  const currentConditionHistory = conditionFilteredHistory(
+  const currentConditionHistory = prepareConditionHistory(
     collectorState.lapHistory || [],
     normalizeTrackCondition(settings.trackCondition)
   );
@@ -612,9 +644,12 @@ function buildAndWritePitstopPlan(settings, context, rows, carNumber) {
       averageLapMs: averageLapForPitPlan(settings, followedCarNumber)
     }
   });
-  const payload = { ...plan, pitState };
-  fs.writeFileSync(path.join(folder, `pitstop_plan_car-${slugPart(followedCarNumber, 'unknown')}.json`), JSON.stringify(payload, null, 2));
-  if (followedCarNumber === String(settings.followedCar || '')) fs.writeFileSync(path.join(folder, 'pitstop_plan.json'), JSON.stringify(payload, null, 2));
+  const payload = { ...plan, pitState, serviceTimers: serviceTimers(serviceStates.get(followedCarNumber), context.collectedAt),
+    fuel: fuelSummary(fuelStates.get(followedCarNumber), settings.fuelByCar?.[followedCarNumber], {
+      averageLapMs: averageLapForPitPlan(settings, followedCarNumber), waitMs: plan.waitMs
+    }) };
+  snapshotWriter.write(path.join(folder, `pitstop_plan_car-${slugPart(followedCarNumber, 'unknown')}.json`), JSON.stringify(payload));
+  if (followedCarNumber === String(settings.followedCar || '')) snapshotWriter.write(path.join(folder, 'pitstop_plan.json'), JSON.stringify(payload));
   return payload;
 }
 
@@ -710,23 +745,21 @@ function appendLapHistory(settings, lapRecords) {
   const folder = ensureStorage(settings);
   const jsonlPath = path.join(folder, 'lap_history.jsonl');
   const csvPath = path.join(folder, 'lap_history.csv');
-  const expectedHeader = LAP_HISTORY_COLUMNS.join(',');
-  let rewroteCsv = false;
-  if (fs.existsSync(csvPath)) {
-    const currentHeader = fs.readFileSync(csvPath, 'utf8').split(/\r?\n/, 1)[0];
-    if (currentHeader !== expectedHeader) {
-      const existingRecords = fs.existsSync(jsonlPath)
-        ? fs.readFileSync(jsonlPath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line))
-        : [];
-      fs.writeFileSync(csvPath, toCsvRows([...existingRecords, ...lapRecords], LAP_HISTORY_COLUMNS) + '\n');
-      rewroteCsv = true;
-    }
-  } else {
-    fs.writeFileSync(csvPath, `${expectedHeader}\n`);
-  }
+  // Commit the canonical journal first. A failed CSV export must never cause
+  // an already-committed passage to be appended to JSONL again on the next poll.
   fs.appendFileSync(jsonlPath, lapRecords.map((entry) => JSON.stringify(entry)).join('\n') + '\n');
-  const currentHeader = fs.readFileSync(csvPath, 'utf8').split(/\r?\n/, 1)[0];
-  if (!rewroteCsv && currentHeader === expectedHeader) fs.appendFileSync(csvPath, lapRecords.map((entry) => toCsvRows([entry], LAP_HISTORY_COLUMNS).split('\n')[1]).join('\n') + '\n');
+  try {
+    if (!checkedCsvHeaders.has(csvPath)) {
+      const records = fs.readFileSync(jsonlPath, 'utf8').split(/\r?\n/).filter(Boolean).map(JSON.parse);
+      fs.writeFileSync(csvPath, toCsvRows(records, LAP_HISTORY_COLUMNS) + '\n');
+      checkedCsvHeaders.add(csvPath);
+    } else {
+      fs.appendFileSync(csvPath, lapRecords.map((entry) => toCsvRows([entry], LAP_HISTORY_COLUMNS).split('\n')[1]).join('\n') + '\n');
+    }
+  } catch (error) {
+    checkedCsvHeaders.delete(csvPath);
+    addError(error, 'csv-export');
+  }
 }
 
 // Stores parser diagnostics that explain which timing table was selected and
@@ -769,7 +802,7 @@ function writeSessionMetadata(settings, context) {
 function compactStats(stats) {
   if (!stats) return null;
   const { laps, ...compact } = stats;
-  return compact;
+  return compactView(compact);
 }
 
 // Compacts nested dashboard analysis for the renderer/storage summary.
@@ -795,9 +828,9 @@ function compactDashboardAnalysis(analysis) {
 // Rebuilds all aggregate analytics from stored lap history. This runs after
 // every poll, but the output stays compact enough for renderer state and disk.
 function buildAnalyticsSummary(settings, context, rows = []) {
-  const history = collectorState.lapHistory || [];
+  const history = prepareHistory(collectorState.lapHistory || []);
   const resolvedConditionFilter = resolveAnalysisCondition(settings.analysisConditionFilter, settings.trackCondition);
-  const analysisHistory = conditionFilteredHistory(history, resolvedConditionFilter);
+  const analysisHistory = prepareConditionHistory(history, resolvedConditionFilter);
   const laps = completedLaps(history);
   const carNumbers = [...new Set(laps.map((lap) => lap.carNumber).filter(Boolean))];
   const classNames = [...new Set(laps.map((lap) => lap.className).filter(Boolean))];
@@ -905,15 +938,13 @@ function buildAnalyticsSummary(settings, context, rows = []) {
 function writeAnalyticsSummary(settings, context, rows = []) {
   const folder = ensureStorage(settings);
   const summary = buildAnalyticsSummary(settings, context, rows);
-  fs.writeFileSync(path.join(folder, 'analytics_summary.json'), JSON.stringify(summary, null, 2));
+  snapshotWriter.write(path.join(folder, 'analytics_summary.json'), JSON.stringify(summary));
   collectorState.analyticsSummary = summary;
   return summary;
 }
 
-// Reconstructs driver stints from immutable lap history on every update. This
-// makes stint numbering restart-safe: reopening an existing session folder
-// produces the same groups without relying on transient in-memory counters.
-// Closed stints receive one JSON and one Electron-generated PDF report.
+// Live timers stay in the collector; report calculations and rendering run in
+// a serial worker queue. Only session finalization waits for those jobs.
 async function writeStintStateAndReports(settings, context, rows = [], options = {}) {
   const folder = ensureStorage(settings);
   const followedCars = normalizeFollowedCars(settings);
@@ -921,6 +952,7 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
   const sessionFinished = Boolean(options.sessionFinished);
   const reportSessionMode = normalizeMode(settings.sessionMode);
   const stintOptions = {
+    pitEventsByCar: Object.fromEntries([...serviceStates].map(([car, state]) => [car, state.events || []])),
     closeFinalAt: sessionFinished ? generatedAt : null,
     generatedAt,
     liveRows: rows,
@@ -930,54 +962,34 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
     sessionStartedAt: collectorState.sessionTiming?.startedAt || null
   };
   const stintState = buildStintState(collectorState.lapHistory || [], followedCars, generatedAt, stintOptions);
-  fs.writeFileSync(path.join(folder, 'stint_state.json'), JSON.stringify(stintState, null, 2));
+  snapshotWriter.write(path.join(folder, 'stint_state.json'), JSON.stringify(stintState));
   collectorState.stintState = stintState;
   const generatedStintReports = [];
   const generatedEventSummaries = [];
 
   for (const carNumber of followedCars) {
     const liveRow = rows.find((row) => String(row.carNumber) === String(carNumber));
-    const closedStints = stintsForCar(collectorState.lapHistory || [], carNumber, {
-      ...stintOptions,
-      liveRow,
-      previousCurrentStint: stintOptions.previousState?.cars?.[carNumber]?.currentStint || null,
-      previousGeneratedAt: stintOptions.previousState?.generatedAt || null
-    }).filter((stint) => stint.closed && stint.lapCount > 0);
+    const closedStints = stintState.cars[carNumber].stints.filter((stint) => stint.closed && stint.lapCount > 0);
+    const input = { sessionFolder: folder, carNumber,
+      session: context?.session || collectorState.session || {},
+      gapSamples: gapMemoryState?.samples || [],
+      pitEvents: serviceStates.get(carNumber)?.events || [],
+      referenceTimes: settings.referenceTimes || {}, pitRules: settings.pitRules || {}, sessionMode: reportSessionMode,
+      stintOptions: { closeFinalAt: stintOptions.closeFinalAt, generatedAt, liveRow } };
+    if (sessionFinished && closedStints.length) {
+      const result = await reportQueue.enqueue(`${folder}|${carNumber}|final`, { ...input, final: true });
+      generatedStintReports.push(...result.results);
+      generatedEventSummaries.push(...result.summaries);
+      continue;
+    }
     for (const stint of closedStints) {
       const reportKey = `${folder}|${carNumber}|${stint.stintNumber}|${stint.driverName}`;
-      if (pendingStintReports.has(reportKey)) continue;
+      if (pendingStintReports.has(reportKey) || completedReportKeys.has(reportKey)) continue;
       pendingStintReports.add(reportKey);
-      try {
-        const report = await writeClosedStintArtifacts({
-          BrowserWindow,
-          sessionFolder: folder,
-          stint,
-          session: context?.session || collectorState.session || {},
-          gapSamples: gapMemoryState?.samples || [],
-          history: collectorState.lapHistory || [],
-          referenceTimes: settings.referenceTimes || {},
-          pitRules: settings.pitRules || {},
-          sessionMode: reportSessionMode
-        });
-        if (report?.written) generatedStintReports.push(report);
-      } finally {
-        pendingStintReports.delete(reportKey);
-      }
-    }
-    if (sessionFinished && closedStints.length) {
-      const summaries = await writeEventSummaryArtifacts({
-        BrowserWindow,
-        sessionFolder: folder,
-        carNumber,
-        stints: closedStints,
-        session: context?.session || collectorState.session || {},
-        gapSamples: gapMemoryState?.samples || [],
-        history: collectorState.lapHistory || [],
-        referenceTimes: settings.referenceTimes || {},
-        pitRules: settings.pitRules || {},
-        sessionMode: reportSessionMode
-      });
-      generatedEventSummaries.push(...summaries);
+      reportQueue.enqueue(reportKey, { ...input, stintNumber: stint.stintNumber })
+        .then(() => completedReportKeys.add(reportKey))
+        .catch((error) => addError(error, 'stint-report-worker'))
+        .finally(() => pendingStintReports.delete(reportKey));
     }
   }
   return { ...stintState, generatedStintReports, generatedEventSummaries };
@@ -999,6 +1011,10 @@ async function showReportGeneratedMessage(result = {}, automatic = false) {
 }
 
 async function finalizeCurrentSession({ automatic = false } = {}) {
+  stopCollector(true);
+  await activePoll;
+  await snapshotWriter.flush();
+  await reportQueue.flush();
   const configuredSettings = loadSettings();
   const folder = ensureStorage(configuredSettings);
   const storedHistory = loadExistingHistory(configuredSettings);
@@ -1083,15 +1099,45 @@ function loadExistingHistory(settings) {
   sectorCaptureResetPendingByCar.clear();
   latestPitStateByCar.clear();
   latestFcyGapStateByCar.clear();
+  sequenceByCar.clear();
+  checkedCsvHeaders.clear();
+  serviceStates.clear();
+  fuelStates.clear();
   const folder = ensureStorage(settings);
   const jsonlPath = path.join(folder, 'lap_history.jsonl');
+  let restoredEntries = [];
   try {
     const { entries, knownKeys } = loadSessionHistory({ fs, jsonlPath, identityForLap: lapIdentity });
+    restoredEntries = entries;
+    try {
+      const storedFuel = loadStoredJson(fs, path.join(folder, 'fuel_state.json')) || {};
+      Object.entries(storedFuel).forEach(([car, state]) => fuelStates.set(car, state));
+    } catch (error) { addError(error, 'loadFuelState'); }
     knownKeys.forEach((key) => knownLapKeys.add(key));
-    return entries;
+    entries.forEach((entry) => {
+      const key = liveRowIdentity(entry);
+      latestLiveRowByCar.set(key, entry);
+      sequenceByCar.set(key, Math.max(Number(entry.historySequence) || 0, (sequenceByCar.get(key) || 0) + 1));
+    });
+    const storedServices = loadStoredJson(fs, path.join(folder, 'pit_event_state.json')) || {};
+    Object.entries(storedServices).forEach(([car, state]) => serviceStates.set(car, state));
+    const ledgerPath = path.join(folder, 'pit_events.jsonl');
+    if (fs.existsSync(ledgerPath)) {
+      fs.readFileSync(ledgerPath, 'utf8').split(/\r?\n/).filter(Boolean).map(JSON.parse).forEach((event) => {
+        const state = serviceStates.get(event.carNumber) || { events: [] };
+        const events = new Map((state.events || []).map((item) => [item.id, item]));
+        events.set(event.id, event);
+        state.events = [...events.values()];
+        state.active = state.events.at(-1)?.closed ? null : state.events.at(-1);
+        serviceStates.set(event.carNumber, state);
+      });
+    }
+    feedState = loadStoredJson(fs, path.join(folder, 'timing_feed_state.json')) || {};
+    return prepareHistory(entries);
   } catch (error) {
     addError(error, 'loadExistingHistory');
-    return [];
+    // A damaged optional timer checkpoint must not discard a valid lap log.
+    return prepareHistory(restoredEntries);
   }
 }
 
@@ -1121,27 +1167,62 @@ function currentPitTargetDurationMs(settings = {}) {
 // Stores newly completed laps from provider-independent normalized storage rows.
 function updateLapHistory(settings, storageRows) {
   const newEntries = [];
+  const stagedRows = new Map();
   const pitTargetDurationMs = currentPitTargetDurationMs(settings);
   storageRows.forEach((row) => {
     if (!row.carNumber || !row.lastLap) return;
     const carKey = liveRowIdentity(row);
     const previousRow = latestLiveRowByCar.get(carKey);
-    latestLiveRowByCar.set(carKey, row);
+    stagedRows.set(carKey, row);
 
-    if (previousRow && previousRow.lastLap === row.lastLap) return;
+    const reliableCounter = row.lapNumber && row.lapNumberSource !== 'alternating-gap';
+    if (previousRow && (reliableCounter
+      ? String(previousRow.lapNumber) === String(row.lapNumber)
+      : previousRow.lastLap === row.lastLap)) return;
 
     const completedRow = completedLapRowFromLiveRow(row, previousRow);
     const entry = lapRecordFromNormalizedRow(completedRow);
     entry.pitTargetDurationMs = pitTargetDurationMs;
     if (!entry.carNumber || !entry.lastLap || entry.lapTimeMs === '') return;
+    entry.historySequence = (sequenceByCar.get(carKey) || 0) + 1;
+    entry.lapId = `${carKey}|observed-${entry.historySequence}`;
     const key = lapIdentity(entry);
     if (knownLapKeys.has(key)) return;
-    knownLapKeys.add(key);
     newEntries.push(entry);
   });
-  try { appendLapHistory(settings, newEntries); } catch (error) { addError(error, 'appendLapHistory'); }
-  if (newEntries.length) collectorState.lapHistory = [...collectorState.lapHistory, ...newEntries].slice(-20000);
+  appendLapHistory(settings, newEntries);
+  stagedRows.forEach((row, key) => latestLiveRowByCar.set(key, row));
+  newEntries.forEach((entry) => {
+    knownLapKeys.add(lapIdentity(entry));
+    sequenceByCar.set(liveRowIdentity(entry), entry.historySequence);
+  });
+  if (newEntries.length) {
+    const previous = collectorState.lapHistory;
+    collectorState.lapHistory = prepareHistory([...previous, ...newEntries], previous, newEntries);
+  }
   return newEntries.length;
+}
+
+function updateServiceEvents(settings, rows, context) {
+  const folder = ensureStorage(settings);
+  const followed = new Set(normalizeFollowedCars(settings));
+  rows.filter((row) => followed.has(String(row.carNumber))).forEach((row) => {
+    const key = String(row.carNumber);
+    const carLaps = lapsForCar(collectorState.lapHistory, key);
+    const result = updatePitEvents(serviceStates.get(key), row, context.collectedAt, {
+      historySequence: carLaps.at(-1)?.historySequence ?? null,
+      maximumObservationGapMs: Math.max(15000, Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) * 3),
+      targetDurationMs: settings.pitRules?.pitStopDurationMs
+    });
+    if (result.changedEvents.length) fs.appendFileSync(path.join(folder, 'pit_events.jsonl'),
+      result.changedEvents.map((event) => JSON.stringify(event)).join('\n') + '\n');
+    serviceStates.set(key, result.state);
+    fuelStates.set(key, updateFuelState(fuelStates.get(key), { sequence: carLaps.at(-1)?.historySequence || 0,
+      events: result.state.events, config: settings.fuelByCar?.[key] }));
+  });
+  snapshotWriter.write(path.join(folder, 'pit_event_state.json'), JSON.stringify(Object.fromEntries(serviceStates)));
+  snapshotWriter.write(path.join(folder, 'timing_feed_state.json'), JSON.stringify(feedState));
+  snapshotWriter.write(path.join(folder, 'fuel_state.json'), JSON.stringify(Object.fromEntries(fuelStates)));
 }
 
 function normalizeManualLapStatusInput(value) {
@@ -1194,6 +1275,7 @@ function manualLapPatch(status) {
 }
 
 function manualLapTargetMatches(entry, target = {}) {
+  if (target.lapId) return entry.lapId === target.lapId;
   if (String(entry.carNumber || '') !== String(target.carNumber || '')) return false;
   const entryLap = String(entry.lapNumber || '');
   const targetLap = String(target.lapNumber || '');
@@ -1216,6 +1298,7 @@ function rebuildCollectorDerivedState(settings, context = null, rows = collector
   const generatedAt = context?.collectedAt || new Date().toISOString();
   const followedCars = normalizeFollowedCars(settings);
   collectorState.stintState = buildStintState(collectorState.lapHistory || [], followedCars, generatedAt, {
+    pitEventsByCar: Object.fromEntries([...serviceStates].map(([car, state]) => [car, state.events || []])),
     generatedAt,
     liveRows: rows,
     previousState: collectorState.stintState,
@@ -1246,7 +1329,7 @@ function updateStoredLapManualStatus(payload = {}) {
     return { ...entry, ...patch };
   });
   if (!changed) return { ok: false, message: 'Lap not found', state: collectorState };
-  collectorState.lapHistory = nextHistory;
+  collectorState.lapHistory = prepareHistory(nextHistory);
   rewriteLapHistoryFiles(settings, nextHistory);
   rebuildCollectorDerivedState(settings);
   collectorState.message = `Lap ${payload.lapNumber || ''} marked as ${normalizeManualLapStatusInput(payload.status)}.`;
@@ -1280,6 +1363,7 @@ async function pollLivePage() {
   // or PDF build from allowing another poll to start concurrently.
   if (pollInFlight || !liveWindow || liveWindow.isDestroyed()) return;
   pollInFlight = true;
+  activePoll = new Promise((resolve) => { finishPoll = resolve; });
   collectorState.lastPollAt = new Date().toISOString();
   try {
     const settings = loadSettings();
@@ -1293,6 +1377,7 @@ async function pollLivePage() {
     const primaryCar = String(settings.followedCar || '');
     const completion = followedClassCompletion(analysisRows, primaryCar);
     const newLapCount = updateLapHistory(settings, storageRows);
+    updateServiceEvents(settings, analysisRows, context);
     const primaryStats = carStats(collectorState.lapHistory || [], primaryCar);
     const primaryRow = analysisRows.find((row) => String(row.carNumber) === primaryCar);
     const finishCountdown = updateFinishCountdown(collectorState.finishCountdown, {
@@ -1391,6 +1476,8 @@ async function pollLivePage() {
     collectorState.status = 'error'; collectorState.message = 'Could not read the live timing page. See Debug for details.'; addError(error, 'pollLivePage');
   } finally {
     pollInFlight = false;
+    finishPoll?.();
+    finishPoll = null;
     broadcastState();
   }
 }
@@ -1423,6 +1510,9 @@ function storageInfo(settings) {
 // Poll frequency is controlled by settings.pollIntervalMs.
 async function startCollector(url) {
   stopCollector(false);
+  await activePoll;
+  await snapshotWriter.flush();
+  completedReportKeys.clear();
   const settings = loadSettings();
   const startedAt = new Date().toISOString();
   const storageSessionFolder = resolveSessionFolder(settings.storageFolder, defaultStorageFolder());
@@ -1533,7 +1623,7 @@ ipcMain.handle('storage:chooseFolder', async () => {
 });
 
 ipcMain.handle('collector:start', (_event, url) => startCollector(url));
-ipcMain.handle('collector:stop', async () => {
+ipcMain.handle('collector:stop', async (event) => {
   const result = await dialog.showMessageBox(mainWindow, {
     type: 'warning',
     title: 'End this session?',
@@ -1543,14 +1633,46 @@ ipcMain.handle('collector:stop', async () => {
     defaultId: 0,
     cancelId: 0
   });
-  if (result.response !== 1) return { cancelled: true, state: collectorState };
-  const state = await finalizeCurrentSession({ automatic: false });
-  return { cancelled: false, state };
+  if (result.response !== 1) return { cancelled: true, state: stateForRenderer(event.sender) };
+  await finalizeCurrentSession({ automatic: false });
+  return { cancelled: false, state: stateForRenderer(event.sender) };
 });
-ipcMain.handle('collector:getState', () => collectorState);
+ipcMain.handle('collector:getState', (event) => stateForRenderer(event.sender, true));
 ipcMain.handle('collector:openLiveWindow', () => { if (liveWindow && !liveWindow.isDestroyed()) { liveWindow.show(); liveWindow.focus(); return true; } return false; });
 ipcMain.handle('graphs:open', (_event, carNumber) => openGraphsWindow(carNumber));
-ipcMain.handle('laps:updateStatus', (_event, payload) => updateStoredLapManualStatus(payload));
+async function updateFuelSettingsAndState(payload = {}) {
+  const settings = loadSettings();
+  const car = String(payload.carNumber || settings.followedCar);
+  if (!normalizeFollowedCars(settings).includes(car)) throw new Error('Select a followed car.');
+  const sequence = lapsForCar(collectorState.lapHistory, car).at(-1)?.historySequence || 0;
+  const service = serviceStates.get(car);
+  let state = updateFuelState(fuelStates.get(car), { sequence, events: service?.events || [], config: settings.fuelByCar?.[car] });
+  const config = normalizeFuelConfig(payload.config || settings.fuelByCar?.[car]);
+  if (payload.config && Object.values(payload.config).some((v) => v != null && v !== '' && (!Number.isFinite(Number(v)) || Number(v) < 0))) {
+    throw new Error('Fuel settings must be non-negative numbers.');
+  }
+  if (config.capacityLitres && config.reserveLitres > config.capacityLitres) throw new Error('Reserve cannot exceed tank capacity.');
+  const stop = service?.active || service?.events?.at(-1);
+  if (payload.action) state = fuelAction(state, { action: payload.action, litres: payload.litres,
+    at: new Date().toISOString(), sequence, stopId: stop?.id, stopActive: Boolean(service?.active), stopExitAt: stop?.exitAt }, config);
+  if (config.capacityLitres && state.balanceLitres > config.capacityLitres) throw new Error('Tank capacity is below the current estimate. Calibrate the level first.');
+  const updated = { ...settings, fuelByCar: { ...settings.fuelByCar, [car]: config } };
+  saveSettings(updated);
+  fuelStates.set(car, state);
+  snapshotWriter.write(path.join(ensureStorage(updated), 'fuel_state.json'), JSON.stringify(Object.fromEntries(fuelStates)));
+  await snapshotWriter.flush();
+  rebuildCollectorDerivedState(updated);
+  return updated;
+}
+ipcMain.handle('fuel:update', async (event, payload = {}) => {
+  const updated = await updateFuelSettingsAndState(payload);
+  broadcastState();
+  return { settings: updated, state: stateForRenderer(event.sender) };
+});
+ipcMain.handle('laps:updateStatus', (event, payload) => {
+  const result = updateStoredLapManualStatus(payload);
+  return { ...result, state: stateForRenderer(event.sender) };
+});
 
 // Creates timestamped exports of the current rows and in-memory lap history.
 // The always-overwritten "latest_*" files are written by saveLatestSnapshot().

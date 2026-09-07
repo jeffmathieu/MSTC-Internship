@@ -29,9 +29,9 @@ WET = HexColor('#2A9DB0')
 TRANSITION = HexColor('#D97730')
 POINT_RADIUS = 1.5
 CONDITION_RING_RADIUS = 2.6
-# The pitstop table uses a 15 pt row height on landscape A4. Twenty-two rows
+# The pitstop table uses a 15 pt row height on landscape A4. Twenty rows
 # leave enough footer/header breathing room while keeping every column readable.
-PITSTOP_ROWS_PER_PAGE = 22
+PITSTOP_ROWS_PER_PAGE = 20
 
 
 def fmt_time(ms, decimals=3):
@@ -83,6 +83,8 @@ def pitstop_header_label(stop):
     if not stop:
         return ''
     parts = [f"End pit #{stop.get('stopNumber', '-')}:", fmt_duration(stop.get('durationMs'))]
+    if stop.get('fuelDurationMs') is not None:
+        parts.append(f"| fuel {fmt_duration(stop.get('fuelDurationMs'))} | pit {fmt_duration(stop.get('pitDurationMs'))}")
     delta = stop.get('deltaVsTargetMs')
     if isinstance(delta, (int, float)) and math.isfinite(delta):
         parts.append(f'({fmt_delta_duration(delta)} vs target)')
@@ -273,7 +275,7 @@ def draw_summary(c, x, y, w, h, stint):
     best_sectors = [stats.get('bestSector1Ms'), stats.get('bestSector2Ms'), stats.get('bestSector3Ms')]
     ideal_time = sum(best_sectors) if all(isinstance(value, (int, float)) and math.isfinite(value) for value in best_sectors) else None
     metrics = [
-        ('Stint time', fmt_duration(stint['stintTimeMs'])),
+        ('Driving time' if stint.get('timerSource') == 'net-driving-time' else 'Stint time', ('~ ' if stint.get('drivingTimeEstimated') else '') + fmt_duration(stint['stintTimeMs'])),
         ('Total driver', fmt_duration(stint['totalDriverTimeMs'])),
         ('Average lap', fmt_time(stats.get('averageLapMs'))),
         ('Best lap', fmt_time(stats.get('bestLapMs'))),
@@ -765,17 +767,20 @@ def render_pitstop_analysis_page(c, payload, stops, page_number, page_count):
         summary_card(c, 28 + index * (card_w + 4), 455, card_w, label, value)
 
     table_x, table_y, table_w, table_h = 28, 72, PAGE_W - 56, 355
-    panel(c, table_x, table_y, table_w, table_h, 'All measured pitstops')
+    panel(c, table_x, table_y, table_w, table_h, 'Recorded pitstops and fuel')
     columns = [
         ('Stop', table_x + 14),
-        ('Lap', table_x + 58),
-        ('Duration', table_x + 102),
-        ('Target', table_x + 164),
-        ('Delta', table_x + 226),
-        ('Rejoin', table_x + 286),
-        ('Driver before', table_x + 360),
-        ('Driver after', table_x + 510),
-        ('Change', table_x + 660),
+        ('Lap', table_x + 48),
+        ('Duration', table_x + 88),
+        ('Fuel*', table_x + 138),
+        ('Pit*', table_x + 178),
+        ('Total*', table_x + 218),
+        ('Target', table_x + 263),
+        ('Delta', table_x + 303),
+        ('Rejoin', table_x + 350),
+        ('Driver before', table_x + 428),
+        ('Driver after', table_x + 546),
+        ('Change', table_x + 668),
     ]
     header_y = table_y + table_h - 38
     c.setFillColor(MUTED)
@@ -791,19 +796,22 @@ def render_pitstop_analysis_page(c, payload, stops, page_number, page_count):
     for stop in stops:
         delta = stop.get('deltaVsTargetMs')
         values = [
-            (table_x + 14, f"#{stop.get('stopNumber', '-')}"),
-            (table_x + 58, str(stop.get('lapNumber') or '-')),
-            (table_x + 102, fmt_duration(stop.get('durationMs'))),
-            (table_x + 164, fmt_duration(stop.get('targetDurationMs'))),
-            (table_x + 226, fmt_delta_duration(delta)),
-            (table_x + 286, pit_rejoin_label(stop) or '-'),
-            (table_x + 360, str(stop.get('driverBefore') or '-')[:24]),
-            (table_x + 510, str(stop.get('driverAfter') or '-')[:24]),
-            (table_x + 660, 'yes' if stop.get('driverChanged') else 'no'),
+            (table_x + 14, f"#{stop.get('stopNumber') or '-'}"),
+            (table_x + 48, str(stop.get('lapNumber') or '-') + ('~' if stop.get('lapNumber') and stop.get('lapNumberSource') == 'observed-sequence' else '')),
+            (table_x + 88, fmt_duration(stop.get('durationMs')) + ('*' if stop.get('durationSource') == 'observed' else '')),
+            (table_x + 138, fmt_duration(stop.get('fuelDurationMs'))),
+            (table_x + 178, fmt_duration(stop.get('pitDurationMs'))),
+            (table_x + 218, fmt_duration(stop.get('totalDurationMs'))),
+            (table_x + 263, fmt_duration(stop.get('targetDurationMs'))),
+            (table_x + 303, fmt_delta_duration(delta)),
+            (table_x + 350, pit_rejoin_label(stop) or '-'),
+            (table_x + 428, str(stop.get('driverBefore') or '-')[:23]),
+            (table_x + 546, str(stop.get('driverAfter') or '-')[:23]),
+            (table_x + 668, 'unknown' if stop.get('driverChanged') is None else 'yes' if stop.get('driverChanged') else 'no'),
         ]
         c.setFont('Helvetica', 7)
         for xx, value in values:
-            c.setFillColor(RED if xx == table_x + 226 and isinstance(delta, (int, float)) and delta > 0 else (GREEN if xx == table_x + 226 and isinstance(delta, (int, float)) else INK))
+            c.setFillColor(RED if xx == table_x + 303 and isinstance(delta, (int, float)) and delta > 0 else (GREEN if xx == table_x + 303 and isinstance(delta, (int, float)) else INK))
             c.drawString(xx, yy, value)
         yy -= row_h
 
@@ -811,9 +819,11 @@ def render_pitstop_analysis_page(c, payload, stops, page_number, page_count):
     slowest = analysis.get('slowestStop') or {}
     c.setFillColor(MUTED)
     c.setFont('Helvetica', 6.5)
+    c.drawString(28, 56, '* Observed feed transitions; polling precision. Duration prefers provider L. PIT. Total = observed fuel + pit.')
+    c.drawString(28, 46, '~ Recorded passage number, not official race lap. Unknown data is shown as a dash; absent fuel is 0:00 for fully observed stops.')
     c.drawString(
         28,
-        38,
+        34,
         f"Fastest stop #{fastest.get('stopNumber', '-')} {fmt_duration(fastest.get('durationMs'))}; "
         f"slowest stop #{slowest.get('stopNumber', '-')} {fmt_duration(slowest.get('durationMs'))}. "
         "Delta is measured pit duration minus configured target pit time."
@@ -836,14 +846,15 @@ def render_page(c, payload, stint, page_number):
     c.drawRightString(PAGE_W - 28, PAGE_H - 27, stint['driverName'])
     c.setFont('Helvetica', 8)
     laps = stint.get('laps', [])
-    start_lap = stint.get('startLap') if stint.get('startLap') is not None else (laps[0].get('lapNumber') if laps else '-')
-    end_lap = stint.get('endLap') if stint.get('endLap') is not None else (laps[-1].get('lapNumber') if laps else '-')
+    start_lap = stint.get('startLap') or (laps[0].get('lapNumber') if laps else None) or '-'
+    end_lap = stint.get('endLap') or (laps[-1].get('lapNumber') if laps else None) or '-'
+    lap_label = 'observed laps' if stint.get('lapNumberSource') == 'observed-sequence' else 'laps'
     driver_stint_number = stint.get('driverStintNumber') or stint.get('stintNumber') or '-'
     car_stint_number = stint.get('stintNumber') or '-'
     c.drawRightString(
         PAGE_W - 28,
         PAGE_H - 43,
-        f"Driver stint {driver_stint_number}  |  Car stint {car_stint_number}  |  laps {start_lap}-{end_lap}"
+        f"Driver stint {driver_stint_number}  |  Car stint {car_stint_number}  |  {lap_label} {start_lap}-{end_lap}"
     )
     end_pit_label = pitstop_header_label(stint.get('endPitStop'))
     if end_pit_label:

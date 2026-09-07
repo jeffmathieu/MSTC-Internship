@@ -29,6 +29,7 @@ function canonicalHeader(header) {
     P: 'position',
     POSITION: 'position',
     STATE: 'state',
+    STATUS: 'state',
     NOW: 'state',
     M: 'movement',
     NR: 'carNumber',
@@ -76,6 +77,7 @@ function canonicalHeader(header) {
     PIT: 'pit',
     PITINFO: 'pit',
     LASTPIT: 'lastPit',
+    PITTIME: 'lastPit',
     LPIT: 'lastPit',
     PITSTOP: 'pit',
     PITSTOPS: 'pit',
@@ -248,7 +250,10 @@ function parseTimingRow(headers, cells) {
   return {
     position: parseInteger(valueAt(cells, headerMap, 'position')),
     movement: valueAt(cells, headerMap, 'movement'),
-    state: valueAt(cells, headerMap, 'state'),
+    // GetRaceResults uses an unlabeled status cell immediately after POS.
+    // Accept only explicit service flags there, never an arbitrary column.
+    state: valueAt(cells, headerMap, 'state') || (/^(F|P)$/i.test(raw.column_1 || '')
+      && headerMap.position === 0 && headerMap.carNumber === 2 ? raw.column_1 : ''),
     carNumber,
     carNumberRaw,
     eta: valueAt(cells, headerMap, 'eta'),

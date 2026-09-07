@@ -303,6 +303,20 @@ function applyPitCircuitDefaults() {
   updatePitDistanceNote();
 }
 
+const FUEL_INPUTS = { capacityLitres: 'fuel-capacity', litresPerLap: 'fuel-consumption', litresPerSecond: 'fuel-flow',
+  reserveLitres: 'fuel-reserve', plannedPitInLaps: 'fuel-pit-laps', targetStintLaps: 'fuel-stint-laps' };
+async function saveFuel(action = '') {
+  const config = Object.fromEntries(Object.entries(FUEL_INPUTS).map(([key, id]) => [key, $(id).value]));
+  config.enabled = $('fuel-enabled').checked;
+  const litres = action === 'calibrate' ? $('fuel-level-input').value : $('fuel-added-input').value;
+  try {
+    const result = await window.liveTiming.updateFuel({ carNumber: activeCarNumber(), config, action, litres });
+    currentSettings = result.settings;
+    render(result.state);
+    setText('fuel-action-message', action ? 'Saved. Actual litres override the estimate for this stop.' : 'Fuel settings saved.');
+    return true;
+  } catch (error) { setText('fuel-action-message', error.message); return false; }
+}
 function showPitSetup(show = true) {
   if (show) {
     $('pit-race-hours').value = String((currentSettings?.pitRules?.raceDurationMs || 86400000) / 3600000);
@@ -317,6 +331,16 @@ function showPitSetup(show = true) {
     $('pit-safety-laps').value = String(currentSettings?.pitRules?.safetyBufferLaps ?? 2);
     $('pit-safety-seconds').value = String((currentSettings?.pitRules?.fixedSafetyBufferMs ?? 30000) / 1000);
     updatePitDistanceNote();
+  }
+  if (show) {
+    const fuel = currentSettings?.fuelByCar?.[activeCarNumber()] || {};
+    $('fuel-enabled').checked = fuel.enabled === true;
+    $('fuel-fields').disabled = !fuel.enabled;
+    setText('fuel-setup-car', activeCarNumber());
+    Object.entries(FUEL_INPUTS).forEach(([field, id]) => { $(id).value = fuel[field] ?? ''; });
+    $('fuel-level-input').value = '';
+    $('fuel-added-input').value = '';
+    setText('fuel-action-message', '');
   }
   $('pit-setup-modal')?.classList.toggle('hidden', !show);
 }
@@ -380,7 +404,7 @@ function historySortTime(entry) {
 // Reads lap numbers while treating missing/zero as unknown. This keeps debug
 // history labels stable for providers that do not expose lap numbers.
 function lapSortNumber(entry) {
-  const n = Number(entry.lapNumber);
+  const n = Number(entry.displayLapNumber ?? entry.lapNumber ?? entry.historySequence);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
@@ -425,6 +449,7 @@ function manualStatusBadge(status) {
 function lapStatusPayload(lap = {}, status = 'normal') {
   return {
     carNumber: activeCarNumber(),
+    lapId: lap.lapId,
     lapNumber: lap.lapNumber,
     lapTimeMs: lap.lapTimeMs,
     collectedAt: lap.collectedAt || '',
@@ -435,33 +460,58 @@ function lapStatusPayload(lap = {}, status = 'normal') {
 // Shows every completed lap for the active dashboard car, newest first. The
 // list remains vertically scrollable for a complete 24-hour history. Status,
 // initials and best-lap highlights are precomputed by timingHighlights.js.
-function renderLapStrip(state, precomputedHighlights = null) {
+function renderLapStrip(state, precomputedHighlights = null, scrolling = false) {
   const list = $('lap-strip-list');
   if (!list) return;
   $('lap-strip')?.classList.toggle('editing', lapEditMode);
   $('lap-edit-toggle')?.classList.toggle('active', lapEditMode);
-  const previousScrollTop = Number(list.scrollTop || 0);
+  let previousScrollTop = Number(list.scrollTop || 0);
   const wasAtTop = previousScrollTop <= 2;
   const carNumber = activeCarNumber();
-  const storedLapCount = lapsForCar(state?.lapHistory || [], carNumber).length;
+  const storedLapCount = state?.lapStrip?.length ?? lapsForCar(state?.lapHistory || [], carNumber).length;
   // lapHistory is the source of truth. Normally the collector supplies an
   // equally fresh precomputed highlight list; after a partial write/error or
   // while resuming an older folder, rebuild through the shared module whenever
   // that list trails the stored history. The renderer still performs no timing
   // comparison itself.
-  const currentHighlights = precomputedHighlights?.lapStrip?.length === storedLapCount
+  const currentHighlights = state?.lapStrip ? null : precomputedHighlights?.lapStrip?.length === storedLapCount
     ? precomputedHighlights
     : timingHighlights?.buildTimingHighlights(state?.lapHistory || [], carNumber, {
       conditionFilter: state?.analyticsSummary?.resolvedConditionFilter
         || state?.analyticsSummary?.analysisConditionFilter
         || 'combined'
     }) || precomputedHighlights;
-  const laps = [...(currentHighlights?.lapStrip || [])].reverse();
+  const source = state?.lapStrip || currentHighlights?.lapStrip || [];
+  if (!scrolling && !wasAtTop && list._lapCar === carNumber && source.length > (list._lapSource?.length || 0)
+    && source[0]?.collectedAt === list._lapSource?.[0]?.collectedAt) {
+    previousScrollTop += (source.length - list._lapSource.length) * 42;
+  }
+  list._lapCar = carNumber;
+  const laps = [...source].reverse();
   const currentStint = state?.stintState?.cars?.[carNumber]?.currentStint || null;
   setText('info-stint', currentStint
-    ? `Driver stint ${currentStint.driverStintNumber} · ${formatStintClock(currentStint.stintTimeMs)} / total ${formatStintClock(currentStint.totalDriverTimeMs)}`
+    ? `Driver stint ${currentStint.driverStintNumber} · ${currentStint.drivingTimeEstimated ? '≈' : ''}${formatStintClock(currentStint.stintTimeMs)} driving / total ${formatStintClock(currentStint.totalDriverTimeMs)}${currentStint.drivingTimePaused ? ' · PIT paused' : ''}`
     : 'Waiting for stint data');
   setText('info-car-stint', currentStint ? `Car stint ${currentStint.stintNumber}` : '—');
+  if (!list._scrollWired) {
+    list._scrollWired = true;
+    list.addEventListener('scroll', () => {
+      if (list._scrollScheduled) return;
+      list._scrollScheduled = true;
+      (window.requestAnimationFrame || ((callback) => setTimeout(callback, 16)))(() => {
+        list._scrollScheduled = false;
+        renderLapStrip(currentState, analyticsForActiveCar(currentState?.analyticsSummary)?.timingHighlights, true);
+      });
+    }, { passive: true });
+  }
+  const rowHeight = 42;
+  const virtual = laps.length > 80;
+  const start = virtual ? Math.max(0, Math.floor(previousScrollTop / rowHeight) - 8) : 0;
+  const end = virtual ? Math.min(laps.length, start + Math.ceil((list.clientHeight || 840) / rowHeight) + 16) : laps.length;
+  const signature = `${carNumber}|${lapEditMode}|${start}|${end}`;
+  if (list._lapSource === source && list._lapSignature === signature) return;
+  list._lapSource = source;
+  list._lapSignature = signature;
   list.innerHTML = '';
   if (!laps.length) {
     const empty = document.createElement('p');
@@ -470,7 +520,16 @@ function renderLapStrip(state, precomputedHighlights = null) {
     list.appendChild(empty);
     return;
   }
-  laps.forEach((lap, index) => {
+  const spacer = (height) => {
+    const element = document.createElement('div');
+    element.className = 'lap-strip-spacer';
+    element.style.height = `${height}px`;
+    element.setAttribute('aria-hidden', 'true');
+    list.appendChild(element);
+  };
+  if (virtual) spacer(start * rowHeight);
+  laps.slice(start, end).forEach((lap, visibleIndex) => {
+    const index = start + visibleIndex;
     const manualStatus = manualStatusForLap(lap);
     const badge = manualStatusBadge(manualStatus);
     const row = document.createElement('div');
@@ -523,9 +582,10 @@ function renderLapStrip(state, precomputedHighlights = null) {
     }
     list.appendChild(row);
   });
+  if (virtual) spacer((laps.length - end) * rowHeight);
   // Polls rebuild the list. Keep the user's position while they inspect older
   // laps; only dashboards already at the top continue following newest-first.
-  list.scrollTop = wasAtTop ? 0 : previousScrollTop;
+  if (!scrolling) list.scrollTop = wasAtTop ? 0 : previousScrollTop;
 }
 
 // Converts verbose provider race-control text to labels that fit the compact
@@ -1089,6 +1149,20 @@ function pitDeltaLabel(plan) {
 // Renders pit window status, required-stop progress, next allowed pit time, and
 // after-pit class projection. All rule calculations come from pitstopPlanner.
 function renderPitstopPlan(plan) {
+  const fuel = plan?.fuel?.enabled ? plan.fuel : null;
+  for (const id of ['fuel-estimate', 'fuel-range', 'fuel-plan', 'fuel-warning']) $(id)?.classList.toggle('hidden', !fuel);
+  setText('fuel-estimate', fuel?.estimatedLitres != null ? `Est. fuel ≈ ${fuel.estimatedLitres.toFixed(1)} L` : 'Fuel estimate: setup required');
+  setText('fuel-range', fuel?.lapsToReserve != null ? `Reserve in ≈ ${Math.floor(fuel.lapsToReserve)} laps` : '');
+  setText('fuel-plan', fuel?.plannedRefuelLitres != null ? `Planned fill ≈ ${fuel.plannedRefuelLitres.toFixed(1)} L` : '');
+  setText('fuel-warning', fuel?.warning || '');
+  const timers = plan?.serviceTimers;
+  setText('service-state', timers?.active ? `Live ${timers.phase}` : 'Last stop');
+  setText('fuel-timer', timers ? pitstopPlanner.formatDuration(timers.fuelDurationMs) : '—');
+  setText('service-pit-timer', timers ? pitstopPlanner.formatDuration(timers.pitDurationMs) : '—');
+  setText('service-total-timer', timers ? pitstopPlanner.formatDuration(timers.totalDurationMs) : '—');
+  if ($('service-timers')) $('service-timers').title = timers?.partial
+    ? 'Incomplete observation: collection started during a stop or feed updates were missed. Duration is unknown.'
+    : 'Fuel and pit timers are observed separately at feed polling resolution.';
   const pitWindow = $('pit-window');
   if ($('open-pit-setup')) {
     $('open-pit-setup').disabled = false;
@@ -1258,7 +1332,7 @@ function render(state) {
   setStatus(currentState.status, currentState.message);
   updateSession(currentState.session || {}, rows.length > 0, currentState.finishCountdown);
   $('row-count').textContent = String(rows.length);
-  $('history-count').textContent = String(history.length);
+  $('history-count').textContent = String(currentState.historyCount ?? history.length);
   $('last-update').textContent = currentState.lastSuccessAt ? new Date(currentState.lastSuccessAt).toLocaleTimeString() : '—';
   const activeAnalytics = analyticsForActiveCar(currentState.analyticsSummary || null);
   renderFollowed(rows, activeAnalytics?.timingHighlights || null);
@@ -1268,8 +1342,10 @@ function render(state) {
   renderDriverAndClassComparisons(activeAnalytics, rows);
   renderAdjacentClassBattles(activeAnalytics);
   renderPitstopPlan(pitstopPlanForActiveCar(currentState));
-  renderAllRowsTable(rows);
-  renderDetails(currentState);
+  if (document.querySelector('.debug-panel')?.open) {
+    renderAllRowsTable(rows);
+    renderDetails(currentState);
+  }
 }
 
 // Opens the native folder picker through the preload bridge and synchronizes
@@ -1479,6 +1555,9 @@ async function init() {
   $('poll-interval').value = String(currentSettings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS);
   syncSetupFromMain();
   setupDetailTabs();
+  document.querySelector('.debug-panel')?.addEventListener('toggle', (event) => {
+    if (event.target.open) { renderAllRowsTable(currentState?.rows || []); renderDetails(currentState || {}); }
+  });
 
   // Race-day controls: each button calls a small preload API method, which then
   // invokes the matching ipcMain handler in main.js.
@@ -1525,14 +1604,21 @@ async function init() {
   $('pit-circuit')?.addEventListener('change', applyPitCircuitDefaults);
   ['pit-distance-meters', 'pit-fcy-speed'].forEach((id) => $(id)?.addEventListener('input', updatePitDistanceNote));
   $('pit-setup-save')?.addEventListener('click', async () => {
+    if (!await saveFuel()) return;
     await saveSettingsFromInputs();
     showPitSetup(false);
     render(currentState);
   });
+  $('fuel-calibrate')?.addEventListener('click', () => saveFuel('calibrate'));
+  $('fuel-enabled')?.addEventListener('change', () => { $('fuel-fields').disabled = !$('fuel-enabled').checked; });
+  $('fuel-refuel')?.addEventListener('click', () => saveFuel('refuel'));
   $('open-setup')?.addEventListener('click', () => showSetup(true));
   $('comparison-prev-tab')?.addEventListener('click', () => setComparisonTab(currentComparisonTab - 1));
   $('comparison-next-tab')?.addEventListener('click', () => setComparisonTab(currentComparisonTab + 1));
-  $('export')?.addEventListener('click', async () => { const result = await window.liveTiming.exportCurrent(); alert(`Exported:\n${result.csvPath}\n${result.jsonPath}\n${result.historyPath || ''}`); });
+  $('export')?.addEventListener('click', async () => {
+    const result = await window.liveTiming.exportCurrent();
+    alert(`Exported:\n${[result.csvPath, result.jsonPath, result.pdfPath, result.historyPath].filter(Boolean).join('\n')}`);
+  });
 
   // Persist settings immediately when hidden inputs change. If new settings are
   // added to the modal, include their hidden input IDs here.

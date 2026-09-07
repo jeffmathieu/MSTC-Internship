@@ -23,12 +23,13 @@ function carKey(value) {
 }
 
 function lapNumber(row) {
+  if (row?.lapNumber === '' || (row?.lapNumber == null && row?.laps == null)) return null;
   const value = Number(row?.lapNumber ?? row?.laps);
   return Number.isFinite(value) ? value : null;
 }
 
 function isInPit(row) {
-  return /^(in|in pit|pit)$/i.test(String(row?.state || '').trim());
+  return /^(in|in pit|pit|p|f|fuel)$/i.test(String(row?.state || '').trim()) || /fuel|in pit/i.test(String(row?.eta || ''));
 }
 
 function rowCrossed(previous, row) {
@@ -36,7 +37,7 @@ function rowCrossed(previous, row) {
   const nextLap = lapNumber(row);
   if (nextLap !== null && nextLap !== previous.lapNumber) return true;
   const lastLap = String(row?.lastLap || row?.lastLapMs || '');
-  return nextLap === null && Boolean(lastLap) && lastLap !== previous.lastLap;
+  return (nextLap === null || row.lapNumberSource === 'alternating-gap') && Boolean(lastLap) && lastLap !== previous.lastLap;
 }
 
 function representativeLapMs(rows) {
@@ -47,6 +48,18 @@ function representativeLapMs(rows) {
 }
 
 function confirmedRow(previous, rows, row, index, collectedAt, cumulative, averageLapMs) {
+  if (row.gapRole === 'completed-laps' || row.gapRole === 'ambiguous') {
+    // A count phase cannot confirm a time gap. Keep the last real crossing so
+    // the next time phase can complete a crossing whose interval was hidden.
+    if (row.gapRole === 'ambiguous') return null;
+    const compatible = previous?.gapSemantics === row.gapSemantics ? previous : null;
+    return { ...(compatible || { carNumber: carKey(row.carNumber), className: row.className || '',
+      lastLap: '', intervalToPreviousMs: null, cumulativeGapToLeaderMs: null,
+      predecessorCarNumber: index > 0 ? carKey(rows[index - 1].carNumber) : '', source: 'count-only' }),
+      lapNumber: lapNumber(row), gapSemantics: row.gapSemantics || '',
+      confirmedAt: compatible?.confirmedAt || collectedAt };
+  }
+  if (previous?.gapSemantics !== (row.gapSemantics || '')) previous = null;
   if (!rowCrossed(previous, row)) return previous;
   const predecessor = index > 0 ? rows[index - 1] : null;
   const numericInterval = classBattle.parseGapToMs(row.diff)
@@ -68,6 +81,7 @@ function confirmedRow(previous, rows, row, index, collectedAt, cumulative, avera
     lapGapToLeader: cumulative ? classBattle.parseLapGap(row.gap) : null,
     source: cumulative ? 'cumulative-gap' : 'adjacent-interval-chain',
     sourceProvider: row.sourceProvider || '',
+    gapSemantics: row.gapSemantics || '',
     confirmedAt: collectedAt
   };
 }

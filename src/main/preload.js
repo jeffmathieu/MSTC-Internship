@@ -1,4 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const { mergeRendererState } = require('./rendererState');
+let rendererState = {};
+const acceptState = (payload) => (rendererState = mergeRendererState(rendererState, payload));
 
 // This preload file is the only bridge between the browser UI and Electron's
 // main process. Keep exposed methods small and explicit: every new renderer
@@ -11,11 +14,21 @@ contextBridge.exposeInMainWorld('liveTiming', {
 
   // Live collector controls.
   startCollector: (url) => ipcRenderer.invoke('collector:start', url),
-  stopCollector: () => ipcRenderer.invoke('collector:stop'),
-  getCollectorState: () => ipcRenderer.invoke('collector:getState'),
+  stopCollector: async () => {
+    const result = await ipcRenderer.invoke('collector:stop');
+    return { ...result, state: acceptState(result.state) };
+  },
+  getCollectorState: async () => acceptState(await ipcRenderer.invoke('collector:getState')),
   openLiveWindow: () => ipcRenderer.invoke('collector:openLiveWindow'),
   openGraphsWindow: (carNumber) => ipcRenderer.invoke('graphs:open', carNumber),
-  updateLapStatus: (payload) => ipcRenderer.invoke('laps:updateStatus', payload),
+  updateFuel: async (payload) => {
+    const result = await ipcRenderer.invoke('fuel:update', payload);
+    return { ...result, state: acceptState(result.state) };
+  },
+  updateLapStatus: async (payload) => {
+    const result = await ipcRenderer.invoke('laps:updateStatus', payload);
+    return result.state ? { ...result, state: acceptState(result.state) } : result;
+  },
 
   // Keeps every open dashboard and graph window on the same saved theme.
   onThemeUpdate: (callback) => {
@@ -31,7 +44,7 @@ contextBridge.exposeInMainWorld('liveTiming', {
   // important if this UI ever becomes component-based and listeners are mounted
   // or unmounted dynamically.
   onCollectorUpdate: (callback) => {
-    const listener = (_event, state) => callback(state);
+    const listener = (_event, state) => callback(acceptState(state));
     ipcRenderer.on('collector:update', listener);
     return () => ipcRenderer.removeListener('collector:update', listener);
   }

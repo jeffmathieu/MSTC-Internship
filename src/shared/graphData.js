@@ -231,10 +231,33 @@
   }
 
   function buildGraph(type, history, carNumber, options = {}) {
+    lapAnalytics.prepareHistory(history);
     if (type === 'driver-pace') return driverPaceComparison(history, carNumber, 10, options.mode);
     if (type === 'driver-sectors') return driverSectorComparison(history, carNumber);
     if (type === 'class-pace') return classPaceComparison(history, carNumber);
     return driverLapTimes(history, carNumber);
+  }
+
+  // Keep actual extrema (and endpoints), never averages, when multiple laps
+  // occupy one screen bucket. Zooming reselects from the original full data.
+  function visibleSeries(points, minX, maxX, buckets = 400) {
+    let low = 0, high = points.length;
+    while (low < high) { const mid = (low + high) >>> 1; if (points[mid].x < minX) low = mid + 1; else high = mid; }
+    const start = Math.max(0, low - 1);
+    high = points.length;
+    while (low < high) { const mid = (low + high) >>> 1; if (points[mid].x <= maxX) low = mid + 1; else high = mid; }
+    const visible = points.slice(start, Math.min(points.length, low + 1));
+    const size = Math.max(1, Math.ceil(visible.length / Math.max(1, buckets)));
+    if (size <= 2) return visible;
+    const result = [visible[0]];
+    for (let i = 0; i < visible.length; i += size) {
+      const group = visible.slice(i, i + size);
+      let min = group[0], max = group[0];
+      group.forEach((point) => { if (point.y < min.y) min = point; if (point.y > max.y) max = point; });
+      result.push(...(min.x <= max.x ? [min, max] : [max, min]));
+    }
+    if (visible.length) result.push(visible.at(-1));
+    return [...new Set(result)].filter(Boolean);
   }
 
   // Zoom state is stored as normalized fractions of the complete x-axis. This
@@ -282,6 +305,7 @@
     classPaceComparison,
     pdfClassPacePages,
     buildGraph,
+    visibleSeries,
     normalizeViewport,
     zoomViewport,
     panViewport

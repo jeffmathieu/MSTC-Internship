@@ -20,6 +20,11 @@ const NORMALIZED_ROW_COLUMNS = [
   'carModel',
   'laps',
   'lapNumber',
+  'lapNumberSource',
+  'observedProviderLapNumber',
+  'gapRaw',
+  'gapRole',
+  'gapSemantics',
   'gap',
   'diff',
   'interval',
@@ -44,6 +49,8 @@ const NORMALIZED_ROW_COLUMNS = [
 
 const LAP_HISTORY_COLUMNS = [
   ...NORMALIZED_ROW_COLUMNS,
+  'lapId',
+  'historySequence',
   'lapTimeMs',
   'sector1Ms',
   'sector2Ms',
@@ -144,6 +151,10 @@ function normalizeForStorage(row, context = {}) {
     carModel: normalizeStorageField(valueAt(row, 'carModel', 'car')),
     laps: normalizeStorageField(valueAt(row, 'laps')),
     lapNumber: normalizeStorageField(valueAt(row, 'lapNumber')),
+    lapNumberSource: normalizeStorageField(valueAt(row, 'lapNumberSource')),
+    gapRaw: normalizeStorageField(valueAt(row, 'gapRaw')),
+    gapRole: normalizeStorageField(valueAt(row, 'gapRole')),
+    gapSemantics: normalizeStorageField(valueAt(row, 'gapSemantics')),
     gap: normalizeStorageField(valueAt(row, 'gap')),
     diff: normalizeStorageField(valueAt(row, 'diff', 'interval')),
     interval: normalizeStorageField(valueAt(row, 'interval', 'diff')),
@@ -234,6 +245,14 @@ function lapRecordFromNormalizedRow(row) {
     sector2Eligible: normalizeStorageField(row.sector2Eligible),
     sector3Eligible: normalizeStorageField(row.sector3Eligible)
   };
+  if (row.lapNumberSource === 'alternating-gap') {
+    // The counter can describe an earlier display phase. Keep that observation
+    // for audit, and number stored passages consistently rather than attaching
+    // the same stale official lap to several completed laps.
+    record.observedProviderLapNumber = normalizeStorageField(row.lapNumber);
+    record.lapNumber = '';
+    record.lapNumberSource = 'observed-sequence';
+  }
   record.trackCondition = normalizeTrackCondition(row.trackCondition);
   record.sector1Condition = normalizeTrackCondition(row.sector1Condition);
   record.sector2Condition = normalizeTrackCondition(row.sector2Condition);
@@ -335,6 +354,7 @@ function liveRowIdentity(row) {
 // this key. Lap number is preferred; when missing, driver + last lap is the best
 // available fallback for providers that do not expose a lap counter.
 function lapIdentity(row) {
+  if (row.lapId) return row.lapId;
   const base = [row.sourceProvider, row.timingUrl, row.carNumber];
   if (row.lapNumber) return [...base, row.lapNumber, row.lastLap].join('|');
   return [...base, row.driverName || row.driver || '', row.lastLap].join('|');

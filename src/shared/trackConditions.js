@@ -105,10 +105,15 @@
   // Applies an analysis filter without deleting records. Full-lap and sector
   // eligibility are disabled independently, preserving dry sectors from a lap
   // that became wet later in the lap.
+  const filteredHistories = new WeakMap();
+  const immutableHistories = new WeakSet();
+  function markImmutableHistory(history) { immutableHistories.add(history); }
   function conditionFilteredHistory(history = [], filter = 'combined') {
     const normalized = normalizeAnalysisFilter(filter, 'combined');
-    if (normalized === 'combined' || normalized === 'current') return [...history];
-    return (history || []).map((entry) => {
+    if (normalized === 'combined' || normalized === 'current') return history;
+    const cache = immutableHistories.has(history) ? filteredHistories.get(history) || new Map() : new Map();
+    if (cache.has(normalized)) return cache.get(normalized);
+    const result = (history || []).map((entry) => {
       const copy = { ...entry };
       if (!lapMatchesCondition(copy, normalized)) copy.paceEligible = 'false';
       [1, 2, 3].forEach((sector) => {
@@ -116,6 +121,9 @@
       });
       return copy;
     });
+    cache.set(normalized, result);
+    if (immutableHistories.has(history)) filteredHistories.set(history, cache);
+    return result;
   }
 
   function conditionCounts(laps = []) {
@@ -138,6 +146,7 @@
     sectorMatchesCondition,
     captureSectorConditions,
     conditionFilteredHistory,
+    markImmutableHistory,
     conditionCounts
   };
 });
