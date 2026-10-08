@@ -3,7 +3,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { lapIdentity } = require('../src/shared/storageSchema');
-const { resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalReportSettings } = require('../src/shared/storageSession');
+const { resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalReportSettings,
+  readJsonLines, appendJsonLines, atomicWriteFile, resolveSessionEndAt } = require('../src/shared/storageSession');
 
 assert.strictEqual(resolveSessionFolder('/race/zolder', '/fallback'), '/race/zolder');
 assert.strictEqual(resolveSessionFolder('', '/fallback'), '/fallback');
@@ -58,8 +59,27 @@ try {
   );
   assert.deepStrictEqual(onlyHistoricalCar.followedCars, ['33'], 'a single historical car is a safe metadata fallback');
 
-  fs.writeFileSync(jsonlPath, '{invalid json}\n');
-  assert.throws(() => loadSessionHistory({ fs, jsonlPath, identityForLap: lapIdentity }), SyntaxError);
+  fs.writeFileSync(jsonlPath, `${JSON.stringify(laps[0])}\n{invalid json}\n${JSON.stringify(laps[1])}\n{"carNumber":`);
+  const recovered = loadSessionHistory({ fs, jsonlPath, identityForLap: lapIdentity });
+  assert.deepStrictEqual(recovered.entries, laps.slice(0, 2), 'bad interior and truncated tail records do not discard valid laps');
+  assert.strictEqual(recovered.knownKeys.size, 2);
+  assert.deepStrictEqual(recovered.invalidLines.map((line) => line.lineNumber), [2, 4]);
+  appendJsonLines(fs, jsonlPath, [laps[2]]);
+  assert.deepStrictEqual(readJsonLines(fs, jsonlPath).entries, laps, 'the next append is separated from the incomplete tail');
+  const original = fs.readFileSync(jsonlPath, 'utf8');
+  const failingFs = { ...fs, renameSync() { throw new Error('Injected rename failure'); } };
+  assert.throws(() => atomicWriteFile(failingFs, jsonlPath, 'replacement'), /Injected rename failure/);
+  assert.strictEqual(fs.readFileSync(jsonlPath, 'utf8'), original, 'a failed replacement preserves the original archive');
+  assert.ok(!fs.readdirSync(folder).some((file) => file.endsWith('.tmp')), 'failed replacement cleans up its temporary file');
+  atomicWriteFile(fs, jsonlPath, `${JSON.stringify(laps[0])}\n`);
+  assert.deepStrictEqual(readJsonLines(fs, jsonlPath).entries, [laps[0]]);
+
+  const end = '2026-09-08T12:06:00.000Z';
+  assert.strictEqual(resolveSessionEndAt({ lastUpdatedAt: end }, [{ collectedAt: '2026-09-08T12:04:00Z' }]), end);
+  assert.strictEqual(resolveSessionEndAt({ finishedAt: end }, [], '2026-10-08T12:00:00Z'), end,
+    'regenerating a finalized archive keeps the stored endpoint');
+  assert.strictEqual(resolveSessionEndAt({}, [{ collectedAt: end }]), end, 'old archives fall back to the last lap observation');
+  assert.strictEqual(resolveSessionEndAt({}, []), null, 'an empty archive has no invented endpoint');
   fs.writeFileSync(pitPlanPath, '{invalid json}');
   assert.throws(() => loadStoredJson(fs, pitPlanPath), SyntaxError);
 } finally {

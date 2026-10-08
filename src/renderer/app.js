@@ -79,7 +79,7 @@ function setStatus(status, message) {
   const normalized = String(status || 'idle').toLowerCase();
   dot.classList.remove('is-ok', 'is-error', 'is-neutral');
   if (['collecting', 'connected'].includes(normalized)) dot.classList.add('is-ok');
-  else if (normalized === 'error' || normalized === 'parser_error') dot.classList.add('is-error');
+  else if (['error', 'parser_error', 'stale', 'disconnected'].includes(normalized)) dot.classList.add('is-error');
   else dot.classList.add('is-neutral');
   const tooltip = String(message || normalized || 'Collector idle');
   dot.setAttribute('title', tooltip);

@@ -195,6 +195,18 @@ const emptyFcyStart = nextFcyGapState({ rows: [], session: { flag: 'FCY' }, coll
 const emptyFcyAgain = nextFcyGapState({ previous: emptyFcyStart, rows: [], session: { flag: 'FCY' }, collectedAt: '2026-06-26T10:00:05.000Z', rules: { fcyStablePollsRequired: 1, fcyMinimumAgeMs: 0 } });
 assert.strictEqual(emptyFcyAgain.ready, false);
 
+let frozenFcy = nextFcyGapState({ rows: classRows, session: { flag: 'FCY' },
+  collectedAt: '2026-06-26T10:00:00.000Z', rules: stabilizationRules });
+for (let second = 5; second <= 30; second += 5) {
+  frozenFcy = nextFcyGapState({ previous: frozenFcy, rows: classRows, session: { flag: 'FCY' },
+    collectedAt: `2026-06-26T10:00:${String(second).padStart(2, '0')}.000Z`, rules: stabilizationRules });
+}
+assert.strictEqual(frozenFcy.freshTimingObserved, false, 'the first FCY snapshot only establishes a baseline');
+assert.strictEqual(frozenFcy.ready, false, 'a frozen table cannot become ready after startup during FCY');
+const firstRealFcyUpdate = nextFcyGapState({ previous: frozenFcy, rows: refreshedRows, session: { flag: 'FCY' },
+  collectedAt: '2026-06-26T10:00:35.000Z', rules: stabilizationRules });
+assert.strictEqual(firstRealFcyUpdate.freshTimingObserved, true);
+
 const provisionalFcyPlan = buildPitstopPlan({
   rows: classRows,
   session: { timeToGo: '1:20:00', flag: 'FCY' },

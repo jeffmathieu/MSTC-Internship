@@ -119,8 +119,8 @@ function nextFcyGapState({ previous = {}, session = {}, rows = [], collectedAt =
   const startedAtMs = justStarted ? nowMs : (numberOrNull(previous.startedAtMs) ?? nowMs);
   const sameGap = !justStarted && signatures.gap !== '' && signatures.gap === previous.lastGapSignature;
   const stablePolls = sameGap ? (Number(previous.stablePolls) || 0) + 1 : 0;
-  const freshTimingObserved = Boolean(previous.freshTimingObserved)
-    || signatures.timing !== String(previous.lastTimingSignature || '');
+  const freshTimingObserved = !justStarted && (Boolean(previous.freshTimingObserved)
+    || (signatures.timing !== '' && signatures.timing !== String(previous.lastTimingSignature || '')));
   const ageMs = Math.max(0, nowMs - startedAtMs);
   const ready = freshTimingObserved
     && ageMs >= normalized.fcyMinimumAgeMs

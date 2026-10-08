@@ -12,11 +12,15 @@ function mainHarness(folder) {
   app.whenReady = () => new Promise(() => {});
   app.getPath = () => folder;
   const ipcMain = { handle() {} };
-  const requireForTest = (name) => name === 'electron' ? { app, ipcMain, BrowserWindow: { getAllWindows: () => [] } }
+  const requireForTest = (name) => name === 'electron' ? { app, ipcMain, BrowserWindow: { getAllWindows: () => [] },
+    dialog: { showMessageBox: async () => ({ response: 0 }) } }
     : name === 'electron-updater' ? { autoUpdater: {} } : realRequire(name);
   const source = fs.readFileSync(filename, 'utf8') + `\nreturn {
     buildAnalyticsSummary, normalizeSettings, normalizeSnapshot, normalizeRowsForStorage, updateLapHistory,
     updateServiceEvents, loadExistingHistory, rebuildCollectorDerivedState, updateStoredLapManualStatus, updateFuelSettingsAndState,
+    prepareLatestSnapshot, saveLatestSnapshot, finalizeCurrentSession, pollLivePage, writeSessionMetadata,
+    setSnapshot: (snapshot) => { liveWindow = { isDestroyed: () => false, close() {},
+      webContents: { executeJavaScript: async () => snapshot } }; },
     getState: () => collectorState, setState: (value) => { collectorState = { ...collectorState, ...value }; },
     setSettings: (settings) => { loadSettings = () => normalizeSettings(settings); },
     flush: () => snapshotWriter.flush(), services: serviceStates, fuel: fuelStates

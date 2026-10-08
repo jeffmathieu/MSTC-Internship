@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { prepareHistory } = require('../shared/lapAnalytics');
 const { drivingStintsForCar: stintsForCar } = require('../shared/stintTracker');
-const { loadSessionHistory } = require('../shared/storageSession');
+const { loadSessionHistory, readJsonLines } = require('../shared/storageSession');
 const { lapIdentity } = require('../shared/storageSchema');
 const { writeClosedStintArtifacts, writeEventSummaryArtifacts } = require('./stintReports');
 
@@ -18,7 +18,7 @@ const { writeClosedStintArtifacts, writeEventSummaryArtifacts } = require('./sti
   });
   const gapsPath = path.join(input.sessionFolder, 'gap_history.jsonl');
   const gapSamples = fs.existsSync(gapsPath)
-    ? fs.readFileSync(gapsPath, 'utf8').split(/\r?\n/).filter(Boolean).map(JSON.parse) : input.gapSamples || [];
+    ? readJsonLines(fs, gapsPath).entries : input.gapSamples || [];
   const options = { ...input, history, gapSamples, printFallback };
   const results = [];
   for (const stint of allStints.filter((item) => item.closed && item.lapCount > 0)) {
