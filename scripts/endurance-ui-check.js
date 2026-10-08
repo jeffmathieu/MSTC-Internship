@@ -7,7 +7,7 @@ const assert = require('assert');
 const { mainHarness } = require('../tests/helpers/mainHarness');
 const { prepareHistory } = require('../src/shared/lapAnalytics');
 const { createRendererChannel } = require('../src/main/rendererState');
-const { buildCanonicalReportPayload, renderReportLabPdf } = require('../src/main/stintReports');
+const { buildCanonicalReportPayload, renderReportLabPdf, printHtmlToPdf, buildCanonicalFallbackHtml } = require('../src/main/stintReports');
 const { stintsForCar } = require('../src/shared/stintTracker');
 
 const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'mstc-endurance-ui-'));
@@ -17,6 +17,22 @@ app.whenReady().then(async () => {
   const settings = harness.normalizeSettings({ storageFolder: folder, followedCar: '1', followedCars: ['1'],
     sessionMode: 'race', trackCondition: 'dry', setupComplete: true, theme: 'light' });
   harness.setSettings(settings);
+  // Exercise the actual extraction script in Chromium, including cached DOM
+  // elements replaced by a provider refresh and hidden obsolete tables.
+  const provider = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+  const fixture = path.join(folder, 'timing-fixture.html');
+  fs.writeFileSync(fixture, `<h2>Session</h2><p><span>Status:</span> Running</p><span>Green flag</span>
+    <table><tr><th>#</th><th>DRIVER</th><th>LAST</th><th>BEST</th><th>LAPS</th></tr></table>
+    <table style="display:none"><tr><th>#</th><th>DRIVER</th><th>LAST</th><th>BEST</th><th>LAPS</th></tr><tr><td>1</td><td>Stale</td><td>2:00.000</td><td>2:00.000</td><td>1</td></tr></table>
+    <table id="current"><tr><th>#</th><th>DRIVER</th><th>LAST</th><th>BEST</th><th>LAPS</th></tr><tr><td>1</td><td>Current</td><td>1:59.000</td><td>1:58.000</td><td>2</td></tr></table>`);
+  await provider.loadFile(fixture);
+  for (let refresh = 0; refresh < 2; refresh++) {
+    const snapshot = await provider.webContents.executeJavaScript(harness.pageExtractionScript);
+    const parsed = harness.normalizeSnapshot(snapshot);
+    assert.strictEqual(parsed.diagnostics.selectedTableIndex, 2);
+    assert.strictEqual(parsed.rows[0].driver, 'Current');
+    if (!refresh) await provider.webContents.executeJavaScript(`document.getElementById('current').innerHTML = document.getElementById('current').innerHTML`);
+  }
   const raw = Array.from({ length: 31095 }, (_, i) => ({ carNumber: String(i % 45 + 1), className: `Class ${i % 3}`,
     driverName: Math.floor(i / 45) < 345 ? 'Peter Bens' : 'Ellen Leysen', teamName: `Team ${i % 45 + 1}`,
     lapNumber: '', historySequence: Math.floor(i / 45) + 1, lapTimeMs: 125000 + Math.sin(i / 20) * 1500,
@@ -44,7 +60,7 @@ app.whenReady().then(async () => {
   const errors = [];
   const open = async (filename) => {
     const win = new BrowserWindow({ show: false, width: 1600, height: 1000,
-      webPreferences: { preload: path.resolve(__dirname, '../src/main/preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false } });
+      webPreferences: { preload: path.resolve(__dirname, '../src/main/preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 3) errors.push(message); });
     await win.loadFile(path.resolve(__dirname, '../src/renderer', filename));
     // Wait on actual content, not a fixed startup delay.
@@ -57,6 +73,15 @@ app.whenReady().then(async () => {
     return win;
   };
   const dashboard = await open('index.html');
+  provider.destroy();
+  const header = await dashboard.webContents.executeJavaScript(`(() => {
+    const controls = document.querySelector('.controls'), exportButton = document.getElementById('export');
+    return { exportVisible: exportButton.getBoundingClientRect().width > 0 && controls.contains(exportButton),
+      fuelSetupHidden: !document.getElementById('fuel-enabled') && !document.getElementById('fuel-estimate'),
+      headerFits: controls.getBoundingClientRect().right <= innerWidth,
+      preloadReady: typeof window.liveTiming.exportCurrent === 'function' };
+  })()`);
+  assert.deepStrictEqual(header, { exportVisible: true, fuelSetupHidden: true, headerFits: true, preloadReady: true });
   const scrolling = await dashboard.webContents.executeJavaScript(`(async () => {
     const list = document.getElementById('lap-strip-list');
     const rowsBefore = list.querySelectorAll('.lap-strip-row').length;
@@ -94,7 +119,10 @@ app.whenReady().then(async () => {
   const pdfPath = path.join(folder, 'report.pdf');
   const pdf = renderReportLabPdf(jsonPath, pdfPath, { includeSummary: true });
   assert.ok(pdf.rendered, JSON.stringify(pdf));
+  const portablePdfPath = path.join(folder, 'report-electron.pdf');
+  await printHtmlToPdf(BrowserWindow, buildCanonicalFallbackHtml(payload, true), portablePdfPath);
+  assert.strictEqual(fs.readFileSync(portablePdfPath).subarray(0, 5).toString(), '%PDF-');
   await harness.flush();
-  console.log(JSON.stringify({ folder, scrolling, graphMetrics, pdfPath, errors }, null, 2));
+  console.log(JSON.stringify({ folder, scrolling, graphMetrics, pdfPath, portablePdfPath, header, errors }, null, 2));
   dashboard.destroy(); graphs.destroy(); app.quit();
 }).catch((error) => { console.error(error); app.exit(1); });

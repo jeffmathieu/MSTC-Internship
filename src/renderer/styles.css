@@ -1204,3 +1204,6 @@ body.mode-qualifying .pit-window { display: none; }
   .compare-stack { grid-template-rows: repeat(3, minmax(70px, auto)); }
   .xic-input { grid-template-columns: 1fr; }
 }
+
+/* Compact collection controls leave room for the session export action. */
+.controls .compact-control { padding: 4px 7px; min-width: 44px; font-size: 12px; }

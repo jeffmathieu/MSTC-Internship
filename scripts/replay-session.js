@@ -62,7 +62,7 @@ app.whenReady().then(async () => {
   const open = async (file) => {
     if (windows.has(file)) { windows.get(file).show(); return; }
     const win = new BrowserWindow({ show: !smoke, width: 1600, height: 1000, title: 'MSTC — OFFLINE TEST',
-      webPreferences: { preload: path.resolve(__dirname, '../src/main/preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false } });
+      webPreferences: { preload: path.resolve(__dirname, '../src/main/preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
     windows.set(file, win);
     const contentsId = win.webContents.id;
     win.on('closed', () => { windows.delete(file); channels.delete(contentsId); });
@@ -124,53 +124,23 @@ app.whenReady().then(async () => {
     })()`);
     fs.writeFileSync(path.join(folder, 'dashboard.png'), (await dashboard.webContents.capturePage()).toPNG());
     fs.writeFileSync(path.join(folder, 'graphs.png'), (await graphs.webContents.capturePage()).toPNG());
-    const fuelSetup = await dashboard.webContents.executeJavaScript(`(async () => {
+    const pitSetup = await dashboard.webContents.executeJavaScript(`(async () => {
       document.getElementById('open-pit-setup').click();
-      document.getElementById('fuel-setup').open = true;
-      document.getElementById('fuel-enabled').checked = true;
-      document.getElementById('fuel-enabled').dispatchEvent(new Event('change'));
-      const values = {'fuel-capacity':100,'fuel-consumption':2,'fuel-flow':1,'fuel-reserve':10,
-        'fuel-pit-laps':5,'fuel-stint-laps':25,'fuel-level-input':60};
-      for (const [id,value] of Object.entries(values)) document.getElementById(id).value = value;
-      document.getElementById('fuel-calibrate').click();
-      await new Promise((resolve,reject) => {
-        let n=0; const timer=setInterval(() => {
-          const message=document.getElementById('fuel-action-message').textContent;
-          if (message) { clearInterval(timer); message.startsWith('Saved') ? resolve() : reject(new Error(message)); }
-          else if (++n>100) {clearInterval(timer);reject(new Error('Fuel save timed out'));}
-        },50);
-      });
-      return {message:document.getElementById('fuel-action-message').textContent,
-        estimate:document.getElementById('fuel-estimate').textContent,
-        range:document.getElementById('fuel-range').textContent};
-    })()`);
-    if (!fuelSetup.estimate.includes('60.0')) throw new Error(JSON.stringify(fuelSetup));
-    await dashboard.webContents.executeJavaScript(`(async () => {
-      document.getElementById('fuel-setup').scrollIntoView({block:'start'});
-      await new Promise(resolve => requestAnimationFrame(() => resolve()));
-      return true;
-    })()`);
-    fs.writeFileSync(path.join(folder, 'fuel-setup.png'), (await dashboard.webContents.capturePage()).toPNG());
-    const fuelToggle = await dashboard.webContents.executeJavaScript(`(async () => {
-      document.getElementById('fuel-enabled').checked = false;
-      document.getElementById('fuel-enabled').dispatchEvent(new Event('change'));
+      const estimationHidden = !document.getElementById('fuel-enabled') && !document.getElementById('fuel-estimate');
       document.getElementById('pit-setup-save').click();
       await new Promise((resolve,reject) => {
         let n=0; const timer=setInterval(() => {
           if (document.getElementById('pit-setup-modal').classList.contains('hidden')) {clearInterval(timer);resolve();}
-          else if (++n>100) {clearInterval(timer);reject(new Error('Toggle save timed out'));}
+          else if (++n>100) {clearInterval(timer);reject(new Error('Pit setup save timed out'));}
         },50);
       });
-      document.getElementById('open-pit-setup').click();
-      return {enabled:document.getElementById('fuel-enabled').checked,
-        fieldsDisabled:document.getElementById('fuel-fields').disabled,
-        hidden:document.getElementById('fuel-estimate').classList.contains('hidden')};
+      return {estimationHidden, exportVisible: document.getElementById('export').getBoundingClientRect().width > 0};
     })()`);
-    if (fuelToggle.enabled || !fuelToggle.fieldsDisabled || !fuelToggle.hidden) throw new Error(JSON.stringify(fuelToggle));
+    if (!pitSetup.estimationHidden || !pitSetup.exportVisible) throw new Error(JSON.stringify(pitSetup));
     const cachedMs = rebuild(); publish();
     const reports = await exportPdf();
     console.log(JSON.stringify({ source, folder, records: raw.length, initialMs, cachedMs, rotatingGapDetected: adapted.state.alternating,
-      scroll, fuelSetup, fuelToggle, reports, errors }, null, 2));
+      scroll, pitSetup, reports, errors }, null, 2));
     clearInterval(timer); await harness.flush(); app.quit();
   } else console.log(`Offline dashboard: ${source}\nScratch reports: ${folder}\nFull archive loaded; updates every 5s. Stop pauses updates, Start resumes. No new laps are invented.`);
   app.on('window-all-closed', () => { clearInterval(timer); app.quit(); });

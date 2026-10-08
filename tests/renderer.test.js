@@ -532,7 +532,7 @@ module.exports = (async () => {
     finishCountdown: { active: true, remainingMs: 127000 }
   });
   assert.strictEqual(document.getElementById('status-text').textContent, '🏁 FINISH');
-  assert.strictEqual(document.getElementById('session-time-label').textContent, 'Auto stop');
+  assert.strictEqual(document.getElementById('session-time-label').textContent, 'Finish watch');
   assert.strictEqual(document.getElementById('session-time').textContent, '2:07');
   assert.strictEqual(document.getElementById('session-status-block').classList.contains('flag-red'), false);
   collectorUpdate(updatedState);

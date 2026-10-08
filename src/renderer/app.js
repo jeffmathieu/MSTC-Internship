@@ -332,7 +332,7 @@ function showPitSetup(show = true) {
     $('pit-safety-seconds').value = String((currentSettings?.pitRules?.fixedSafetyBufferMs ?? 30000) / 1000);
     updatePitDistanceNote();
   }
-  if (show) {
+  if (show && $('fuel-enabled')) {
     const fuel = currentSettings?.fuelByCar?.[activeCarNumber()] || {};
     $('fuel-enabled').checked = fuel.enabled === true;
     $('fuel-fields').disabled = !fuel.enabled;
@@ -620,11 +620,11 @@ function formatFinishCountdown(remainingMs) {
 function updateSession(session = {}, hasTimingRows = false, finishCountdown = null) {
   const finishing = Boolean(finishCountdown?.active);
   setText('session-name', session.sessionName || session.pageTitle || '—');
-  setText('session-time-label', finishing ? 'Auto stop' : 'Time left');
+  setText('session-time-label', finishing ? 'Finish watch' : 'Time left');
   setText(
     'session-time',
     finishing
-      ? formatFinishCountdown(finishCountdown.remainingMs)
+      ? (finishCountdown.expired ? 'Awaiting cars' : formatFinishCountdown(finishCountdown.remainingMs))
       : session.timeToGo || session.pageUpdated || '—'
   );
   const statusBlock = $('session-status-block');
@@ -1149,7 +1149,7 @@ function pitDeltaLabel(plan) {
 // Renders pit window status, required-stop progress, next allowed pit time, and
 // after-pit class projection. All rule calculations come from pitstopPlanner.
 function renderPitstopPlan(plan) {
-  const fuel = plan?.fuel?.enabled ? plan.fuel : null;
+  const fuel = null; // Estimation parked; observed fuel/pit timers below remain active.
   for (const id of ['fuel-estimate', 'fuel-range', 'fuel-plan', 'fuel-warning']) $(id)?.classList.toggle('hidden', !fuel);
   setText('fuel-estimate', fuel?.estimatedLitres != null ? `Est. fuel ≈ ${fuel.estimatedLitres.toFixed(1)} L` : 'Fuel estimate: setup required');
   setText('fuel-range', fuel?.lapsToReserve != null ? `Reserve in ≈ ${Math.floor(fuel.lapsToReserve)} laps` : '');
@@ -1604,7 +1604,7 @@ async function init() {
   $('pit-circuit')?.addEventListener('change', applyPitCircuitDefaults);
   ['pit-distance-meters', 'pit-fcy-speed'].forEach((id) => $(id)?.addEventListener('input', updatePitDistanceNote));
   $('pit-setup-save')?.addEventListener('click', async () => {
-    if (!await saveFuel()) return;
+    // Fuel estimation is temporarily disabled.
     await saveSettingsFromInputs();
     showPitSetup(false);
     render(currentState);

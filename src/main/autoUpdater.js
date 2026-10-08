@@ -73,7 +73,7 @@ function setupAutoUpdates({
         ? await dialog.showMessageBox(parent, options)
         : await dialog.showMessageBox(options);
       if (result.response === 0) {
-        onBeforeQuitAndInstall();
+        await onBeforeQuitAndInstall();
         setImmediate(() => autoUpdater.quitAndInstall(false, true));
       }
     } catch (error) {

@@ -275,10 +275,13 @@
     const events = options.pitEvents || options.pitEventsByCar?.[String(carNumber)] || [];
     const now = Date.parse(options.closeFinalAt || options.generatedAt || '')
       || Date.parse(completionTime(stints.at(-1)?.laps?.at(-1)) || '');
-    const intervals = events.filter((event) => event.entryAt).map((event) => ({
-      start: Date.parse(event.entryAt), end: Date.parse(event.exitAt || '') || now,
-      approximate: Boolean(event.partial), stopNumber: event.stopNumber
-    }));
+    const intervals = events.map((event) => {
+      const end = Date.parse(event.exitAt || '') || now;
+      const duration = event.totalDurationMs ?? event.durationMs;
+      const start = Date.parse(event.entryAt || '');
+      return { start: Number.isFinite(start) ? start : Number.isFinite(duration) ? end - duration : NaN,
+        end, approximate: Boolean(event.partial) || !Number.isFinite(start), stopNumber: event.stopNumber };
+    }).filter((event) => Number.isFinite(event.start));
     // Old lap-only archives have no exact pit exit timestamps. Exclude the
     // observed service window conservatively and label the result estimated.
     let pending = null;
@@ -286,14 +289,35 @@
       const at = Date.parse(completionTime(lap) || '');
       if (lapAnalytics.rowShowsInPit(lap) && !pending) pending = { start: at, stopNumber: lapAnalytics.pitCountFromLap(lap) };
       if (pending && !lapAnalytics.rowShowsInPit(lap)) {
-        if (!events.some((event) => event.stopNumber === pending.stopNumber ||
-          (Date.parse(event.entryAt) <= at && Date.parse(event.exitAt || '') >= pending.start))) {
+        if (!intervals.some((event) => (pending.stopNumber != null && event.stopNumber === pending.stopNumber) ||
+          (event.start <= at && event.end >= pending.start))) {
           intervals.push({ ...pending, end: at, approximate: true });
         }
         pending = null;
       }
     }
-    if (pending && !events.some((event) => event.stopNumber === pending.stopNumber)) intervals.push({ ...pending, end: now, approximate: true });
+    if (pending && !intervals.some((event) => pending.stopNumber != null && event.stopNumber === pending.stopNumber)) intervals.push({ ...pending, end: now, approximate: true });
+    // Counter-only archives still supply a measured last pit duration. Exclude
+    // that known portion and label its placement estimated, rather than count
+    // the entire stop as driving time.
+    let previousCount = 0;
+    for (const lap of lapAnalytics.lapsForCar(history, carNumber)) {
+      const count = lapAnalytics.pitCountFromLap(lap);
+      if (count > previousCount) {
+        const duration = parseStintDurationMs(lap.lastPit);
+        const end = Date.parse(completionTime(lap));
+        if (Number.isFinite(duration) && !intervals.some((event) => event.stopNumber === count)) {
+          intervals.push({ start: end - duration, end, stopNumber: count, approximate: true });
+        }
+        previousCount = count;
+      }
+    }
+    const liveInPit = lapAnalytics.rowShowsInPit(options.liveRow);
+    const previousPitAt = options.previousCurrentStint?.pitObservedAt;
+    const pitObservedAt = liveInPit ? previousPitAt || options.liveRow?.collectedAt || options.generatedAt : null;
+    if (liveInPit && !events.some((event) => !event.closed && event.entryAt)) {
+      intervals.push({ start: Date.parse(pitObservedAt), end: now, approximate: true });
+    }
     const bounds = stints.map((stint, i) => {
       const previous = options.previousCurrentStint;
       let start = Date.parse(estimatedStartTime(stint.laps[0]) || '')
@@ -302,7 +326,7 @@
       let end = i + 1 < stints.length ? Date.parse(estimatedStartTime(stints[i + 1].laps[0]) || '') || now : now;
       // Match transitions by time too: returning drivers can change repeatedly.
       const incoming = events.filter((e) => driverKey(e.driverAfter) === driverKey(stint.driverName)
-        && e.exitAt && Date.parse(e.exitAt) <= Date.parse(completionTime(stint.laps[0]) || options.generatedAt)
+        && e.exitAt && (i === 0 || Date.parse(e.exitAt) >= Date.parse(completionTime(stints[i - 1].laps.at(-1)))) && Date.parse(e.exitAt) <= Date.parse(completionTime(stint.laps[0]) || options.generatedAt)
         && (i === 0 || driverKey(e.driverBefore) === driverKey(stints[i - 1].driverName)))
         .sort((a, b) => Date.parse(b.exitAt) - Date.parse(a.exitAt))[0];
       if (incoming && i > 0) start = Date.parse(incoming.exitAt);
@@ -310,7 +334,9 @@
         && driverKey(e.driverBefore) === driverKey(stint.driverName)
         && ((e.driverAfter && i + 1 < stints.length && driverKey(e.driverAfter) === driverKey(stints[i + 1].driverName))
           || (!e.closed && i + 1 < stints.length)));
-      if (outgoing) end = Date.parse(outgoing.entryAt);
+      // A same-driver stop belongs inside this stint; it must not permanently
+      // cap the driver's time at that stop's entry.
+      if (outgoing && i + 1 < stints.length) end = Date.parse(outgoing.entryAt);
       if (!stint.laps.length && i > 0) {
         const active = events.find((e) => !e.closed);
         if (active) start = Date.parse(active.entryAt);
@@ -331,6 +357,7 @@
         stintTimeMs: options.timerRunning === false ? 0 : Math.max(0, gross - excluded),
         drivingTimeEstimated: clipped.some((p) => p.approximate) || !events.length,
         drivingTimePaused: i === stints.length - 1 && (active || lapAnalytics.rowShowsInPit(options.liveRow)),
+        pitObservedAt: i === stints.length - 1 ? pitObservedAt : null,
         timerSource: options.timerRunning === false ? 'session-not-started' : 'net-driving-time' };
     });
     const totals = new Map();

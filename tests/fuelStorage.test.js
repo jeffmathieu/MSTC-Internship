@@ -5,36 +5,23 @@ const path = require('path');
 const { mainHarness } = require('./helpers/mainHarness');
 
 module.exports = (async () => {
-  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'mstc-fuel-storage-'));
-  const app = mainHarness(folder);
-  let settings = app.normalizeSettings({ storageFolder: folder, followedCar: '1', followedCars: ['1'], sessionMode: 'race' });
-  app.setSettings(settings);
-  app.setState({ storageSessionFolder: folder });
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'mstc-fuel-disabled-'));
+  const collector = mainHarness(folder);
+  const settings = collector.normalizeSettings({ storageFolder: folder, followedCar: '1', followedCars: ['1'], sessionMode: 'race',
+    fuelByCar: { '1': { enabled: true, capacityLitres: 100, litresPerLap: 2 } } });
+  collector.setSettings(settings);
+  collector.setState({ storageSessionFolder: folder });
   try {
-    settings = await app.updateFuelSettingsAndState({ carNumber: '1',
-      config: { enabled: true, capacityLitres: 100, litresPerLap: 2, litresPerSecond: 1, reserveLitres: 10 },
-      action: 'calibrate', litres: 60 });
-    app.setSettings(settings);
-    assert.strictEqual(settings.fuelByCar['1'].capacityLitres, 100);
-    assert.strictEqual(app.fuel.get('1').balanceLitres, 60);
-    assert.strictEqual(JSON.parse(fs.readFileSync(path.join(folder, 'fuel_state.json')))['1'].balanceLitres, 60);
-    app.loadExistingHistory(settings);
-    assert.strictEqual(app.fuel.get('1').balanceLitres, 60, 'fuel calibration survives an archive reload');
-    await assert.rejects(app.updateFuelSettingsAndState({ carNumber: '2', action: 'calibrate', litres: 40 }), /followed car/);
-    await assert.rejects(app.updateFuelSettingsAndState({ carNumber: '1', config: { reserveLitres: -1 } }), /non-negative/);
-    await assert.rejects(app.updateFuelSettingsAndState({ carNumber: '1', config: { capacityLitres: 100, reserveLitres: 120 } }), /Reserve/);
-    app.services.set('1', { active: { id: 'active' }, events: [] });
-    await assert.rejects(app.updateFuelSettingsAndState({ carNumber: '1', action: 'calibrate', litres: 40 }), /leaving the pits/);
-    app.services.clear();
-    settings = await app.updateFuelSettingsAndState({ carNumber: '1', config: { ...settings.fuelByCar['1'], enabled: false } });
-    app.setSettings(settings);
-    settings = await app.updateFuelSettingsAndState({ carNumber: '1', config: { ...settings.fuelByCar['1'], enabled: true } });
-    app.setSettings(settings);
-    assert.strictEqual(settings.fuelByCar['1'].capacityLitres, 100, 'toggle retains configuration');
-    assert.strictEqual(app.fuel.get('1').balanceLitres, null, 're-enabling requires calibration, not a stale tank level');
-  } finally {
-    await app.flush();
-    fs.rmSync(folder, { recursive: true, force: true });
-  }
-  console.log('Fuel settings, calibration, persistence and input validation tests passed.');
+    await assert.rejects(collector.updateFuelSettingsAndState({ action: 'calibrate', litres: 60 }), /temporarily disabled/);
+    const collectedAt = '2026-09-08T12:00:00Z';
+    const rows = [{ carNumber: '1', driver: 'A', state: 'F', pit: '0' }];
+    collector.updateServiceEvents(settings, rows, { collectedAt });
+    collector.rebuildCollectorDerivedState(settings, { collectedAt, session: { elapsed: '00:10:00' } }, rows);
+    await collector.flush();
+    assert.strictEqual(collector.getState().pitstopPlansByCar['1'].fuel, null, 'old enabled settings cannot reactivate estimates');
+    assert.strictEqual(collector.services.get('1').active.phase, 'fuel', 'observed fuel service time remains enabled');
+    assert.strictEqual(fs.existsSync(path.join(folder, 'fuel_state.json')), false, 'parked estimation does not update tank balances');
+    assert.strictEqual(settings.fuelByCar['1'].capacityLitres, 100, 'saved configuration is retained for later');
+  } finally { await collector.flush(); fs.rmSync(folder, { recursive: true, force: true }); }
+  console.log('Disabled fuel estimation and retained service timer tests passed.');
 })();

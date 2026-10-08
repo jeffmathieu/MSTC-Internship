@@ -629,10 +629,10 @@ def render_race_summary(c, payload):
     c.setFont('Helvetica', 8)
     c.drawString(28, PAGE_H - 43, race_detail_line(race))
     c.setFont('Helvetica-Bold', 14)
-    c.drawRightString(PAGE_W - 28, PAGE_H - 27, 'FULL RACE OVERVIEW')
+    c.drawRightString(PAGE_W - 28, PAGE_H - 27, f"FULL {payload.get('reportMode', 'race').upper()} OVERVIEW")
 
     cards = [
-        ('Recorded race time', fmt_duration(summary.get('recordedRaceTimeMs'))),
+        ('Recorded session time', fmt_duration(summary.get('recordedRaceTimeMs'))),
         ('Completed laps', str(summary.get('totalLaps', 0))),
         ('Valid pace laps', str(stats.get('paceLapCount', 0))),
         ('Best lap', fmt_time(stats.get('bestLapMs'))),
@@ -644,7 +644,7 @@ def render_race_summary(c, payload):
 
     pace_w = 470
     condition_w = left_w - pace_w - 8
-    panel(c, left_x, 300, pace_w, 140, 'Full-race pace statistics')
+    panel(c, left_x, 300, pace_w, 140, 'Full-session pace statistics')
     best_theoretical_ms = metric_or_dash(stats.get('bestSector1Ms'), stats.get('bestSector2Ms'), stats.get('bestSector3Ms'))
     average_theoretical_ms = metric_or_dash(stats.get('averageSector1Ms'), stats.get('averageSector2Ms'), stats.get('averageSector3Ms'))
     pace_metrics = [
@@ -689,7 +689,7 @@ def render_race_summary(c, payload):
     c.setFillColor(MUTED)
     c.setFont('Helvetica', 5.7)
 
-    panel(c, left_x, 118, left_w, 170, 'Driver race comparison')
+    panel(c, left_x, 118, left_w, 170, 'Driver session comparison')
     headers = [('Driver', left_x + 14), ('Laps', left_x + 300), ('Valid', left_x + 350), ('Average', left_x + 405), ('Best', left_x + 482), ('Avg S1', left_x + 555), ('Avg S2', left_x + 632), ('Avg S3', left_x + 709)]
     c.setFillColor(MUTED)
     c.setFont('Helvetica-Bold', 7)
@@ -715,10 +715,11 @@ def render_race_summary(c, payload):
 
     panel(c, left_x, 72, left_w, 34, 'Race control')
     control = summary.get('raceControl', {})
+    durations = control.get('durationsMs', {})
     facts = [
-        ('FCY', str(control.get('fcy', 0)), YELLOW),
-        ('SC', str(control.get('safetyCar', 0)), YELLOW),
-        ('Red', str(control.get('redFlag', 0)), RED),
+        ('FCY', f"{control.get('fcy', 0)} / {fmt_time(durations.get('fcy'))}", YELLOW),
+        ('SC', f"{control.get('safetyCar', 0)} / {fmt_time(durations.get('safetyCar'))}", YELLOW),
+        ('Red', f"{control.get('redFlag', 0)} / {fmt_time(durations.get('redFlag'))}", RED),
     ]
     xx = left_x + 14
     for label, value, color in facts:
@@ -730,10 +731,10 @@ def render_race_summary(c, payload):
         c.setFillColor(INK)
         c.setFont('Helvetica-Bold', 8)
         c.drawString(xx + 35, 84, value)
-        xx += 120
+        xx += 210
     c.setFillColor(MUTED)
     c.setFont('Helvetica', 6.5)
-    c.drawRightString(PAGE_W - 28, 18, 'Generated from stored race data | race overview')
+    c.drawRightString(PAGE_W - 28, 18, f"Generated from stored timing data | {payload.get('reportMode', 'race')} overview")
 
 
 def render_pitstop_analysis_page(c, payload, stops, page_number, page_count):
@@ -879,6 +880,31 @@ def render_page(c, payload, stint, page_number):
     c.drawRightString(PAGE_W - 28, 18, f'Generated from stored {source_label} | page {page_number}')
 
 
+def render_caveats(c, payload):
+    draw_report_header(c, payload, 'DATA QUALITY AND TIMING NOTES')
+    c.setFont('Helvetica', 10)
+    c.setFillColor(INK)
+    y = PAGE_H - 95
+    for note in payload.get('caveats', []):
+        line = ''
+        for word in str(note).split():
+            proposed = (line + ' ' + word).strip()
+            if c.stringWidth(proposed, 'Helvetica', 10) > PAGE_W - 80:
+                c.drawString(40, y, line)
+                y -= 16
+                line = word
+            else:
+                line = proposed
+            if y < 60:
+                c.showPage()
+                draw_report_header(c, payload, 'DATA QUALITY AND TIMING NOTES (CONTINUED)')
+                c.setFont('Helvetica', 10)
+                c.setFillColor(INK)
+                y = PAGE_H - 95
+        c.drawString(40, y, line)
+        y -= 30
+
+
 def render_pdf(filename, payload, stints, include_summary=False):
     pdf = canvas.Canvas(filename, pagesize=(PAGE_W, PAGE_H))
     pdf.setTitle(f"{payload['race']['sessionName']} stint analysis")
@@ -896,6 +922,9 @@ def render_pdf(filename, payload, stints, include_summary=False):
                 pdf.showPage()
     for index, stint in enumerate(stints, 1):
         render_page(pdf, payload, stint, index)
+        pdf.showPage()
+    if payload.get('caveats'):
+        render_caveats(pdf, payload)
         pdf.showPage()
     # Analysis graphs are an appendix: the detailed stint and pitstop reports
     # come first, while the paginated 24-hour class charts always finish the PDF.

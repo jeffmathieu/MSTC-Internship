@@ -88,6 +88,7 @@ module.exports = (async () => {
       brokenExport.collector.setSnapshot(snapshot(2));
       await brokenExport.collector.pollLivePage();
       assert.strictEqual(archive(brokenExport.storageFolder).length, 2, `${blockedFile} failure cannot stop lap recording`);
+      await brokenExport.collector.flush();
       assert.ok(brokenExport.collector.getState().errors.length, 'optional export failures remain visible');
       assert.strictEqual(brokenExport.collector.getState().status, 'collecting');
     }
@@ -166,11 +167,13 @@ module.exports = (async () => {
     const today = new Date().toISOString();
     historical.collector.writeSessionMetadata(historical.settings, { collectedAt: today, sourceObservedAt: today,
       session: { flag: 'Finished flag' }, sourceProgressObserved: false });
+    await historical.collector.flush();
     assert.strictEqual(JSON.parse(fs.readFileSync(metadataPath)).finishedAt, at(245),
       'reading a finished page again cannot reopen its archived endpoint');
     assert.strictEqual(JSON.parse(fs.readFileSync(metadataPath)).lastUpdatedAt, at(245));
     historical.collector.writeSessionMetadata(historical.settings, { collectedAt: today, sourceObservedAt: today,
       session: { flag: 'Green flag' }, sourceProgressObserved: true });
+    await historical.collector.flush();
     assert.strictEqual(JSON.parse(fs.readFileSync(metadataPath)).finishedAt, null, 'actual new source progress reopens collection');
   } finally {
     for (const collector of collectors) await collector.flush();

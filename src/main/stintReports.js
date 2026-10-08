@@ -7,8 +7,10 @@ const graphData = require('../shared/graphData');
 const { buildStintInsights, classComparisonsForStint, classRankingForStint } = require('../shared/stintInsights');
 const { normalizeMode } = require('../shared/sessionMode');
 const { numberOrNull, driverChange } = require('../shared/pitEvents');
+const { summarizeRaceControl } = require('../shared/raceControl');
+const crypto = require('crypto');
 
-const REPORT_LAYOUT_VERSION = 'canonical-reportlab-landscape-v9-net-driving';
+const REPORT_LAYOUT_VERSION = 'canonical-landscape-v10-data-revision';
 
 // Every session mode gets an end-of-session overview. Pitstop analysis remains
 // race-only, while practice and qualifying summaries contain pace/sector data.
@@ -33,8 +35,8 @@ function safeFilePart(value, fallback = 'Unknown') {
 }
 
 function formatMs(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return '—';
+  const numeric = numberOrNull(value);
+  if (numeric === null) return '—';
   let remaining = Math.max(0, Math.round(numeric));
   const hours = Math.floor(remaining / 3600000); remaining %= 3600000;
   const minutes = Math.floor(remaining / 60000); remaining %= 60000;
@@ -82,8 +84,8 @@ function gapSamplesForStint(samples = [], stint = {}) {
       rivalCarNumber: String(sample.rivalCarNumber || ''),
       relation: sample.relation || '',
       confirmedAt: sample.confirmedAt || '',
-      gapMs: Number.isFinite(Number(sample.gapMs)) ? Number(sample.gapMs) : null,
-      lapGap: Number.isFinite(Number(sample.lapGap)) ? Number(sample.lapGap) : null,
+      gapMs: numberOrNull(sample.gapMs),
+      lapGap: numberOrNull(sample.lapGap),
       estimated: Boolean(sample.estimated),
       source: sample.source || ''
     }));
@@ -342,8 +344,16 @@ function buildCanonicalReportPayload({
   referenceTimes = {},
   pitRules = {},
   pitEvents = [],
-  sessionMode = 'race'
+  sessionMode = 'race',
+  raceControlEvents = [],
+  preparedReportPayload = null
 }) {
+  if (preparedReportPayload) {
+    const legacy = stints[0] ? buildStintReportPayload(stints[0], session, gapSamples) : null;
+    return { ...preparedReportPayload, stints: stints.map((stint) => preparedReportPayload.stints.find((item) =>
+      item.stintNumber === stint.stintNumber && item.driverName === stint.driverName)),
+      session: legacy?.session || null, stint: legacy?.stint || null, gapHistory: legacy?.gapHistory || [] };
+  }
   const reportPolicy = reportPolicyForSessionMode(sessionMode);
   const followedCar = String(carNumber || stints[0]?.carNumber || '');
   const invalidLegacyGaps = history.some((lap) => lap.gapSemantics === 'alternating-adjacent')
@@ -404,7 +414,7 @@ function buildCanonicalReportPayload({
       totalPitTimeMs: pitStops.length && pitStops.every((stop) => Number.isFinite(stop.durationMs))
         ? pitStops.reduce((total, stop) => total + stop.durationMs, 0)
         : null,
-      raceControl: raceControlSummary(history),
+      raceControl: raceControlEvents.length ? summarizeRaceControl(raceControlEvents, session.finishedAt || session.lastUpdatedAt) : raceControlSummary(history),
       graphs: (() => {
         const classPace = graphData.classPaceComparison(history, followedCar);
         return {
@@ -564,7 +574,12 @@ function artifactPaths(sessionFolder, stint) {
   };
 }
 
+let pdfPythonCache;
+let pdfPythonCacheKey;
 function findPdfPython() {
+  const key = process.env.PDF_PYTHON || '';
+  if (pdfPythonCacheKey === key) return pdfPythonCache;
+  pdfPythonCacheKey = key;
   const candidates = [
     process.env.PDF_PYTHON,
     path.join(os.homedir(), '.cache', 'codex-runtimes', 'codex-primary-runtime', 'dependencies', 'python', 'bin', 'python3'),
@@ -573,9 +588,9 @@ function findPdfPython() {
   ].filter(Boolean);
   for (const candidate of [...new Set(candidates)]) {
     const check = spawnSync(candidate, ['-c', 'import reportlab'], { stdio: 'ignore' });
-    if (!check.error && check.status === 0) return candidate;
+    if (!check.error && check.status === 0) return (pdfPythonCache = candidate);
   }
-  return null;
+  return (pdfPythonCache = null);
 }
 
 function reportRendererPath() {
@@ -646,6 +661,8 @@ async function writeClosedStintArtifacts({
   force = false,
   printFallback = (html, pdfPath) => printHtmlToPdf(BrowserWindow, html, pdfPath),
   sessionMode = 'race',
+  raceControlEvents = [],
+  preparedReportPayload = null,
   renderPdf = renderReportLabPdf
 }) {
   if (!stint?.closed) return { written: false, reason: 'stint-open' };
@@ -662,14 +679,6 @@ async function writeClosedStintArtifacts({
   }
   const pdfExists = fs.existsSync(paths.pdfPath);
   const layoutIsCurrent = previousPayload?.reportLayoutVersion === REPORT_LAYOUT_VERSION;
-  if (!force && previousPayload && pdfExists && layoutIsCurrent) {
-    return {
-      ...paths,
-      written: false,
-      pdfCreated: false,
-      reason: 'already-generated'
-    };
-  }
   const payload = buildCanonicalReportPayload({
     stints: [stint],
     session,
@@ -679,10 +688,21 @@ async function writeClosedStintArtifacts({
     pitRules,
     pitEvents,
     sessionMode,
+    raceControlEvents, preparedReportPayload,
     carNumber: stint.carNumber
   });
+  const { generatedAt, ...revisionInputs } = payload;
+  payload.dataRevision = crypto.createHash('sha256').update(JSON.stringify(revisionInputs)).digest('hex');
+  if (!force && previousPayload && pdfExists && layoutIsCurrent && previousPayload.dataRevision === payload.dataRevision) {
+    return {
+      ...paths,
+      written: false,
+      pdfCreated: false,
+      reason: 'already-generated'
+    };
+  }
   fs.writeFileSync(paths.jsonPath, JSON.stringify(payload, null, 2));
-  const needsPdf = force || !pdfExists || !layoutIsCurrent;
+  const needsPdf = force || !pdfExists || !layoutIsCurrent || previousPayload?.dataRevision !== payload.dataRevision;
   if (needsPdf) {
     const result = await renderPdf(paths.jsonPath, paths.pdfPath, { includeSummary: false });
     if (!result?.rendered) {
@@ -729,28 +749,88 @@ function buildCanonicalFallbackHtml(payload, includeSummary = false) {
   const time = (value) => numberOrNull(value) === null ? '—' : formatMs(value);
   const summary = payload.raceSummary || {};
   const columns = ['Stop', 'Lap', 'Duration', 'Fuel*', 'Pit*', 'Total*', 'Target', 'Delta', 'Driver before', 'Driver after', 'Change'];
-  const stopRows = (summary.pitStops || []).map((stop) => [
+  const stopValues = (stop) => [
     stop.stopNumber ?? '—', stop.lapNumber ?? '—', time(stop.durationMs), time(stop.fuelDurationMs), time(stop.pitDurationMs),
     time(stop.totalDurationMs), time(stop.targetDurationMs),
     numberOrNull(stop.deltaVsTargetMs) === null ? '—' : `${stop.deltaVsTargetMs < 0 ? '-' : '+'}${time(Math.abs(stop.deltaVsTargetMs))}`,
     stop.driverBefore || '—', stop.driverAfter || '—', stop.driverChanged == null ? 'unknown' : stop.driverChanged ? 'yes' : 'no'
-  ]).map((values) => `<tr>${values.map((value) => `<td>${htmlEscape(value)}</td>`).join('')}</tr>`).join('');
+  ];
+  const stopRows = (summary.pitStops || []).map(stopValues)
+    .map((values) => `<tr>${values.map((value) => `<td>${htmlEscape(value)}</td>`).join('')}</tr>`).join('');
+  const table = (title, headings, rows) => `<section><h2>${htmlEscape(title)}</h2><table><thead><tr>${headings.map((item) => `<th>${htmlEscape(item)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((item) => `<td>${htmlEscape(item ?? '—')}</td>`).join('')}</tr>`).join('')}</tbody></table></section>`;
+  const comparison = (title, rows) => table(title, ['Driver / car', 'Average', 'Best', 'Average delta', 'Best delta'], rows.map((row) =>
+    [row.driverName || `#${row.carNumber}`, time(row.averageLapMs), time(row.bestLapMs), delta(row.averageDeltaMs), delta(row.bestDeltaMs)]));
+  const delta = (value) => numberOrNull(value) === null ? '—' : `${value < 0 ? '-' : '+'}${time(Math.abs(value))}`;
+  const metricLabel = (key) => key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/ Ms$/, '').replace(/^./, (char) => char.toUpperCase());
+  const facts = (object, prefix = '') => Object.entries(object || {}).flatMap(([key, value]) => {
+    const label = `${prefix}${metricLabel(key)}`;
+    if (value && typeof value === 'object' && !Array.isArray(value)) return facts(value, `${label} / `);
+    if (Array.isArray(value)) return value.every((item) => typeof item !== 'object') ? [[label, value.join('; ')]] : [];
+    const formatted = key.endsWith('Ms') ? (value < 0 ? delta(value) : time(value))
+      : typeof value === 'number' ? (key.endsWith('Percent') ? `${value.toFixed(2)}%`
+        : key.endsWith('MsPerLap') ? `${value.toFixed(2)} ms/lap`
+        : Number.isInteger(value) ? value : value.toFixed(3)) : value ?? '—';
+    return [[label, formatted]];
+  });
   const overview = includeSummary ? `<section><h1>${htmlEscape(payload.race.sessionName)} · #${htmlEscape(payload.race.carNumber)}</h1>
+    <h2>${htmlEscape((payload.reportMode || 'race').toUpperCase())} OVERVIEW</h2>
     <p>${summary.totalLaps || 0} recorded laps · average ${time(summary.stats?.averageLapMs)} · best ${time(summary.stats?.bestLapMs)}</p>
     ${(summary.pitStops || []).length ? `<h2>Recorded pitstops and fuel</h2><table><thead><tr>${columns.map((label) => `<th>${label}</th>`).join('')}</tr></thead><tbody>${stopRows}</tbody></table>
       <p>* Observed fuel/pit transitions at feed polling precision. Duration prefers provider L. PIT. Missing measurements stay unknown.</p>` : ''}
-    ${(payload.caveats || []).map((caveat) => `<p>${htmlEscape(caveat)}</p>`).join('')}</section>` : '';
+    </section>${table('Pace by track condition', ['Condition', 'Laps', 'Valid', 'Average', 'Best'], Object.entries(summary.statsByCondition || {}).map(([condition, stats]) =>
+      [condition, stats.lapCount, stats.paceLapCount, time(stats.averageLapMs), time(stats.bestLapMs)]))}
+    ${table('Driver session comparison', ['Driver', 'Laps', 'Valid', 'Average', 'Best', 'S1', 'S2', 'S3'], (summary.drivers || []).map((driver) =>
+      [driver.driverName, driver.lapCount, driver.paceLapCount, time(driver.averageLapMs), time(driver.bestLapMs), time(driver.averageSector1Ms), time(driver.averageSector2Ms), time(driver.averageSector3Ms)]))}
+    ${table('Race control', ['Period', 'Count', 'Observed duration'], ['fcy', 'safetyCar', 'redFlag'].map((key) =>
+      [key, summary.raceControl?.[key] ?? '—', time(summary.raceControl?.durationsMs?.[key])]))}` : '';
   const stints = payload.stints.map((stint) => {
     const legacy = { session: { ...payload.race, driverName: stint.driverName }, stint: { ...stint, lapCount: stint.laps.length }, gapHistory: stint.gapHistory };
-    return buildStintReportHtml(legacy).match(/<body>([\s\S]*)<\/body>/)?.[1] || '';
+    return (buildStintReportHtml(legacy).match(/<body>([\s\S]*)<\/body>/)?.[1] || '')
+      + comparison('Team comparison', stint.teammates || [])
+      + comparison('Class comparison', stint.classComparisons || [])
+      + (stint.endPitStop ? table('End pitstop and observed fuel/pit time', columns, [stopValues(stint.endPitStop)]) : '')
+      + table('Stint engineering insights', ['Metric', 'Value'], facts(stint.insights))
+      + table('Reference times', ['Metric', 'Time'], Object.entries(payload.referenceTimes || {}).map(([key, value]) => [metricLabel(key), value > 0 ? time(value) : '—']));
   });
   const style = payload.stints.length ? buildStintReportHtml({ session: { ...payload.race, driverName: '' },
     stint: { ...payload.stints[0], lapCount: payload.stints[0].laps.length } }).match(/<style>([\s\S]*)<\/style>/)?.[1] || '' : '';
-  return `<!doctype html><html><head><meta charset="utf-8"><style>${style}
+  const graphs = summary.graphs || {};
+  const appendices = includeSummary ? [graphs.driverLaps, graphs.driverPace, graphs.driverSectors, ...(graphs.classPacePages || [graphs.classPace])]
+    .filter(Boolean).map((graph) => `<section class="stint-page"><h2>${htmlEscape(graph.title)}</h2><p>${htmlEscape(graph.subtitle)}</p>${fallbackGraphSvg(graph)}</section>`).join('') : '';
+  const caveats = payload.caveats?.length ? `<section class="report-caveats"><h2>Data quality and timing notes</h2>${payload.caveats.map((note) => `<p>${htmlEscape(note)}</p>`).join('')}</section>` : '';
+  return `<!doctype html><html><head><meta charset="utf-8"><title>MSTC session analysis</title><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><style>${style}
     @page { size: A4 landscape; margin: 12mm; } table { width:100%; border-collapse:collapse; font-size:9px; }
-    th,td { border:1px solid #d8ddd7; padding:5px; } thead { display:table-header-group; }
+    th,td { border:1px solid #d8ddd7; padding:5px; overflow-wrap:anywhere; } thead { display:table-header-group; }
     tr { break-inside:avoid; } .stint-page { break-before:page; } section { break-inside:auto; }
-    </style></head><body>${overview}${stints.map((html, i) => `<div class="${includeSummary || i ? 'stint-page' : ''}">${html}</div>`).join('')}</body></html>`;
+    h2 { break-after:avoid; } svg { width:100%; height:auto; break-inside:avoid; } .report-caveats p { margin:8px 0; }
+    </style></head><body>${overview}${stints.map((html, i) => `<div class="${includeSummary || i ? 'stint-page' : ''}">${html}</div>`).join('')}${caveats}${appendices}</body></html>`;
+}
+
+function fallbackGraphSvg(graph) {
+  const colors = ['#2474b5', '#1f9d70', '#d97730', '#b54a72', '#6556ad'];
+  const series = graph.series || [];
+  const points = series.flatMap((item) => item.points || []).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  const values = graph.type === 'bar' ? series.flatMap((item) => item.values || []).filter(Number.isFinite) : points.map((point) => point.y);
+  if (!values.length) return '<p>No measured samples available.</p>';
+  const low = graph.type === 'bar' ? 0 : Math.min(...values) * .98;
+  const high = Math.max(low + 1, ...values) * 1.02;
+  const yy = (value) => 270 - (value - low) / (high - low) * 235;
+  const labels = series.map((item, index) => `<text x="${60 + (index % 4) * 210}" y="${312 + Math.floor(index / 4) * 16}" fill="${colors[index % colors.length]}">${htmlEscape(item.name)}</text>`).join('');
+  let drawing;
+  if (graph.type === 'bar') {
+    const categories = graph.categories || [];
+    const groupWidth = 800 / Math.max(1, categories.length), barWidth = groupWidth / Math.max(1, series.length + 1);
+    drawing = series.map((item, j) => (item.values || []).map((value, i) => Number.isFinite(value)
+      ? `<rect x="${60 + i * groupWidth + j * barWidth}" y="${yy(value)}" width="${barWidth * .85}" height="${270 - yy(value)}" fill="${colors[j % colors.length]}"/>` : '').join('')).join('')
+      + categories.map((category, i) => `<text x="${60 + i * groupWidth}" y="289">${htmlEscape(category)}</text>`).join('');
+  } else {
+    const min = Math.min(...points.map((point) => point.x)), max = Math.max(min + 1, ...points.map((point) => point.x));
+    drawing = series.map((item, j) => `<polyline fill="none" stroke="${colors[j % colors.length]}" stroke-width="1.5" points="${(item.points || []).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+      .map((point) => `${60 + (point.x - min) / (max - min) * 800},${yy(point.y)}`).join(' ')}"/>`).join('')
+      + `<text x="60" y="289">${min}</text><text x="850" y="289">${max}</text>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 ${335 + Math.ceil(series.length / 4) * 16}" font-family="Arial" font-size="10"><path d="M60 30v240h800" fill="none" stroke="#68716d"/>
+    <text x="0" y="40">${htmlEscape(formatMs(high))}</text><text x="0" y="270">${htmlEscape(formatMs(low))}</text>${drawing}${labels}</svg>`;
 }
 
 async function writeEventSummaryArtifacts({
@@ -766,6 +846,8 @@ async function writeEventSummaryArtifacts({
   pitEvents = [],
   printFallback = (html, pdfPath) => printHtmlToPdf(BrowserWindow, html, pdfPath),
   sessionMode = 'race',
+  raceControlEvents = [],
+  preparedReportPayload = null,
   renderPdf = renderReportLabPdf
 }) {
   const reportPolicy = reportPolicyForSessionMode(sessionMode);
@@ -808,6 +890,7 @@ async function writeEventSummaryArtifacts({
       pitRules,
       pitEvents,
       sessionMode: reportPolicy.sessionMode,
+      raceControlEvents, preparedReportPayload,
       carNumber
     });
     payload.title = group.title;

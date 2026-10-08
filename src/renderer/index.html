@@ -2,6 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Race Engineer Dashboard</title>
     <link rel="stylesheet" href="styles.css" />
@@ -87,6 +88,7 @@
           </label>
         </div>
         <p id="pit-distance-note" class="subtitle"></p>
+        <!-- Fuel estimation UI parked until reimplementation. See fuelModel.js and TODO.md.
         <details id="fuel-setup">
           <summary>Fuel estimate — car <span id="fuel-setup-car"></span></summary>
           <label class="fuel-enable"><input id="fuel-enabled" type="checkbox" /> Enable fuel estimates and strategy warnings</label>
@@ -104,6 +106,7 @@
           <p class="subtitle">Confirm measurements after leaving the pits. Consumption uses observed completed laps; missing laps and changing conditions can reduce accuracy.</p>
           <p id="fuel-action-message" class="subtitle" role="status"></p>
         </details>
+        -->
         <div class="button-row end">
           <button id="pit-setup-cancel" class="secondary">Cancel</button>
           <button id="pit-setup-save" class="primary">Save pitstop setup</button>
@@ -162,8 +165,11 @@
               <path d="m7 15 4-4 3 3 5-6"></path>
             </svg>
           </button>
-          <button id="start" class="primary">Start</button>
-          <button id="stop" class="secondary">Stop</button>
+          <button id="export" class="secondary icon-button" title="Export current session data" aria-label="Export current session data">
+            <svg class="graph-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M4 15v6h16v-6"></path></svg>
+          </button>
+          <button id="start" class="primary compact-control">Start</button>
+          <button id="stop" class="secondary compact-control">Stop</button>
           <button id="open-setup" class="secondary">Setup</button>
           <button id="theme-toggle" class="secondary icon-button theme-toggle" title="Switch to dark mode" aria-label="Switch to dark mode">☾</button>
         </div>
@@ -277,10 +283,12 @@
           <span>Fuel<strong id="fuel-timer">—</strong></span>
           <span>Pit<strong id="service-pit-timer">—</strong></span>
           <span>Total<strong id="service-total-timer">—</strong></span>
+          <!-- Fuel estimation is parked until its replacement is implemented.
           <span id="fuel-estimate">Fuel estimate: setup required</span>
           <span id="fuel-range"></span>
           <span id="fuel-plan"></span>
           <small id="fuel-warning" role="status"></small>
+          -->
         </div>
         <div class="pit-header">
           <div>
@@ -323,7 +331,7 @@
       <details class="debug-panel">
         <summary>Detailed timing table / debug</summary>
         <div class="debug-actions">
-          <button id="export" class="secondary">Export</button>
+
           <span>Rows: <strong id="row-count">0</strong></span>
           <span>Stored laps: <strong id="history-count">0</strong></span>
           <span>Last update: <strong id="last-update">—</strong></span>

@@ -34,7 +34,7 @@ Dit opent het echte dashboard met alle 12.568 records uit de kopie. De bronmap, 
 - Scroll direct naar oude rondes, ook terwijl het dashboard iedere 5 seconden ververst.
 - Open de grafieken; zoom, verschuif het bereik en wissel grafiektype en conditiefilter.
 - Stop pauzeert de herhaalde updates; Start hervat ze. Deze teststand verzint geen extra historische rondes en reconstrueert geen fuel-overgangen tussen ontbrekende polls.
-- De exportknop in het debuggedeelte maakt een proef-PDF in de tijdelijke map. Handmatige rondewijzigingen zijn in deze alleen-lezen teststand uitgeschakeld.
+- De exportknop in de bovenbalk maakt een proef-PDF in de tijdelijke map. Handmatige rondewijzigingen zijn in deze alleen-lezen teststand uitgeschakeld.
 - Test dit op de teamlaptop met dezelfde vensters, schermgrootte en overige programma's die tijdens de race gebruikt worden. Laat dit bijvoorbeeld een uur draaien; let op responsiviteit én oplopend geheugen.
 
 ## Geautomatiseerde controles
@@ -48,7 +48,7 @@ npm run replay -- "race kopie" --smoke
 
 `test:24h` simuleert 45 auto's, 17.281 pollmomenten en 31.095 opgeslagen rondes. Opslag en timers lopen op alle pollmomenten; de eerste fase controleert afgeleide analytics elk uur. Vervolgens worden 120 opeenvolgende volledige live updates uitgevoerd tegen het volle archief, met twee nieuwe autorondes per poll. Herstart, historische correcties, IPC-patches en grafiekdatasets worden eveneens getest. Dit is een versnelde data-/belastingtest, **geen 24 uur durende wall-clock- of hardwaregarantie**.
 
-Gemeten op deze ontwikkelmachine (september 2026; indicatief):
+Gemeten op deze ontwikkelmachine (september/oktober 2026; indicatief):
 
 | Controle | Resultaat |
 | --- | --- |
@@ -56,23 +56,18 @@ Gemeten op deze ontwikkelmachine (september 2026; indicatief):
 | Echte kopie: herhaalde berekening / scroll | circa 20 ms / 2,5–18 ms over meerdere runs; 20 getekende regels onderaan |
 | Synthetische 24h-UI: scroll / zoom | circa 5 ms / 8 ms |
 | Dashboardupdate zonder nieuwe ronde | maximaal circa 67 kB per venster |
-| Vol archief + nieuwe rondes, 120 updates | mediaan 226 ms; 95e percentiel 332 ms; maximum 1,77 s inclusief koude herstart |
+| Vol archief + nieuwe rondes, 120 updates | mediaan 208 ms; 95e percentiel 280 ms; maximum 1,61 s inclusief koude herstart |
+| Vertraagde LAST-correctie in volledig 24h-archief | 712 ms; dezelfde passage behouden en correct herladen |
 | Proef-PDF uit echte kopie | 16 pagina's, 8 driverstints, 18 geregistreerde stopnummers; ontbrekende gegevens expliciet onbekend |
 
 De laatste bugcontrole was gericht op deze datastroom: wisselkolommen, ontbrekende/late pitgegevens, driverwissels, herstart/deduplicatie, handmatige correcties, IPC en grafiekresponsiviteit. Dit is geen claim dat alle mogelijke bugs in de gehele app zijn uitgesloten.
-# Fuel estimates and net driver time
 
-Pitstop setup now contains a per-car **Enable fuel estimates** switch (off by default).
-When off, estimated level, refuel advice and fuel warnings are hidden; measured
-fuel/pit service timers remain independent. Capacity, consumption in litres per
-observed completed lap, reserve, optional fuel flow, planned pit horizon and next
-stint length are configurable. Calibrate the current tank level to start. Confirm
-the actual total litres after leaving the pits to replace that stop's timer-based
-estimate, rather than adding it twice. A calibration already includes earlier stops.
-Re-enabling after disabling requires a new calibration; configuration is retained.
-These are estimates, not telemetry: missed laps and variable consumption reduce
-accuracy. Unknown refuels hide the level until corrected or recalibrated. Fuel
-settings and the accounting checkpoint survive restart.
+## Fuel estimates and net driver time
+
+Fuel estimation, calibration and refuel advice are temporarily disabled. Their
+UI markup is commented out, and saved configuration is retained for future
+reimplementation. Observed fuel/pit service timers and report columns remain
+active; a stop's observed total is fuel time plus pit time.
 
 Live driver stint time and driver totals now use net driving time: observed fuel
 and pit/garage intervals are excluded, including long stops without a driver
@@ -81,4 +76,33 @@ approximate service windows and are labelled estimated; they cannot recover an
 unrecorded exact pit entry/exit or certify regulatory driving-time compliance.
 
 Regression coverage: `fuelAndDriving.test.js`, `fuelStorage.test.js`, and the
-offline replay `--smoke` check (real Electron calibration and enable/disable UI).
+offline replay `--smoke` check (real Electron pit setup and top-bar export UI).
+
+## TODO implementation verification (October 2026)
+
+The top bar now exposes session export beside compact Start/Stop controls.
+CSV text that could be interpreted as a spreadsheet formula is prefixed with an
+apostrophe, including leading whitespace/control characters. Numeric time and
+counter fields retain their numeric representation.
+
+All dashboard windows use sandboxed preloads; remote timing pages cannot open
+popups, request permissions or navigate away from their timing origin (an HTTP
+to HTTPS upgrade on the same host is allowed). Privileged IPC requires a known
+local dashboard/graph window's main frame. Live-provider redirect compatibility
+still needs checking on the supported sites.
+
+`test:ui` exercises the extraction script in actual Chromium, replacing header
+rows between polls and distinguishing empty, hidden obsolete and populated tables.
+It also generates PDFs with both ReportLab and the built-in Electron renderer.
+Installed applications select the Electron engine, so PDF export needs no Python
+installation. Both reports include timing caveats, team/class comparisons,
+engineering insights and analysis graph appendices. Packaged Windows/macOS
+installation verification remains a separate follow-up.
+
+Race-control transitions are journalled independently of lap passages. Counts
+and durations reflect observed transitions at polling precision; outages cannot
+supply flag changes that were never observed. The finish countdown is advisory:
+automatic stopping waits for every followed class, including slower classes.
+
+`test:24h` now also times a delayed-LAST correction that replaces the passage
+without adding a lap and confirms it survives reloading the complete archive.

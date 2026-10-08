@@ -28,7 +28,8 @@
   }
 
   function completedLapEvidence(history = []) {
-    return history.find((lap) => Number(lap?.lapNumber) > 0 && Number(lap?.lapTimeMs) > 0) || null;
+    return history.find((lap) => Number(lap?.lapTimeMs) > 0
+      && (Number(lap?.lapNumber) > 0 || Number(lap?.historySequence) > 0 || lap?.lapNumberSource === 'observed-sequence')) || null;
   }
 
   function lapStartAt(lap, fallback) {
