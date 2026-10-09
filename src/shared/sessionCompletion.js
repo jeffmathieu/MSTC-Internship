@@ -48,6 +48,21 @@
     return /\b(?:finish|finished|finishd|checkered|chequered)\b/.test(status);
   }
 
+  function followedClassesCompletion(rows = [], followedCars = []) {
+    const classes = [...new Set(followedCars.map(String))].map((car) => followedClassCompletion(rows, car));
+    const classRows = [...new Map(classes.flatMap((group) => group.classRows).map((row) => [String(row.carNumber), row])).values()];
+    return { complete: classes.length > 0 && classes.every((group) => group.complete), classes, classRows,
+      unfinished: classRows.filter((row) => !rowIsFinished(row)),
+      reason: classes.some((group) => group.reason === 'followed-car-missing') ? 'followed-car-missing' : 'followed-classes' };
+  }
+
+  // A countdown is advisory while a followed class still reports running cars.
+  // Missing followed cars must also prevent an automatic shutdown.
+  function automaticCompletionReason(completion, countdown) {
+    if (completion.complete) return 'all-class-cars-finished';
+    return '';
+  }
+
   function timestampMs(value) {
     if (value instanceof Date) return value.getTime();
     if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -95,7 +110,7 @@
       };
     }
 
-    const baseLapMs = positiveMs(input.primaryAverageLapMs)
+    const baseLapMs = positiveMs(input.slowestFollowedLapMs) || positiveMs(input.primaryAverageLapMs)
       || positiveMs(input.primaryLastLapMs)
       || DEFAULT_FINISH_LAP_MS;
     const durationMs = Math.round(baseLapMs * (1 + bufferRatio));
@@ -116,6 +131,8 @@
     DEFAULT_FINISH_LAP_MS,
     rowIsFinished,
     followedClassCompletion,
+    followedClassesCompletion,
+    automaticCompletionReason,
     finishSignalPresent,
     updateFinishCountdown
   };

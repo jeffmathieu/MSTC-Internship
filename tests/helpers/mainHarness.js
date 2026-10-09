@@ -16,7 +16,7 @@ function mainHarness(folder) {
     dialog: { showMessageBox: async () => ({ response: 0 }) } }
     : name === 'electron-updater' ? { autoUpdater: {} } : realRequire(name);
   const source = fs.readFileSync(filename, 'utf8') + `\nreturn {
-    buildAnalyticsSummary, normalizeSettings, normalizeSnapshot, normalizeRowsForStorage, updateLapHistory,
+    pageExtractionScript, buildAnalyticsSummary, normalizeSettings, normalizeSnapshot, normalizeRowsForStorage, updateLapHistory,
     updateServiceEvents, loadExistingHistory, rebuildCollectorDerivedState, updateStoredLapManualStatus, updateFuelSettingsAndState,
     prepareLatestSnapshot, saveLatestSnapshot, finalizeCurrentSession, pollLivePage, writeSessionMetadata,
     setSnapshot: (snapshot) => { liveWindow = { isDestroyed: () => false, close() {},

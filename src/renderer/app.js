@@ -84,6 +84,12 @@ function setStatus(status, message) {
   const tooltip = String(message || normalized || 'Collector idle');
   dot.setAttribute('title', tooltip);
   dot.setAttribute('aria-label', tooltip);
+  const notice = $('collector-message');
+  if (notice) {
+    notice.hidden = !['loading', 'waiting', 'error', 'parser_error', 'stale', 'disconnected'].includes(normalized);
+    notice.textContent = tooltip;
+    notice.title = tooltip;
+  }
 }
 
 // Displays missing table values consistently.
@@ -332,7 +338,7 @@ function showPitSetup(show = true) {
     $('pit-safety-seconds').value = String((currentSettings?.pitRules?.fixedSafetyBufferMs ?? 30000) / 1000);
     updatePitDistanceNote();
   }
-  if (show) {
+  if (show && $('fuel-enabled')) {
     const fuel = currentSettings?.fuelByCar?.[activeCarNumber()] || {};
     $('fuel-enabled').checked = fuel.enabled === true;
     $('fuel-fields').disabled = !fuel.enabled;
@@ -620,11 +626,11 @@ function formatFinishCountdown(remainingMs) {
 function updateSession(session = {}, hasTimingRows = false, finishCountdown = null) {
   const finishing = Boolean(finishCountdown?.active);
   setText('session-name', session.sessionName || session.pageTitle || '—');
-  setText('session-time-label', finishing ? 'Auto stop' : 'Time left');
+  setText('session-time-label', finishing ? 'Finish watch' : 'Time left');
   setText(
     'session-time',
     finishing
-      ? formatFinishCountdown(finishCountdown.remainingMs)
+      ? (finishCountdown.expired ? 'Awaiting cars' : formatFinishCountdown(finishCountdown.remainingMs))
       : session.timeToGo || session.pageUpdated || '—'
   );
   const statusBlock = $('session-status-block');
@@ -1149,7 +1155,7 @@ function pitDeltaLabel(plan) {
 // Renders pit window status, required-stop progress, next allowed pit time, and
 // after-pit class projection. All rule calculations come from pitstopPlanner.
 function renderPitstopPlan(plan) {
-  const fuel = plan?.fuel?.enabled ? plan.fuel : null;
+  const fuel = null; // Estimation parked; observed fuel/pit timers below remain active.
   for (const id of ['fuel-estimate', 'fuel-range', 'fuel-plan', 'fuel-warning']) $(id)?.classList.toggle('hidden', !fuel);
   setText('fuel-estimate', fuel?.estimatedLitres != null ? `Est. fuel ≈ ${fuel.estimatedLitres.toFixed(1)} L` : 'Fuel estimate: setup required');
   setText('fuel-range', fuel?.lapsToReserve != null ? `Reserve in ≈ ${Math.floor(fuel.lapsToReserve)} laps` : '');
@@ -1561,7 +1567,16 @@ async function init() {
 
   // Race-day controls: each button calls a small preload API method, which then
   // invokes the matching ipcMain handler in main.js.
-  $('start')?.addEventListener('click', async () => { await saveSettingsFromInputs(true); await window.liveTiming.startCollector(currentSettings.timingUrl); });
+  $('start')?.addEventListener('click', async () => {
+    const button = $('start');
+    button.disabled = true;
+    try {
+      await saveSettingsFromInputs(true);
+      await window.liveTiming.startCollector(currentSettings.timingUrl);
+    } catch (error) {
+      setStatus('error', `Could not start collection: ${error.message}`);
+    } finally { button.disabled = false; }
+  });
   $('stop')?.addEventListener('click', () => window.liveTiming.stopCollector());
   $('show-live')?.addEventListener('click', () => window.liveTiming.openLiveWindow());
   $('open-graphs')?.addEventListener('click', () => window.liveTiming.openGraphsWindow(activeCarNumber()));
@@ -1604,7 +1619,7 @@ async function init() {
   $('pit-circuit')?.addEventListener('change', applyPitCircuitDefaults);
   ['pit-distance-meters', 'pit-fcy-speed'].forEach((id) => $(id)?.addEventListener('input', updatePitDistanceNote));
   $('pit-setup-save')?.addEventListener('click', async () => {
-    if (!await saveFuel()) return;
+    // Fuel estimation is temporarily disabled.
     await saveSettingsFromInputs();
     showPitSetup(false);
     render(currentState);

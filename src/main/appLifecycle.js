@@ -1,12 +1,24 @@
 // Centralizes Electron shutdown behavior so hidden collector windows cannot
 // accidentally keep the application alive or cancel a macOS Quit command.
-function setupAppLifecycle({ app, onBeforeQuit }) {
+function setupAppLifecycle({ app, onBeforeQuit, onError = () => {} }) {
   let isQuitting = false;
+  let draining = null;
 
-  function beginQuit() {
-    if (isQuitting) return;
+  function beginQuit(event) {
+    if (isQuitting) {
+      if (draining) event?.preventDefault();
+      return draining;
+    }
     isQuitting = true;
-    onBeforeQuit();
+    const result = onBeforeQuit();
+    if (result && typeof result.then === 'function') {
+      event?.preventDefault();
+      draining = Promise.resolve(result).catch(onError).finally(() => {
+        draining = null;
+        if (event) app.quit();
+      });
+    }
+    return draining;
   }
 
   app.on('before-quit', beginQuit);

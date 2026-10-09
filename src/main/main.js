@@ -62,7 +62,7 @@ const { normalizeMode, buildComparisonView, qualifyingAdjacentView } = require('
 const { preferStableSessionName } = require('../shared/sessionName');
 const { drivingStintsForCar: stintsForCar, buildDrivingStintState: buildStintState } = require('../shared/stintTracker');
 const { updateSessionTiming } = require('../shared/sessionTiming');
-const { followedClassCompletion, updateFinishCountdown } = require('../shared/sessionCompletion');
+const { followedClassesCompletion, automaticCompletionReason: completionReason, updateFinishCountdown } = require('../shared/sessionCompletion');
 const { buildTimingHighlights } = require('../shared/timingHighlights');
 const { resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalReportSettings,
   readJsonLines, appendJsonLines, atomicWriteFile, resolveSessionEndAt } = require('../shared/storageSession');
@@ -71,6 +71,10 @@ const { setupAppLifecycle } = require('./appLifecycle');
 const { haltCollectorForCompletion } = require('./collectorCompletion');
 const { printHtmlToPdf } = require('./stintReports');
 const { createReportQueue } = require('./reportQueue');
+const { secureContents, localPageAllowed, remoteNavigationAllowed, trustedSender } = require('./windowSecurity');
+const { nextRaceControlEvent } = require('../shared/raceControl');
+// Fuel estimation is parked for a later release; observed service timers stay active.
+const FUEL_ESTIMATION_ENABLED = false;
 const {
   normalizeTrackCondition,
   normalizeAnalysisFilter,
@@ -94,6 +98,7 @@ const pendingStintReports = new Set();
 let automaticCompletionHandled = false;
 let feedState = {};
 let providerFreshness = {};
+let raceControlEvents = [];
 const lapReconciliationByCar = new Map();
 const serviceStates = new Map();
 const fuelStates = new Map();
@@ -103,6 +108,7 @@ const rendererChannels = new Map();
 const snapshotWriter = createSnapshotWriter((error, context) => addError(error, context));
 const reportQueue = createReportQueue((html, pdfPath) => printHtmlToPdf(BrowserWindow, html, pdfPath));
 const completedReportKeys = new Set();
+let reportCorrectionsRevision = 0;
 
 // A real application quit must bypass the hidden live window's normal
 // close-to-hide behavior and stop the polling timer before Electron exits.
@@ -112,7 +118,9 @@ const appLifecycle = setupAppLifecycle({
     shouldCloseLiveWindow = true;
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = null;
-  }
+    return (async () => { await activePoll; await snapshotWriter.flush(); await reportQueue.flush(); })();
+  },
+  onError: (error) => addError(error, 'shutdown')
 });
 
 // Stores unique lap identifiers that have already been written to disk.
@@ -288,7 +296,7 @@ function appendTrackConditionEvent(previous, next) {
       .map((row) => [String(row.carNumber), row.lapNumber ?? row.laps ?? null]))
   };
   fs.appendFileSync(path.join(folder, 'track_condition_events.jsonl'), `${JSON.stringify(event)}\n`);
-  fs.writeFileSync(path.join(folder, 'track_condition_state.json'), JSON.stringify(event, null, 2));
+  snapshotWriter.write(path.join(folder, 'track_condition_state.json'), JSON.stringify(event, null, 2));
   return event;
 }
 
@@ -305,11 +313,10 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      // sandbox is disabled because the preload/main bridge is trusted in this
-      // local Electron app. Revisit this if the renderer starts loading remote UI.
-      sandbox: false
+      sandbox: true
     }
   });
+  secureContents(mainWindow.webContents, (url) => localPageAllowed(url, path.resolve(__dirname, '../renderer')));
   appLifecycle.attachMainWindow(mainWindow);
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
@@ -337,9 +344,10 @@ function createAdditionalDashboardWindow(carNumber) {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
   });
+  secureContents(win.webContents, (url) => localPageAllowed(url, path.resolve(__dirname, '../renderer')));
   additionalDashboardWindows.set(key, win);
   win.on('closed', () => additionalDashboardWindows.delete(key));
   win.loadFile(path.join(__dirname, '../renderer/index.html'), { query: { car: key, secondary: '1' } });
@@ -378,9 +386,10 @@ function openGraphsWindow(carNumber = loadSettings().followedCar) {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
   });
+  secureContents(graphsWindow.webContents, (url) => localPageAllowed(url, path.resolve(__dirname, '../renderer')));
   graphWindowsByCar.set(key, graphsWindow);
   graphsWindow.on('closed', () => graphWindowsByCar.delete(key));
   graphsWindow.loadFile(path.join(__dirname, '../renderer/graphs.html'), { query: { car: key } });
@@ -397,8 +406,9 @@ function createLiveWindow() {
     width: 1400,
     height: 900,
     show: false,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: false }
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, partition: 'mstc-timing' }
   });
+  secureContents(liveWindow.webContents, (url) => remoteNavigationAllowed(url, collectorState.url));
   liveWindow.on('close', (event) => {
     if (shouldCloseLiveWindow) return;
     event.preventDefault();
@@ -446,29 +456,43 @@ function addError(error, context = '') {
 // here before changing the parser.
 const pageExtractionScript = String.raw`(() => {
   const clean = (value) => String(value || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  const cache = window.__mstcExtractionCache || (window.__mstcExtractionCache = { labels: {}, headers: new WeakMap() });
   // Preserve visual line boundaries inside RIS TEAM INFO cells. Plain
   // textContent flattens "team" and "driver - car" into one ambiguous string.
   const cellText = (cell) => clean(String(cell.innerText || cell.textContent || '').replace(/(?:\r?\n)+/g, ' | '));
   const tables = Array.from(document.querySelectorAll('table')).map((table, tableIndex) => {
-    const rows = Array.from(table.querySelectorAll('tr'));
+    const rows = Array.from(table.rows);
     let headerCells = [];
     const explicitHeader = table.querySelector('thead tr');
     if (explicitHeader) {
       headerCells = Array.from(explicitHeader.querySelectorAll('th,td')).map(cellText);
     } else {
-      const firstHeaderRow = rows.find((row) => Array.from(row.querySelectorAll('th')).length > 0) || rows[0];
+      let firstHeaderRow = cache.headers.get(table);
+      if (!firstHeaderRow?.isConnected || !table.contains(firstHeaderRow)) {
+        firstHeaderRow = rows.find((row) => Array.from(row.cells).some((cell) => cell.tagName === 'TH')) || rows[0];
+        if (firstHeaderRow) cache.headers.set(table, firstHeaderRow);
+      }
       headerCells = firstHeaderRow ? Array.from(firstHeaderRow.querySelectorAll('th,td')).map(cellText) : [];
     }
     const bodyRows = rows
-      .map((row) => Array.from(row.querySelectorAll('td,th')).map(cellText))
+      .map((row) => Array.from(row.cells).map(cellText))
       .filter((cells) => cells.length > 0)
       .filter((cells) => cells.join('|') !== headerCells.join('|'));
-    return { tableIndex, headers: headerCells, rows: bodyRows, rowCount: bodyRows.length, className: table.className || '', id: table.id || '' };
+    const style = window.getComputedStyle(table);
+    const visible = style.display !== 'none' && style.visibility !== 'hidden' && table.getClientRects().length > 0;
+    return { tableIndex, headers: headerCells, rows: bodyRows, rowCount: bodyRows.length, visible, className: table.className || '', id: table.id || '' };
   });
-  const allText = clean(document.body ? (document.body.textContent || document.body.innerText) : '');
+  // Provider pages retain hidden connection/error panels and script strings.
+  // Only rendered text may decide whether a live session is unavailable.
+  const allText = clean(document.body ? (document.body.innerText ?? document.body.textContent ?? '') : '');
+  let textCandidates;
+  const candidates = () => textCandidates || (textCandidates = Array.from(document.querySelectorAll('span,b,strong,label,div,p,td')));
   const labelledValue = (label) => {
-    const labelElement = Array.from(document.querySelectorAll('body *'))
-      .find((element) => clean(element.textContent || '') === label);
+    let labelElement = cache.labels[label];
+    if (!labelElement?.isConnected || clean(labelElement.textContent) !== label) {
+      labelElement = candidates().find((element) => clean(element.textContent || '') === label);
+      cache.labels[label] = labelElement;
+    }
     if (!labelElement || !labelElement.parentElement) return '';
     const parentText = clean(labelElement.parentElement.innerText || labelElement.parentElement.textContent || '');
     return parentText.toLowerCase().startsWith(label.toLowerCase())
@@ -479,10 +503,11 @@ const pageExtractionScript = String.raw`(() => {
   // race-control banner near the top of the page instead. Historical messages
   // can contain the same words lower down, so they must never be selected as
   // the live flag.
-  const currentFlagElement = Array.from(document.querySelectorAll('body *'))
+  const currentFlagElement = candidates()
+    .filter((element) => /^(?:green(?: flag)?|full course yellow|fcy|safety car|red(?: flag)?|yellow(?: flag)?|code 60|finish(?:ed)?(?: flag)?)$/i.test(clean(element.textContent || '')))
     .map((element) => ({
       element,
-      text: clean(element.innerText || element.textContent || ''),
+      text: clean(element.textContent || ''),
       rect: element.getBoundingClientRect()
     }))
     .filter(({ element, text, rect }) => {
@@ -521,7 +546,14 @@ function hashObject(value) {
 // chooses the best table and attaches diagnostics.
 function normalizeSnapshot(snapshot) {
   const session = parseSessionInfo(snapshot);
-  const timingTable = snapshot.tables.find((table) => looksLikeTimingHeaders(table.headers));
+  const selectedTable = snapshot.tables.filter((table) => looksLikeTimingHeaders(table.headers))
+    .map((table) => {
+      const parsedRows = table.rows.map((cells, rowIndex) => ({ rowIndex, ...parseTimingRow(table.headers, cells), cells }))
+        .filter((row) => row.carNumber != null);
+      return { table, parsedRows, score: (table.visible === false ? -100000 : 100000)
+        + parsedRows.filter((row) => row.lastLapMs > 0).length * 100 + parsedRows.length };
+    }).sort((a, b) => b.score - a.score)[0];
+  const timingTable = selectedTable?.table;
   const diagnostics = {
     url: snapshot.location,
     title: snapshot.title,
@@ -533,9 +565,7 @@ function normalizeSnapshot(snapshot) {
   if (!timingTable) {
     return { status: snapshot.bodyText?.includes('No active heat') ? 'waiting' : 'parser_error', message: 'No timing table with NR/TEAM/LAST/BEST-style headers detected yet.', headers: [], rows: [], session, diagnostics };
   }
-  const parsedRows = applySingleClassFallback(timingTable.rows
-    .map((cells, rowIndex) => ({ rowIndex, ...parseTimingRow(timingTable.headers, cells), cells }))
-    .filter((row) => row.carNumber !== null && row.carNumber !== undefined));
+  const parsedRows = applySingleClassFallback(selectedTable.parsedRows);
   const adapted = adaptTimingFeed(feedState, timingTable.headers, parsedRows);
   feedState = adapted.state;
   const rows = adapted.rows;
@@ -650,9 +680,9 @@ function buildAndWritePitstopPlan(settings, context, rows, carNumber) {
     }
   });
   const payload = { ...plan, pitState, serviceTimers: serviceTimers(serviceStates.get(followedCarNumber), context.collectedAt),
-    fuel: fuelSummary(fuelStates.get(followedCarNumber), settings.fuelByCar?.[followedCarNumber], {
+    fuel: FUEL_ESTIMATION_ENABLED ? fuelSummary(fuelStates.get(followedCarNumber), settings.fuelByCar?.[followedCarNumber], {
       averageLapMs: averageLapForPitPlan(settings, followedCarNumber), waitMs: plan.waitMs
-    }) };
+    }) : null };
   snapshotWriter.write(path.join(folder, `pitstop_plan_car-${slugPart(followedCarNumber, 'unknown')}.json`), JSON.stringify(payload));
   if (followedCarNumber === String(settings.followedCar || '')) snapshotWriter.write(path.join(folder, 'pitstop_plan.json'), JSON.stringify(payload));
   return payload;
@@ -702,8 +732,8 @@ function annotateLiveSectorFlags(storageRows, context) {
 
 function writeLatestRows(settings, normalizedRows) {
   const folder = ensureStorage(settings);
-  fs.writeFileSync(path.join(folder, 'latest_live_rows.json'), JSON.stringify(normalizedRows, null, 2));
-  fs.writeFileSync(path.join(folder, 'latest_live_rows.csv'), toCsvRows(normalizedRows));
+  snapshotWriter.write(path.join(folder, 'latest_live_rows.json'), JSON.stringify(normalizedRows, null, 2));
+  snapshotWriter.write(path.join(folder, 'latest_live_rows.csv'), toCsvRows(normalizedRows));
 }
 
 // Commits only start/finish-confirmed GAP/INT/DIFF values. The compact state is
@@ -718,7 +748,7 @@ function updateAndWriteGapMemory(settings, context, rows) {
     paceWindow: DEFAULT_GAP_PACE_WINDOW,
     pitSuppressionLaps: DEFAULT_PIT_SUPPRESSION_LAPS
   });
-  fs.writeFileSync(path.join(folder, 'gap_state.json'), JSON.stringify({ ...gapMemoryState, samples: [], newSamples: [] }, null, 2));
+  snapshotWriter.write(path.join(folder, 'gap_state.json'), JSON.stringify({ ...gapMemoryState, samples: [], newSamples: [] }, null, 2));
   if (gapMemoryState.newSamples.length) {
     appendJsonLines(fs, path.join(folder, 'gap_history.jsonl'), gapMemoryState.newSamples);
   }
@@ -769,7 +799,7 @@ function appendLapHistory(settings, lapRecords) {
 // its HTML/column names.
 function writeParserDebug(settings, debugInfo) {
   const folder = ensureStorage(settings);
-  fs.writeFileSync(path.join(folder, 'parser_debug.json'), JSON.stringify(debugInfo, null, 2));
+  snapshotWriter.write(path.join(folder, 'parser_debug.json'), JSON.stringify(debugInfo, null, 2));
 }
 
 // Writes session-level metadata beside the latest rows/history so every session
@@ -779,7 +809,9 @@ function writeSessionMetadata(settings, context, options = {}) {
   const metadataPath = path.join(folder, 'session_metadata.json');
   let previousMetadata = {};
   try {
-    if (fs.existsSync(metadataPath)) previousMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+    const pendingMetadata = snapshotWriter.latest(metadataPath);
+    if (pendingMetadata !== undefined) previousMetadata = JSON.parse(pendingMetadata);
+    else if (fs.existsSync(metadataPath)) previousMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
   } catch (error) {
     addError(error, 'readSessionMetadata');
   }
@@ -793,7 +825,7 @@ function writeSessionMetadata(settings, context, options = {}) {
   const finishedAt = options.finishedAt || (resumed ? null : previousMetadata.finishedAt) || null;
   if (finishedAt && !resumed && !options.finishedAt) observedAt = previousMetadata.lastUpdatedAt || finishedAt;
   if (finishedAt) context.finishedAt = finishedAt;
-  atomicWriteFile(fs, metadataPath, JSON.stringify({
+  snapshotWriter.write(metadataPath, JSON.stringify({
     timingUrl: context.timingUrl || '',
     sourceProvider: context.sourceProvider || 'unknown',
     sessionName: preferStableSessionName(currentSessionName, previousMetadata.sessionName),
@@ -983,7 +1015,8 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
     const liveRow = rows.find((row) => String(row.carNumber) === String(carNumber));
     const closedStints = stintState.cars[carNumber].stints.filter((stint) => stint.closed && stint.lapCount > 0);
     const input = { sessionFolder: folder, carNumber,
-      session: context?.session || collectorState.session || {},
+      session: { ...(context?.session || collectorState.session || {}), finishedAt: stintOptions.closeFinalAt, lastUpdatedAt: generatedAt },
+      pdfEngine: app.isPackaged ? 'electron' : 'auto',
       gapSamples: gapMemoryState?.samples || [],
       pitEvents: serviceStates.get(carNumber)?.events || [],
       referenceTimes: settings.referenceTimes || {}, pitRules: settings.pitRules || {}, sessionMode: reportSessionMode,
@@ -995,7 +1028,15 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
       continue;
     }
     for (const stint of closedStints) {
-      const reportKey = `${folder}|${carNumber}|${stint.stintNumber}|${stint.driverName}`;
+      // Future stops/flags must not regenerate every earlier PDF on each poll.
+      // Include service observations touching this stint, plus edits/settings.
+      const end = Date.parse(stint.closedAt);
+      const reportInputs = hashObject({ referenceTimes: input.referenceTimes, pitRules: input.pitRules,
+        mode: reportSessionMode, startedAt: stint.startedAt, closedAt: stint.closedAt,
+        drivingTimeMs: stint.stintTimeMs,
+        events: input.pitEvents.filter((event) => Date.parse(event.entryAt || event.exitAt) <= end
+          && (!event.exitAt || Date.parse(event.exitAt) >= Date.parse(stint.startedAt))) });
+      const reportKey = `${folder}|${carNumber}|${stint.stintNumber}|${stint.driverName}|${reportCorrectionsRevision}|${reportInputs}`;
       if (pendingStintReports.has(reportKey) || completedReportKeys.has(reportKey)) continue;
       pendingStintReports.add(reportKey);
       reportQueue.enqueue(reportKey, { ...input, stintNumber: stint.stintNumber })
@@ -1079,8 +1120,8 @@ function buildAndWriteLapPrediction(settings, context, rows, carNumber) {
     options: { sampleSize: 10, currentCondition: settings.trackCondition }
   });
   const payload = { ...prediction, updatedAt: context?.collectedAt || new Date().toISOString() };
-  fs.writeFileSync(path.join(folder, `lap_prediction_car-${slugPart(followedCarNumber, 'unknown')}.json`), JSON.stringify(payload, null, 2));
-  if (followedCarNumber === String(settings.followedCar || '')) fs.writeFileSync(path.join(folder, 'lap_prediction.json'), JSON.stringify(payload, null, 2));
+  snapshotWriter.write(path.join(folder, `lap_prediction_car-${slugPart(followedCarNumber, 'unknown')}.json`), JSON.stringify(payload, null, 2));
+  if (followedCarNumber === String(settings.followedCar || '')) snapshotWriter.write(path.join(folder, 'lap_prediction.json'), JSON.stringify(payload, null, 2));
   return payload;
 }
 
@@ -1125,6 +1166,8 @@ function loadExistingHistory(settings) {
   serviceStates.clear();
   fuelStates.clear();
   const folder = ensureStorage(settings);
+  try { raceControlEvents = readJsonLines(fs, path.join(folder, 'race_control_events.jsonl')).entries; }
+  catch (error) { raceControlEvents = []; addError(error, 'load-race-control-events'); }
   const jsonlPath = path.join(folder, 'lap_history.jsonl');
   let restoredEntries = [];
   try {
@@ -1269,6 +1312,7 @@ function updateLapHistory(settings, storageRows) {
   });
   const previousHistory = collectorState.lapHistory;
   if (corrections.size) {
+    reportCorrectionsRevision++;
     const nextHistory = [...previousHistory.map((entry) => corrections.get(entry.lapId) || entry), ...newEntries];
     rewriteLapHistoryFiles(settings, nextHistory);
     collectorState.lapHistory = prepareHistory(nextHistory);
@@ -1298,12 +1342,12 @@ function updateServiceEvents(settings, rows, context) {
     });
     appendJsonLines(fs, path.join(folder, 'pit_events.jsonl'), result.changedEvents);
     serviceStates.set(key, result.state);
-    fuelStates.set(key, updateFuelState(fuelStates.get(key), { sequence: carLaps.at(-1)?.historySequence || 0,
+    if (FUEL_ESTIMATION_ENABLED) fuelStates.set(key, updateFuelState(fuelStates.get(key), { sequence: carLaps.at(-1)?.historySequence || 0,
       events: result.state.events, config: settings.fuelByCar?.[key] }));
   });
   snapshotWriter.write(path.join(folder, 'pit_event_state.json'), JSON.stringify(Object.fromEntries(serviceStates)));
   snapshotWriter.write(path.join(folder, 'timing_feed_state.json'), JSON.stringify(feedState));
-  snapshotWriter.write(path.join(folder, 'fuel_state.json'), JSON.stringify(Object.fromEntries(fuelStates)));
+  if (FUEL_ESTIMATION_ENABLED) snapshotWriter.write(path.join(folder, 'fuel_state.json'), JSON.stringify(Object.fromEntries(fuelStates)));
 }
 
 function normalizeManualLapStatusInput(value) {
@@ -1394,7 +1438,7 @@ function rebuildCollectorDerivedState(settings, context = null, rows = collector
       || (!collectorState.sessionTiming && Boolean(collectorState.lapHistory?.length)),
     sessionStartedAt: collectorState.sessionTiming?.startedAt || null
   });
-  fs.writeFileSync(path.join(ensureStorage(settings), 'stint_state.json'), JSON.stringify(collectorState.stintState, null, 2));
+  snapshotWriter.write(path.join(ensureStorage(settings), 'stint_state.json'), JSON.stringify(collectorState.stintState, null, 2));
   collectorState.analyticsSummary = writeAnalyticsSummary(settings, context || { collectedAt: generatedAt, session: collectorState.session || {} }, rows);
   collectorState.lapPredictionsByCar = writeLapPredictions(settings, context || { collectedAt: generatedAt }, rows);
   if (normalizeMode(settings.sessionMode) === 'race') {
@@ -1419,6 +1463,7 @@ function updateStoredLapManualStatus(payload = {}) {
   if (!changed) return { ok: false, message: 'Lap not found', state: collectorState };
   rewriteLapHistoryFiles(settings, nextHistory);
   collectorState.lapHistory = prepareHistory(nextHistory);
+  reportCorrectionsRevision++;
   rebuildCollectorDerivedState(settings);
   collectorState.message = `Lap ${payload.lapNumber || ''} marked as ${normalizeManualLapStatusInput(payload.status)}.`;
   broadcastState();
@@ -1482,33 +1527,34 @@ async function pollLivePage() {
     context.sourceObservedAt = providerFreshness.lastProgressAt;
     context.sourceProgressObserved = providerFreshness.progressObserved;
     const primaryCar = String(settings.followedCar || '');
-    const completion = followedClassCompletion(analysisRows, primaryCar);
+    const completion = followedClassesCompletion(analysisRows, normalizeFollowedCars(settings));
     const newLapCount = updateLapHistory(settings, storageRows);
     saveLatestSnapshot(settings, normalized, prepared);
     updateServiceEvents(settings, analysisRows, context);
+    const raceControlEvent = nextRaceControlEvent(raceControlEvents.at(-1), normalized.session, observedAt);
+    if (raceControlEvent) {
+      appendJsonLines(fs, path.join(ensureStorage(settings), 'race_control_events.jsonl'), [raceControlEvent]);
+      raceControlEvents.push(raceControlEvent);
+    }
     const primaryStats = carStats(collectorState.lapHistory || [], primaryCar);
     const primaryRow = analysisRows.find((row) => String(row.carNumber) === primaryCar);
     const finishCountdown = updateFinishCountdown(collectorState.finishCountdown, {
       session: context?.session || normalized.session || {},
       rows: analysisRows,
       nowMs: context?.collectedAt || new Date().toISOString(),
+      slowestFollowedLapMs: Math.max(0, ...completion.classRows.map((row) => Number(row.lastLapMs) || 0),
+        ...normalizeFollowedCars(settings).map((car) => carStats(collectorState.lapHistory, car).averageLapMs || 0)),
       primaryAverageLapMs: primaryStats.averageLapMs,
       primaryLastLapMs: primaryRow?.lastLapMs
     });
-    const automaticCompletionReason = completion.complete
-      ? 'all-class-cars-finished'
-      : finishCountdown.expired
-        ? 'finish-countdown-expired'
-        : '';
+    const automaticCompletionReason = completionReason(completion, finishCountdown);
     const shouldFinalizeAutomatically = Boolean(automaticCompletionReason) && !automaticCompletionHandled;
     if (shouldFinalizeAutomatically) {
       context.finishedAt ||= observedAt;
       try { writeSessionMetadata(settings, context, { finishedAt: context.finishedAt }); }
       catch (error) { addError(error, 'save-session-endpoint'); }
       automaticCompletionHandled = true;
-      const completionMessage = automaticCompletionReason === 'all-class-cars-finished'
-        ? 'All cars in the followed class have finished.'
-        : 'Finish countdown elapsed after the primary car average lap plus 25% buffer.';
+      const completionMessage = 'All cars in the followed classes have finished.';
 
       // Stop and publish first. Report generation and the native OK dialog can
       // take an arbitrary amount of time and must never keep collection alive.
@@ -1621,6 +1667,7 @@ function storageInfo(settings) {
 // an immediate poll, then schedules repeated polls.
 // Poll frequency is controlled by settings.pollIntervalMs.
 async function startCollector(url) {
+  if (!remoteNavigationAllowed(url, url)) throw new Error('Use an HTTP or HTTPS timing URL without embedded credentials.');
   stopCollector(false);
   await activePoll;
   await snapshotWriter.flush();
@@ -1670,11 +1717,19 @@ function stopCollector(closeLiveWindow = true) {
   broadcastState();
 }
 
+function handleTrusted(channel, handler) {
+  ipcMain.handle(channel, (event, ...args) => {
+    const windows = [mainWindow, ...additionalDashboardWindows.values(), ...graphWindowsByCar.values()];
+    if (!trustedSender(event, windows, path.resolve(__dirname, '../renderer'))) throw new Error('Untrusted IPC sender');
+    return handler(event, ...args);
+  });
+}
+
 // IPC handlers are the public API used by preload.js and the renderer. When
 // adding a UI action, add its handler here and expose a matching function in
 // preload.js.
-ipcMain.handle('settings:get', () => loadSettings());
-ipcMain.handle('settings:set', (_event, settings) => {
+handleTrusted('settings:get', () => loadSettings());
+handleTrusted('settings:set', (_event, settings) => {
   const previous = loadSettings();
   const requestedCondition = settings?.trackCondition === undefined
     ? previous.trackCondition
@@ -1730,7 +1785,7 @@ ipcMain.handle('settings:set', (_event, settings) => {
 });
 
 // Opens a native folder picker and stores the chosen export/history directory.
-ipcMain.handle('storage:chooseFolder', async () => {
+handleTrusted('storage:chooseFolder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Choose or create the folder for this race session',
     properties: ['openDirectory', 'createDirectory']
@@ -1739,8 +1794,8 @@ ipcMain.handle('storage:chooseFolder', async () => {
   return result.filePaths[0];
 });
 
-ipcMain.handle('collector:start', (_event, url) => startCollector(url));
-ipcMain.handle('collector:stop', async (event) => {
+handleTrusted('collector:start', (_event, url) => startCollector(url));
+handleTrusted('collector:stop', async (event) => {
   const result = await dialog.showMessageBox(mainWindow, {
     type: 'warning',
     title: 'End this session?',
@@ -1754,10 +1809,11 @@ ipcMain.handle('collector:stop', async (event) => {
   await finalizeCurrentSession({ automatic: false });
   return { cancelled: false, state: stateForRenderer(event.sender) };
 });
-ipcMain.handle('collector:getState', (event) => stateForRenderer(event.sender, true));
-ipcMain.handle('collector:openLiveWindow', () => { if (liveWindow && !liveWindow.isDestroyed()) { liveWindow.show(); liveWindow.focus(); return true; } return false; });
-ipcMain.handle('graphs:open', (_event, carNumber) => openGraphsWindow(carNumber));
+handleTrusted('collector:getState', (event) => stateForRenderer(event.sender, true));
+handleTrusted('collector:openLiveWindow', () => { if (liveWindow && !liveWindow.isDestroyed()) { liveWindow.show(); liveWindow.focus(); return true; } return false; });
+handleTrusted('graphs:open', (_event, carNumber) => openGraphsWindow(carNumber));
 async function updateFuelSettingsAndState(payload = {}) {
+  if (!FUEL_ESTIMATION_ENABLED) throw new Error('Fuel estimation is temporarily disabled.');
   const settings = loadSettings();
   const car = String(payload.carNumber || settings.followedCar);
   if (!normalizeFollowedCars(settings).includes(car)) throw new Error('Select a followed car.');
@@ -1781,19 +1837,19 @@ async function updateFuelSettingsAndState(payload = {}) {
   rebuildCollectorDerivedState(updated);
   return updated;
 }
-ipcMain.handle('fuel:update', async (event, payload = {}) => {
+handleTrusted('fuel:update', async (event, payload = {}) => {
   const updated = await updateFuelSettingsAndState(payload);
   broadcastState();
   return { settings: updated, state: stateForRenderer(event.sender) };
 });
-ipcMain.handle('laps:updateStatus', (event, payload) => {
+handleTrusted('laps:updateStatus', (event, payload) => {
   const result = updateStoredLapManualStatus(payload);
   return { ...result, state: stateForRenderer(event.sender) };
 });
 
 // Creates timestamped exports of the current rows and in-memory lap history.
 // The always-overwritten "latest_*" files are written by saveLatestSnapshot().
-ipcMain.handle('export:current', async () => {
+handleTrusted('export:current', async () => {
   const settings = loadSettings();
   const folder = ensureStorage(settings);
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');

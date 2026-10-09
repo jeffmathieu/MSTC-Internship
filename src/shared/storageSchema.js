@@ -88,8 +88,11 @@ function normalizeMsField(value) {
 
 // Escapes one CSV cell. Keep this tiny and dependency-free because export code
 // uses it frequently during live polling.
-function csvEscape(value) {
-  const s = normalizeStorageField(value);
+function csvEscape(value, numericColumn = false) {
+  let s = normalizeStorageField(value);
+  const numeric = (typeof value === 'number' && Number.isFinite(value))
+    || (numericColumn && /^[+-]?\d+(?:\.\d+)?$/.test(s));
+  if (!numeric && (/^[=+\-@]/.test(s) || /^[\t\r\n]/.test(String(value ?? '')))) s = `'${s}`;
   if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
@@ -99,7 +102,8 @@ function csvEscape(value) {
 function toCsvRows(rows, columns = NORMALIZED_ROW_COLUMNS) {
   return [
     columns.join(','),
-    ...rows.map((row) => columns.map((column) => csvEscape(row[column])).join(','))
+    ...rows.map((row) => columns.map((column) => csvEscape(row[column],
+      /Ms$/.test(column) || ['carNumber', 'lapNumber', 'historySequence', 'position', 'classPosition'].includes(column))).join(','))
   ].join('\n');
 }
 

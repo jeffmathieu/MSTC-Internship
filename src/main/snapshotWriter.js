@@ -5,7 +5,9 @@ const fs = require('fs');
 function createSnapshotWriter(onError = () => {}) {
   const pending = new Map();
   const running = new Map();
+  const latest = new Map();
   function write(file, contents) {
+    latest.set(file, contents);
     pending.set(file, contents);
     if (running.has(file)) return;
     const job = (async () => {
@@ -18,9 +20,9 @@ function createSnapshotWriter(onError = () => {}) {
           await fs.promises.rename(temporary, file);
         } catch (error) { onError(error, 'snapshot-write'); }
       }
-    })().finally(() => running.delete(file));
+    })().finally(() => { running.delete(file); latest.delete(file); });
     running.set(file, job);
   }
-  return { write, flush: async () => { while (running.size) await Promise.all([...running.values()]); } };
+  return { write, latest: (file) => latest.get(file), flush: async () => { while (running.size) await Promise.all([...running.values()]); } };
 }
 module.exports = { createSnapshotWriter };

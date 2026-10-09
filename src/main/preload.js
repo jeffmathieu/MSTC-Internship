@@ -1,5 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron');
-const { mergeRendererState } = require('./rendererState');
+// Self-contained for the sandboxed preload; contract tested against rendererState.
+function mergeRendererState(previous = {}, payload = {}) {
+  if (!payload.transportSequence) return payload;
+  if (payload.transportSequence <= (previous.transportSequence || 0)) return previous;
+  const apply = (old, patch) => patch ? [...(old || []).slice(0, patch.from), ...patch.items] : old || [];
+  const { historyPatch, stripPatch, ...state } = payload;
+  return { ...state, lapHistory: apply(previous.lapHistory, historyPatch), lapStrip: apply(previous.lapStrip, stripPatch) };
+}
+
 let rendererState = {};
 const acceptState = (payload) => (rendererState = mergeRendererState(rendererState, payload));
 

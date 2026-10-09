@@ -25,7 +25,16 @@
   // Uses the official lap number when available. The fallback sequence keeps
   // old timing providers without lap numbers usable in line charts.
   function chartLapNumber(lap, fallbackIndex) {
-    return Number.isFinite(lap.lapNumber) && lap.lapNumber > 0 ? lap.lapNumber : fallbackIndex + 1;
+    const number = [lap.displayLapNumber, lap.lapNumber, lap.historySequence].map(Number).find((value) => Number.isFinite(value) && value > 0);
+    return Number.isFinite(number) && number > 0 ? number : fallbackIndex + 1;
+  }
+
+  function numberedLaps(laps) {
+    return new Map(laps.map((lap, index) => [lap, chartLapNumber(lap, index)]));
+  }
+
+  function lapLabel(lap, number) {
+    return `${Number(lap.lapNumber) > 0 && lap.lapNumberSource !== 'observed-sequence' ? 'Race lap' : 'Observed passage'} ${number}`;
   }
 
   function followedCarLaps(history, carNumber) {
@@ -50,7 +59,7 @@
         eligible: true,
         raceLapNumber,
         condition: lap.lapCondition || lap.trackCondition || 'unknown',
-        label: `Driver lap ${driverLapNumber} · race lap ${raceLapNumber}`
+        label: `Driver lap ${driverLapNumber} · ${lapLabel(lap, raceLapNumber)}`
       });
     });
     return {
@@ -124,15 +133,16 @@
   // use the data already available; after `windowSize` laps it becomes a fixed
   // rolling window. This lets the graph appear before five laps are complete.
   function rollingAveragePoints(laps, windowSize = 5) {
+    const numbers = numberedLaps(laps);
     const eligible = lapAnalytics.representativePaceLaps(laps);
     return eligible.map((lap, index) => {
       const window = eligible.slice(Math.max(0, index - windowSize + 1), index + 1);
       return {
-        x: chartLapNumber(lap, index),
+        x: numbers.get(lap),
         y: average(window.map((entry) => entry.lapTimeMs)),
         eligible: true,
         sampleCount: window.length,
-        label: `Lap ${chartLapNumber(lap, index)} · ${window.length}-lap average`
+        label: `${lapLabel(lap, numbers.get(lap))} · ${window.length}-lap average`
       };
     });
   }
@@ -140,28 +150,32 @@
   function classPaceComparison(history, carNumber, windowSize = 5) {
     const ourCar = lapAnalytics.carStats(history, carNumber);
     const classCars = ourCar.className ? lapAnalytics.carsInClass(history, ourCar.className) : [];
+    const numbersByCar = new Map(classCars.map((car) => [car.carNumber, numberedLaps(car.laps)]));
+    const ourNumbers = numberedLaps(ourCar.laps);
     const ourLapTimes = new Map(lapAnalytics.representativePaceLaps(ourCar.laps)
-      .map((lap, index) => [chartLapNumber(lap, index), lap.lapTimeMs]));
+      .filter((lap) => Number(lap.lapNumber) > 0 && lap.lapNumberSource !== 'observed-sequence')
+      .map((lap) => [ourNumbers.get(lap), lap.lapTimeMs]));
     return {
       type: 'line',
       title: 'Class pace comparison',
       subtitle: 'Actual valid lap times for every car in our class.',
       yFormat: 'time',
-      xLabel: 'Race lap',
+      xLabel: classCars.some((car) => car.laps.some((lap) => !Number(lap.lapNumber))) ? 'Race lap / observed passage' : 'Race lap',
       series: classCars.map((car) => ({
         name: `#${car.carNumber}${car.teamName ? ` ${car.teamName}` : ''}`,
         carNumber: car.carNumber,
         highlight: String(car.carNumber) === String(carNumber),
         points: lapAnalytics.representativePaceLaps(car.laps)
           .map((lap, index) => {
-            const raceLapNumber = chartLapNumber(lap, index);
-            const ourLapMs = ourLapTimes.get(raceLapNumber);
+            const raceLapNumber = numbersByCar.get(car.carNumber).get(lap);
+            const ourLapMs = Number(lap.lapNumber) > 0 && lap.lapNumberSource !== 'observed-sequence'
+              ? ourLapTimes.get(raceLapNumber) : null;
             return {
               x: raceLapNumber,
               y: lap.lapTimeMs,
               eligible: true,
               condition: lap.lapCondition || lap.trackCondition || 'unknown',
-              label: `Lap ${raceLapNumber}`,
+              label: lapLabel(lap, raceLapNumber),
               deltaToOurCarMs: Number.isFinite(ourLapMs) ? lap.lapTimeMs - ourLapMs : null
             };
           })

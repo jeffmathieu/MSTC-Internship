@@ -92,10 +92,23 @@ async function runSoak({ hours = 24, cars = 45, livePolls = 120 } = {}) {
     liveMs.sort((a, b) => a - b);
     const live = { polls: livePolls, p50Ms: +liveMs[Math.floor(liveMs.length * 0.5)].toFixed(1),
       p95Ms: +liveMs[Math.floor(liveMs.length * 0.95)].toFixed(1), maxMs: +liveMs.at(-1).toFixed(1) };
+    // Counter-first / delayed-LAST correction rewrites the complete archive.
+    const correctionAt = Date.parse(rows[0].collectedAt) + 5000;
+    const provisional = { ...rows[0], lapNumber: String(Number(rows[0].lapNumber) + 1),
+      collectedAt: new Date(correctionAt).toISOString() };
+    collector.updateLapHistory(settings, [provisional]);
+    const beforeCorrection = collector.getState().lapHistory.length;
+    const correctionStarted = performance.now();
+    collector.updateLapHistory(settings, [{ ...provisional, lastLap: '2:06.321',
+      collectedAt: new Date(correctionAt + 5000).toISOString() }]);
+    const correctionMs = +(performance.now() - correctionStarted).toFixed(1);
+    assert.strictEqual(collector.getState().lapHistory.length, beforeCorrection);
+    await collector.flush();
+    assert.strictEqual(analytics.lapsForCar(collector.loadExistingHistory(settings), '1').at(-1).lapTimeMs, 126321);
     assert.ok(maxSteadyBytes < 100000, 'per-window steady-state payload stays below 100 KB');
     return { hours, cars, polls: Math.floor(hours * 3600 / 5) + 1, records: expected,
       elapsedSeconds: +((performance.now() - start) / 1000).toFixed(1), maxSteadyBytes,
-      graphDatasetMs: +graphMs.toFixed(1), live, measurements };
+      graphDatasetMs: +graphMs.toFixed(1), correctionMs, live, measurements };
   } finally {
     await collector.flush();
     fs.rmSync(folder, { recursive: true, force: true });

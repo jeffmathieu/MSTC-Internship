@@ -199,7 +199,7 @@ module.exports = (async () => {
 
   // Stop and automatic race completion use the same finalization path. At
   // that point an earlier driver-change report already exists, so only the
-  // final active stint may create a new stint PDF.
+  // reports whose data changed and the final active stint create new PDFs.
   const finalizedStints = stintsForCar(history, 33, {
     closeFinalAt: '2026-06-23T12:06:00.000Z',
     generatedAt: '2026-06-23T12:06:00.000Z'
@@ -222,11 +222,11 @@ module.exports = (async () => {
     history,
     renderPdf: fakeCanonicalRenderer
   });
-  assert.strictEqual(previousAtFinish.written, false, 'finalization preserves previously generated stints');
-  assert.strictEqual(previousAtFinish.reason, 'already-generated');
+  assert.strictEqual(previousAtFinish.written, true, 'finalization refreshes earlier reports when their data changes');
+  assert.strictEqual(previousAtFinish.pdfCreated, true);
   assert.strictEqual(finalAtFinish.written, true, 'finalization writes the last active stint');
   assert.strictEqual(finalAtFinish.pdfCreated, true);
-  assert.strictEqual(printCount, 3);
+  assert.strictEqual(printCount, 4);
 
   const summaries = await writeEventSummaryArtifacts({
     BrowserWindow: FakeBrowserWindow,
@@ -239,7 +239,7 @@ module.exports = (async () => {
   });
   assert.strictEqual(summaries.length, 2, 'race and driver summaries are generated at session end');
   assert.strictEqual(summaries.every((summary) => fs.existsSync(summary.pdfPath)), true);
-  assert.strictEqual(printCount, 5);
+  assert.strictEqual(printCount, 6);
 
   const practiceOutput = path.join(output, 'practice');
   const practice = await writeClosedStintArtifacts({
@@ -258,7 +258,7 @@ module.exports = (async () => {
   assert.strictEqual(storedPractice.reportScope, 'session-and-stints');
   assert.deepStrictEqual(storedPractice.raceSummary.pitStops, []);
   assert.strictEqual(storedPractice.stints[0].endPitStop, null);
-  assert.strictEqual(printCount, 6);
+  assert.strictEqual(printCount, 7);
 
   const practiceSummaries = await writeEventSummaryArtifacts({
     BrowserWindow: FakeBrowserWindow,
@@ -272,7 +272,7 @@ module.exports = (async () => {
   });
   assert.strictEqual(practiceSummaries.length, 2, 'practice writes session and driver summaries without pit analysis');
   assert.strictEqual(practiceSummaries.every((summary) => fs.existsSync(summary.pdfPath)), true);
-  assert.strictEqual(printCount, 8);
+  assert.strictEqual(printCount, 9);
 
   const migrationOutput = path.join(output, 'old-layout');
   const oldPaths = artifactPaths(migrationOutput, closedStint);
@@ -288,7 +288,7 @@ module.exports = (async () => {
     renderPdf: fakeCanonicalRenderer
   });
   assert.strictEqual(migrated.pdfCreated, true, 'old automatic reports are regenerated once');
-  assert.strictEqual(printCount, 9);
+  assert.strictEqual(printCount, 10);
   assert.strictEqual(fs.readFileSync(oldPaths.pdfPath, 'utf8'), '%PDF-canonical-fake');
 
   const openStint = stintsForCar(history, 33).at(-1);
