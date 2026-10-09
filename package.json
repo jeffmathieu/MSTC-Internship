@@ -9,6 +9,7 @@
     "test": "node tests/run-all.js",
     "test:24h": "node scripts/endurance-soak.js",
     "test:ui": "electron scripts/endurance-ui-check.js",
+    "test:start": "electron scripts/start-collector-check.js",
     "replay": "electron scripts/replay-session.js",
     "test:coverage": "node --test --experimental-test-coverage tests/*.test.js",
     "dist": "electron-builder --publish never",

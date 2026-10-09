@@ -84,6 +84,12 @@ function setStatus(status, message) {
   const tooltip = String(message || normalized || 'Collector idle');
   dot.setAttribute('title', tooltip);
   dot.setAttribute('aria-label', tooltip);
+  const notice = $('collector-message');
+  if (notice) {
+    notice.hidden = !['loading', 'waiting', 'error', 'parser_error', 'stale', 'disconnected'].includes(normalized);
+    notice.textContent = tooltip;
+    notice.title = tooltip;
+  }
 }
 
 // Displays missing table values consistently.
@@ -1561,7 +1567,16 @@ async function init() {
 
   // Race-day controls: each button calls a small preload API method, which then
   // invokes the matching ipcMain handler in main.js.
-  $('start')?.addEventListener('click', async () => { await saveSettingsFromInputs(true); await window.liveTiming.startCollector(currentSettings.timingUrl); });
+  $('start')?.addEventListener('click', async () => {
+    const button = $('start');
+    button.disabled = true;
+    try {
+      await saveSettingsFromInputs(true);
+      await window.liveTiming.startCollector(currentSettings.timingUrl);
+    } catch (error) {
+      setStatus('error', `Could not start collection: ${error.message}`);
+    } finally { button.disabled = false; }
+  });
   $('stop')?.addEventListener('click', () => window.liveTiming.stopCollector());
   $('show-live')?.addEventListener('click', () => window.liveTiming.openLiveWindow());
   $('open-graphs')?.addEventListener('click', () => window.liveTiming.openGraphsWindow(activeCarNumber()));

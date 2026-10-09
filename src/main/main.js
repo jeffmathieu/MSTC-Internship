@@ -482,7 +482,9 @@ const pageExtractionScript = String.raw`(() => {
     const visible = style.display !== 'none' && style.visibility !== 'hidden' && table.getClientRects().length > 0;
     return { tableIndex, headers: headerCells, rows: bodyRows, rowCount: bodyRows.length, visible, className: table.className || '', id: table.id || '' };
   });
-  const allText = clean(document.body ? (document.body.textContent || document.body.innerText) : '');
+  // Provider pages retain hidden connection/error panels and script strings.
+  // Only rendered text may decide whether a live session is unavailable.
+  const allText = clean(document.body ? (document.body.innerText ?? document.body.textContent ?? '') : '');
   let textCandidates;
   const candidates = () => textCandidates || (textCandidates = Array.from(document.querySelectorAll('span,b,strong,label,div,p,td')));
   const labelledValue = (label) => {

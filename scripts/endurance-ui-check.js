@@ -22,6 +22,8 @@ app.whenReady().then(async () => {
   const provider = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
   const fixture = path.join(folder, 'timing-fixture.html');
   fs.writeFileSync(fixture, `<h2>Session</h2><p><span>Status:</span> Running</p><span>Green flag</span>
+    <div hidden>No active heat</div><div style="display:none">Not connected to the LiveTiming server</div>
+    <script type="application/json">{"inactiveLabel":"No active heat"}</script>
     <table><tr><th>#</th><th>DRIVER</th><th>LAST</th><th>BEST</th><th>LAPS</th></tr></table>
     <table style="display:none"><tr><th>#</th><th>DRIVER</th><th>LAST</th><th>BEST</th><th>LAPS</th></tr><tr><td>1</td><td>Stale</td><td>2:00.000</td><td>2:00.000</td><td>1</td></tr></table>
     <table id="current"><tr><th>#</th><th>DRIVER</th><th>LAST</th><th>BEST</th><th>LAPS</th></tr><tr><td>1</td><td>Current</td><td>1:59.000</td><td>1:58.000</td><td>2</td></tr></table>`);
@@ -29,6 +31,7 @@ app.whenReady().then(async () => {
   for (let refresh = 0; refresh < 2; refresh++) {
     const snapshot = await provider.webContents.executeJavaScript(harness.pageExtractionScript);
     const parsed = harness.normalizeSnapshot(snapshot);
+    assert.strictEqual(parsed.session.statusText, 'Green flag', 'hidden provider status panels cannot suppress an active session');
     assert.strictEqual(parsed.diagnostics.selectedTableIndex, 2);
     assert.strictEqual(parsed.rows[0].driver, 'Current');
     if (!refresh) await provider.webContents.executeJavaScript(`document.getElementById('current').innerHTML = document.getElementById('current').innerHTML`);

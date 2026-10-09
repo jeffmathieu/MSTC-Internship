@@ -16,6 +16,7 @@ The P1 fixes are merged into `afte-24h` and `main`. The directly implementable i
 ## P2 data collection and timing
 
 - [x] Choose the visible, populated timing table with the strongest timing evidence instead of the first matching header set. Cover empty and obsolete duplicate tables.
+- [x] Ignore hidden provider error/status panels and script text when checking feed availability. Verify the real Start flow through sandboxed IPC and show genuine waiting/errors visibly.
 - [x] Let observed completed laps without an official lap number establish that a session has started (`sessionTiming.completedLapEvidence`).
 - [x] Make automatic session completion consider every followed car/class. Revisit countdown expiry based on a primary car's average lap so slower classes do not end collection early.
 - [x] Persist race-control transitions independently of completed laps so short FCY/SC/red-flag periods appear in report counts and durations.
@@ -60,5 +61,6 @@ The P1 fixes are merged into `afte-24h` and `main`. The directly implementable i
 
 - `npm test`: complete suite passes.
 - `npm run test:ui`: sandboxed preload, Chromium table replacement, top-bar layout, scrolling/graphs and both PDF engines pass; reports inspected visually.
+- `npm run test:start`: actual Start button collects a populated feed despite hidden inactive/error panels, shows genuine waiting messages and handles invalid URLs. Real GetRaceResults demo verified on 9 October 2026: 24 cars, no collector errors.
 - `npm run replay -- "race kopie" --smoke`: 12,568 records loaded without renderer errors.
 - `npm run test:24h`: 45 cars, 17,281 polls, 31,095 laps; no archive cap or restart loss. Full live updates: median 208 ms / p95 280 ms; delayed-LAST correction: 712 ms, with identity retained after restart. This is a simulated load test, not a 24-hour hardware run.

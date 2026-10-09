@@ -43,6 +43,7 @@ Dit opent het echte dashboard met alle 12.568 records uit de kopie. De bronmap, 
 npm test
 npm run test:24h
 npm run test:ui
+npm run test:start
 npm run replay -- "race kopie" --smoke
 ```
 
@@ -98,6 +99,14 @@ Installed applications select the Electron engine, so PDF export needs no Python
 installation. Both reports include timing caveats, team/class comparisons,
 engineering insights and analysis graph appendices. Packaged Windows/macOS
 installation verification remains a separate follow-up.
+
+`test:start` runs the actual main process, sandboxed preload and Start button
+against a local HTTP timing page. Hidden inactive/error panels and embedded
+script strings must not suppress a populated active feed; a visible inactive
+message still pauses ingestion. The scraper reads rendered body text once.
+Waiting/error reasons appear beneath the status, and Start errors are caught.
+On 9 October 2026, the real GetRaceResults demo also collected 24 cars after this
+fix, with no collector errors. Test settings and storage are isolated.
 
 Race-control transitions are journalled independently of lap passages. Counts
 and durations reflect observed transitions at polling precision; outages cannot

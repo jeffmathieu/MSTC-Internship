@@ -1207,3 +1207,14 @@ body.mode-qualifying .pit-window { display: none; }
 
 /* Compact collection controls leave room for the session export action. */
 .controls .compact-control { padding: 4px 7px; min-width: 44px; font-size: 12px; }
+
+#collector-message:not([hidden]) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 10px;
+  line-height: 1.2;
+}
+#collector-message[hidden] { display: none; }
