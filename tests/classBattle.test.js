@@ -6,6 +6,7 @@ const {
   parseLapGap,
   parseTimeToMs,
   formatSeconds,
+  formatGap,
   formatSignedSeconds,
   rowSortNumber,
   classSortedRows,
@@ -27,6 +28,13 @@ assert.strictEqual(numberOrNull('bad'), null);
 assert.strictEqual(average([]), null);
 assert.strictEqual(average([null, 'bad', 1000, '2000']), 1500);
 assert.strictEqual(formatSeconds(NaN), '—');
+assert.strictEqual(formatGap(59999), '59.999s');
+assert.strictEqual(formatGap(60000), '1:00.000');
+assert.strictEqual(formatGap(291299), '4:51.299');
+assert.strictEqual(formatGap(3600000), '60:00.000');
+assert.strictEqual(formatGap(null), '—');
+assert.strictEqual(formatSeconds(1377177), '1377.177s');
+assert.strictEqual(formatSignedSeconds(1374086), '+1374.086s');
 assert.strictEqual(formatSignedSeconds(1250), '+1.250s');
 assert.strictEqual(formatSignedSeconds(-1250), '-1.250s');
 assert.strictEqual(formatSignedSeconds(null), '—');
@@ -115,6 +123,12 @@ const confirmedChainBattle = buildAdjacentClassBattles(numericOtherClassChain, h
 assert.strictEqual(confirmedChainBattle.behind.relativeGap, 8500);
 assert.strictEqual(confirmedChainBattle.behind.gapSource, 'confirmed-interval-chain');
 assert.strictEqual(confirmedChainBattle.behind.gapConfirmedAt, '2026-07-05T10:00:00.000Z');
+const longGapBattle = buildAdjacentClassBattles(numericOtherClassChain, history, 13, {
+  confirmedGapView: { behind: { rivalCarNumber: '2', gapMs: 291299, lapGap: 0, source: 'confirmed-interval-chain' } }
+});
+assert.strictEqual(longGapBattle.behind.gapLabel, '4:51.299');
+assert.strictEqual(longGapBattle.behind.lastLapDeltaLabel, '-1.000s');
+assert.ok(longGapBattle.behind.trendLabel.includes('they gain 1.000s/l'));
 const suppressedChainBattle = buildAdjacentClassBattles(numericOtherClassChain, history, 13, {
   confirmedGapView: {
     behind: { rivalCarNumber: '2', gapMs: 8500, lapGap: 0, suppressed: true, rivalInPit: true, rivalPitLaps: 5 }

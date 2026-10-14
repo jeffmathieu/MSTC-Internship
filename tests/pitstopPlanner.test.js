@@ -1,4 +1,6 @@
 const assert = require('assert');
+const { updateGapMemory } = require('../src/shared/gapMemory');
+const missingIntervalFixture = require('./fixtures/afterPitMissingInterval.json');
 const {
   normalizeRules,
   parseTimeToMs,
@@ -475,6 +477,63 @@ const mixedTrafficAhead = projectClassAfterPit([
 assert.strictEqual(mixedTrafficAhead.carAhead.carNumber, '96');
 assert.strictEqual(mixedTrafficAhead.carAhead.projectedGapToUsMs, -105000);
 
+// Real saved Asian LMS snapshot: #4 (another class) has a missing interval,
+// but the known chain already puts all later cars over 280s behind us. #1's
+// unknown exact gap must not block a 75s pit projection indefinitely.
+const boundedSnapshotProjection = projectClassAfterPit(missingIntervalFixture.rows,
+  missingIntervalFixture.followedCarNumber, missingIntervalFixture.pitLossMs, missingIntervalFixture);
+assert.strictEqual(boundedSnapshotProjection.available, true);
+assert.strictEqual(boundedSnapshotProjection.projectedClassPosition, 6);
+assert.strictEqual(boundedSnapshotProjection.carAhead.carNumber, '34');
+assert.strictEqual(boundedSnapshotProjection.carAhead.projectedGapToUsMs, -372902);
+assert.strictEqual(boundedSnapshotProjection.carBehind.carNumber, '1');
+assert.strictEqual(boundedSnapshotProjection.carBehind.projectedGapToUsMs, null, 'a distance bound cannot invent an exact gap');
+assert.strictEqual(boundedSnapshotProjection.gapSource, 'overall-interval-chain-bounded');
+const volatileAheadRows = missingIntervalFixture.rows.map((row) => String(row.carNumber) === '33'
+  ? { ...row, interval: '90.000', diff: '90.000' } : row);
+assert.strictEqual(projectClassAfterPit(volatileAheadRows, '33', 75000, missingIntervalFixture).carAhead.projectedGapToUsMs, -372902,
+  'the partial fallback preserves the available confirmed gap ahead instead of replacing it with a volatile poll');
+
+let missingIntervalMemory = {};
+for (let lap = 1; lap <= 5; lap++) {
+  const freshRows = missingIntervalFixture.rows.map((row) => {
+    if (['4', '1'].includes(String(row.carNumber))) return row;
+    const lastLapMs = parseTimeToMs(row.lastLap) + lap;
+    return { ...row, lastLapMs, lastLap: (lastLapMs / 1000).toFixed(3) };
+  });
+  missingIntervalMemory = updateGapMemory(missingIntervalMemory, {
+    rows: freshRows, followedCars: ['33'], collectedAt: `2026-10-14T14:${String(14 + lap * 2).padStart(2, '0')}:00Z`
+  });
+  const projected = projectClassAfterPit(freshRows, '33', 75000, {
+    averageLapMs: missingIntervalFixture.averageLapMs,
+    confirmedGapView: missingIntervalMemory.viewsByCar['33']
+  });
+  assert.strictEqual(projected.available, true, 'new lap passages keep the bounded prediction available despite the persistent missing interval');
+  assert.strictEqual(projected.projectedClassPosition, 6);
+}
+
+// When a missing interval occurs before the known distance exceeds pit loss,
+// the rival could still pass us. Do not promote an uncertain bound to a result.
+const shortChainWithMissingGap = (interval) => [
+  { position: 1, classPosition: 1, carNumber: 10, className: 'CC', interval: '--' },
+  { position: 2, classPosition: 2, carNumber: 33, className: 'CC', interval: '10.000' },
+  { position: 3, classPosition: 1, carNumber: 77, className: 'GT', interval },
+  { position: 4, classPosition: 1, carNumber: 90, className: 'OTHER', interval: '?' },
+  { position: 5, classPosition: 3, carNumber: 1, className: 'CC', interval: '100.000' }
+];
+for (const interval of ['20.000', '75.000', '-80.000']) {
+  assert.strictEqual(projectClassAfterPit(shortChainWithMissingGap(interval), '33', 75000).available, false);
+}
+const enoughBound = projectClassAfterPit(shortChainWithMissingGap('75.001'), '33', 75000);
+assert.strictEqual(enoughBound.available, true);
+assert.strictEqual(enoughBound.projectedClassPosition, 2);
+assert.strictEqual(enoughBound.carAhead.carNumber, '10');
+assert.strictEqual(enoughBound.carAhead.projectedGapToUsMs, -85000);
+assert.strictEqual(enoughBound.carBehind.carNumber, '1');
+assert.strictEqual(enoughBound.carBehind.projectedGapToUsMs, null);
+assert.strictEqual(projectClassAfterPit(missingIntervalFixture.rows, '33', 300000, missingIntervalFixture).available, false,
+  'the same incomplete snapshot cannot support a stop longer than its known distance bound');
+
 const projection = projectClassAfterPit(classRows, '33', 75000);
 assert.strictEqual(projection.available, true);
 assert.strictEqual(projection.projectedClassPosition, 3);
@@ -540,8 +599,10 @@ const fallbackUnscoredOurCarProjection = projectClassAfterPit([
   { position: 1, classPosition: 1, carNumber: 10, className: 'CC', interval: '--', lapNumber: 20, lastLapMs: 125000 },
   { position: 2, classPosition: 2, carNumber: 33, className: 'CC', interval: '1L', lapNumber: 20, lastLapMs: 125000 }
 ], '33', 500, { averageLapMs: 125000 });
-assert.strictEqual(fallbackUnscoredOurCarProjection.available, false);
-assert.strictEqual(fallbackUnscoredOurCarProjection.reason, 'Our projected race distance is not reliable yet');
+assert.strictEqual(fallbackUnscoredOurCarProjection.available, true, 'the last class car cannot lose another position when it pits alone');
+assert.strictEqual(fallbackUnscoredOurCarProjection.projectedClassPosition, 2);
+assert.strictEqual(fallbackUnscoredOurCarProjection.carAhead.carNumber, '10');
+assert.strictEqual(fallbackUnscoredOurCarProjection.carAhead.projectedGapToUsMs, null);
 
 // A numeric DIFF may be present beside a lap-based interval. Classification lap
 // counts win: a 75-second stop cannot make a car four laps behind pass us.
@@ -605,7 +666,9 @@ const unreliableProjection = projectClassAfterPit([
   classRows[0],
   { ...classRows[1], interval: '1L' }
 ], '33', 75000);
-assert.strictEqual(unreliableProjection.available, false);
+assert.strictEqual(unreliableProjection.available, true);
+assert.strictEqual(unreliableProjection.projectedClassPosition, 2);
+assert.strictEqual(unreliableProjection.carAhead.projectedGapToUsMs, null);
 
 // RIS GAP-only projection subtracts cumulative leader gaps. Other-class cars
 // can sit between class rivals without changing the result.

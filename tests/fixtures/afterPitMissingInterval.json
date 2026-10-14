@@ -1,0 +1,328 @@
+{
+  "followedCarNumber": "33",
+  "pitLossMs": 75000,
+  "averageLapMs": 121925.2,
+  "rows": [
+    {
+      "carNumber": "26",
+      "position": "1",
+      "classPosition": "1",
+      "className": "LMP2",
+      "lapNumber": "",
+      "interval": "",
+      "diff": "",
+      "gap": "-- 96 laps --",
+      "lastLap": "1:58.251"
+    },
+    {
+      "carNumber": "45",
+      "position": "2",
+      "classPosition": "2",
+      "className": "LMP2",
+      "lapNumber": "",
+      "interval": "0.150",
+      "diff": "0.150",
+      "gap": "0.150",
+      "lastLap": "2:03.492"
+    },
+    {
+      "carNumber": "36",
+      "position": "3",
+      "classPosition": "3",
+      "className": "LMP2",
+      "lapNumber": "",
+      "interval": "44.796",
+      "diff": "44.796",
+      "gap": "44.946",
+      "lastLap": "1:57.953"
+    },
+    {
+      "carNumber": "96",
+      "position": "4",
+      "classPosition": "4",
+      "className": "LMP2",
+      "lapNumber": "",
+      "interval": "3:35.555",
+      "diff": "3:35.555",
+      "gap": "-- 94 laps --",
+      "lastLap": "1:57.373"
+    },
+    {
+      "carNumber": "34",
+      "position": "5",
+      "classPosition": "5",
+      "className": "LMP2",
+      "lapNumber": "",
+      "interval": "2:08.647",
+      "diff": "2:08.647",
+      "gap": "-- 93 laps --",
+      "lastLap": "1:59.618"
+    },
+    {
+      "carNumber": "13",
+      "position": "6",
+      "classPosition": "1",
+      "className": "LMP3",
+      "lapNumber": "",
+      "interval": "1:42.241",
+      "diff": "1:42.241",
+      "gap": "-- 92 laps --",
+      "lastLap": "2:06.863"
+    },
+    {
+      "carNumber": "59",
+      "position": "7",
+      "classPosition": "1",
+      "className": "LMP2 AM",
+      "lapNumber": "",
+      "interval": "1:01.637",
+      "diff": "1:01.637",
+      "gap": "-- 91 laps --",
+      "lastLap": "2:06.166"
+    },
+    {
+      "carNumber": "2",
+      "position": "8",
+      "classPosition": "2",
+      "className": "LMP3",
+      "lapNumber": "",
+      "interval": "29.342",
+      "diff": "29.342",
+      "gap": "29.342",
+      "lastLap": "2:04.095"
+    },
+    {
+      "carNumber": "9",
+      "position": "9",
+      "classPosition": "3",
+      "className": "LMP3",
+      "lapNumber": "",
+      "interval": "1:26.743",
+      "diff": "1:26.743",
+      "gap": "-- 90 laps --",
+      "lastLap": "2:05.686"
+    },
+    {
+      "carNumber": "33",
+      "position": "10",
+      "classPosition": "6",
+      "className": "LMP2",
+      "lapNumber": "",
+      "interval": "17.939",
+      "diff": "17.939",
+      "gap": "17.939",
+      "lastLap": "2:00.404"
+    },
+    {
+      "carNumber": "88",
+      "position": "11",
+      "classPosition": "1",
+      "className": "GT",
+      "lapNumber": "",
+      "interval": "1:08.971",
+      "diff": "1:08.971",
+      "gap": "1:26.910",
+      "lastLap": "2:07.973"
+    },
+    {
+      "carNumber": "77",
+      "position": "12",
+      "classPosition": "2",
+      "className": "GT",
+      "lapNumber": "",
+      "interval": "13.872",
+      "diff": "13.872",
+      "gap": "1:40.782",
+      "lastLap": "2:07.539"
+    },
+    {
+      "carNumber": "17",
+      "position": "13",
+      "classPosition": "3",
+      "className": "GT",
+      "lapNumber": "",
+      "interval": "15.248",
+      "diff": "15.248",
+      "gap": "-- 89 laps --",
+      "lastLap": "2:08.748"
+    },
+    {
+      "carNumber": "12",
+      "position": "14",
+      "classPosition": "4",
+      "className": "LMP3",
+      "lapNumber": "",
+      "interval": "0.718",
+      "diff": "0.718",
+      "gap": "0.718",
+      "lastLap": "2:07.562"
+    },
+    {
+      "carNumber": "51",
+      "position": "15",
+      "classPosition": "4",
+      "className": "GT",
+      "lapNumber": "",
+      "interval": "55.657",
+      "diff": "55.657",
+      "gap": "56.375",
+      "lastLap": "2:07.881"
+    },
+    {
+      "carNumber": "7",
+      "position": "16",
+      "classPosition": "5",
+      "className": "GT",
+      "lapNumber": "",
+      "interval": "23.211",
+      "diff": "23.211",
+      "gap": "1:19.586",
+      "lastLap": "2:08.822"
+    },
+    {
+      "carNumber": "52",
+      "position": "17",
+      "classPosition": "2",
+      "className": "LMP2 AM",
+      "lapNumber": "",
+      "interval": "2.529",
+      "diff": "2.529",
+      "gap": "1:22.115",
+      "lastLap": "2:03.769"
+    },
+    {
+      "carNumber": "75",
+      "position": "18",
+      "classPosition": "6",
+      "className": "GT",
+      "lapNumber": "",
+      "interval": "8.798",
+      "diff": "8.798",
+      "gap": "1:30.913",
+      "lastLap": "2:08.732"
+    },
+    {
+      "carNumber": "27",
+      "position": "19",
+      "classPosition": "7",
+      "className": "GT",
+      "lapNumber": "",
+      "interval": "9.505",
+      "diff": "9.505",
+      "gap": "1:40.418",
+      "lastLap": "2:07.286"
+    },
+    {
+      "carNumber": "65",
+      "position": "20",
+      "classPosition": "5",
+      "className": "LMP3",
+      "lapNumber": "",
+      "interval": "31.021",
+      "diff": "31.021",
+      "gap": "-- 88 laps --",
+      "lastLap": "2:06.510"
+    },
+    {
+      "carNumber": "3",
+      "position": "21",
+      "classPosition": "6",
+      "className": "LMP3",
+      "lapNumber": "",
+      "interval": "1:07.115",
+      "diff": "1:07.115",
+      "gap": "1:07.115",
+      "lastLap": "2:06.431"
+    },
+    {
+      "carNumber": "4",
+      "position": "22",
+      "classPosition": "3",
+      "className": "LMP2 AM",
+      "lapNumber": "",
+      "interval": "",
+      "diff": "",
+      "gap": "-- 77 laps --",
+      "lastLap": "2:01.459"
+    },
+    {
+      "carNumber": "1",
+      "position": "23",
+      "classPosition": "7",
+      "className": "LMP2",
+      "lapNumber": "",
+      "interval": "22:13.253",
+      "diff": "22:13.253",
+      "gap": "-- 27 laps --",
+      "lastLap": "24:58.345"
+    },
+    {
+      "carNumber": "90",
+      "position": "24",
+      "classPosition": "8",
+      "className": "GT",
+      "lapNumber": "",
+      "interval": "1:04:10.369",
+      "diff": "1:04:10.369",
+      "gap": "-- 17 laps --",
+      "lastLap": "2:10.764"
+    }
+  ],
+  "confirmedGapView": {
+    "classCoordinates": [
+      {
+        "carNumber": "26",
+        "relation": "ahead",
+        "gapToUsMs": -687050,
+        "lapGap": 0,
+        "estimated": false,
+        "source": "confirmed-interval-chain"
+      },
+      {
+        "carNumber": "45",
+        "relation": "ahead",
+        "gapToUsMs": -686900,
+        "lapGap": 0,
+        "estimated": false,
+        "source": "confirmed-interval-chain"
+      },
+      {
+        "carNumber": "36",
+        "relation": "ahead",
+        "gapToUsMs": -642104,
+        "lapGap": 0,
+        "estimated": false,
+        "source": "confirmed-interval-chain"
+      },
+      {
+        "carNumber": "96",
+        "relation": "ahead",
+        "gapToUsMs": -426549,
+        "lapGap": 0,
+        "estimated": false,
+        "source": "confirmed-interval-chain"
+      },
+      {
+        "carNumber": "34",
+        "relation": "ahead",
+        "gapToUsMs": -297902,
+        "lapGap": 0,
+        "estimated": false,
+        "source": "confirmed-interval-chain"
+      },
+      {
+        "carNumber": "33",
+        "gapToUsMs": 0,
+        "estimated": false
+      },
+      {
+        "carNumber": "1",
+        "relation": "behind",
+        "gapToUsMs": null,
+        "lapGap": null,
+        "estimated": true,
+        "source": "unavailable"
+      }
+    ]
+  }
+}

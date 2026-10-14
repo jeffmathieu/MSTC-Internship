@@ -1108,7 +1108,10 @@ function renderAdjacentClassBattles(summary) {
         item.predictionLabel || `Prediction paused after ${item.rivalPitLaps} of our laps`
       );
     } else {
-      setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · Gap ${item.gapLabel}`);
+      const gapLabel = Number.isFinite(item.relativeGap) && !(item.lapGap > 0)
+        ? classBattle.formatGap(item.relativeGap) : item.gapLabel;
+      const gapText = gapLabel === 'gap unknown' ? 'Gap unknown' : `Gap ${gapLabel || 'unknown'}`;
+      setText(`battle-${side}-main`, `#${item.row?.carNumber || '?'} · ${gapText}`);
       // New summaries provide explicit labels. catchInfo remains a fallback for
       // race folders saved before the three-line battle-card layout existed.
       const fallbackParts = String(item.catchInfo || '').split(' · ');

@@ -106,9 +106,19 @@ function cumulativeGapToLeaderMs(rows, row, averageLapMs = null) {
   return Number.isFinite(lapDeficit) ? lapDeficit * averageLapMs : null;
 }
 
-// Formats gap deltas for compact class-table cells.
+// Pace differences remain in seconds, even when unusually large.
 function formatSeconds(ms) {
   return Number.isFinite(ms) ? `${(ms / 1000).toFixed(3)}s` : '—';
+}
+
+// Absolute race gaps use minutes and seconds from one minute onward.
+function formatGap(ms) {
+  if (!Number.isFinite(ms)) return '—';
+  if (Math.abs(ms) < 60000) return formatSeconds(ms);
+  const rounded = Math.round(Math.abs(ms));
+  const minutes = Math.floor(rounded / 60000);
+  const seconds = ((rounded % 60000) / 1000).toFixed(3).padStart(6, '0');
+  return `${ms < 0 ? '-' : ''}${minutes}:${seconds}`;
 }
 
 function formatSignedSeconds(ms) {
@@ -165,7 +175,7 @@ function classGapToPrevious(rows, classRows, row) {
 
   const gapMs = parseGapToMs(row.diff) ?? parseGapToMs(row.interval) ?? parseGapToMs(row.gap);
   if (!Number.isFinite(gapMs)) return { ms: null, label: row.diff || row.interval || row.gap || 'class gap unknown', reliable: false };
-  return { ms: gapMs, label: formatSeconds(gapMs), reliable: true };
+  return { ms: gapMs, label: formatGap(gapMs), reliable: true };
 }
 
 // Adds reliable adjacent class gaps between two class rows. Returns null when
@@ -350,7 +360,7 @@ function buildBattleItem({ rows, classRows, followed, row, history, lapWindow, c
     gapIsEstimate,
     gapLabel: Number.isFinite(lapGap) && lapGap > 0
       ? `${lapGap}L`
-      : Number.isFinite(relativeGap) ? formatSeconds(relativeGap) : 'gap unknown',
+      : Number.isFinite(relativeGap) ? formatGap(relativeGap) : 'gap unknown',
     lastLapDeltaMs,
     lastLapDeltaLabel: formatSignedSeconds(lastLapDeltaMs),
     ourAvg,
@@ -425,6 +435,7 @@ return {
   usesCumulativeGap,
   cumulativeGapToLeaderMs,
   formatSeconds,
+  formatGap,
   formatSignedSeconds,
   rowSortNumber,
   classSortedRows,

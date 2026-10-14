@@ -389,7 +389,7 @@ const liveTiming = {
 };
 
 const context = {
-  window: { location: { search: '' }, liveTiming, classBattle: {}, trackConditions: require('../src/shared/trackConditions'), lapAnalytics: require('../src/shared/lapAnalytics'), timingHighlights: require('../src/shared/timingHighlights'), pitstopCircuits: require('../src/shared/pitstopCircuits'), pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
+  window: { location: { search: '' }, liveTiming, classBattle: require('../src/shared/classBattle'), trackConditions: require('../src/shared/trackConditions'), lapAnalytics: require('../src/shared/lapAnalytics'), timingHighlights: require('../src/shared/timingHighlights'), pitstopCircuits: require('../src/shared/pitstopCircuits'), pitstopPlanner: require('../src/shared/pitstopPlanner'), normReference: require('../src/shared/normReference'), dashboardView: require('../src/shared/dashboardView') },
   document,
   URLSearchParams,
   console,
@@ -603,6 +603,21 @@ module.exports = (async () => {
   assert.ok(document.getElementById('battle-ahead-card').classList.contains('good'));
   assert.strictEqual(document.getElementById('battle-behind-main').textContent, '#56 · Gap 10.000s');
   assert.ok(document.getElementById('battle-behind-card').classList.contains('bad'));
+  const cachedBattles = updatedState.analyticsSummary.adjacentClassBattles;
+  collectorUpdate({ ...updatedState, analyticsSummary: { ...updatedState.analyticsSummary,
+    adjacentClassBattles: { ...cachedBattles,
+      ahead: { ...cachedBattles.ahead, relativeGap: 291299, gapLabel: '291.299s',
+        lastLapDeltaLabel: '-4.688s', trendLabel: 'we are not catching · we lose 0.769s/l' },
+      behind: { ...cachedBattles.behind, relativeGap: null, gapLabel: 'gap unknown' }
+    }
+  } });
+  await flushAsync();
+  assert.strictEqual(document.getElementById('battle-ahead-main').textContent, '#2 · Gap 4:51.299');
+  assert.strictEqual(document.getElementById('battle-ahead-delta').textContent, 'Last lap Δ -4.688s');
+  assert.strictEqual(document.getElementById('battle-ahead-trend').textContent, 'we are not catching · we lose 0.769s/l');
+  assert.strictEqual(document.getElementById('battle-behind-main').textContent, '#56 · Gap unknown');
+  collectorUpdate(updatedState);
+  await flushAsync();
 
   await document.getElementById('open-graphs').trigger('click');
   assert.strictEqual(graphsOpenCount, 1, 'graph icon opens the detachable graphs window');
@@ -674,6 +689,12 @@ module.exports = (async () => {
   } });
   await flushAsync();
   assert.ok(!document.getElementById('pit-projection').textContent.includes('class lead'), 'older saved projections cannot label sixth place a lead');
+  const missingIntervalSnapshot = require('./fixtures/afterPitMissingInterval.json');
+  const boundedProjection = require('../src/shared/pitstopPlanner').projectClassAfterPit(missingIntervalSnapshot.rows,
+    '33', missingIntervalSnapshot.pitLossMs, missingIntervalSnapshot);
+  collectorUpdate({ ...updatedState, pitstopPlan: { ...updatedState.pitstopPlan, projection: boundedProjection } });
+  await flushAsync();
+  assert.strictEqual(document.getElementById('pit-projection').textContent, 'PIC 6 · 6:12.902 behind #34 · gap unknown ahead #1');
   collectorUpdate({ ...updatedState, pitstopPlan: { ...updatedState.pitstopPlan,
     serviceTimers: { active: true, phase: 'fuel', fuelDurationMs: 10000, pitDurationMs: 0, totalDurationMs: 10000 },
     projection: { available: true, projectedClassPosition: 1, carAhead: null, carBehind: null }

@@ -614,15 +614,19 @@ function projectFromConfirmedGaps(rows, followedCarNumber, pitLossMs, confirmedG
 
 // If no rival behind passes us, our current class predecessor remains ahead.
 // Keep that car even when its gap is unknown; absence is not proof of a lead.
-function currentClassAheadAfterPit(rows, rowsInClass, followed, pitLossMs, averageLapMs) {
+function currentClassAheadAfterPit(rows, rowsInClass, followed, pitLossMs, averageLapMs, confirmedGapView = null) {
   const ourIndex = rowsInClass.indexOf(followed);
   if (ourIndex <= 0) return null;
   const row = rowsInClass[ourIndex - 1];
-  const lapDelta = Number.isFinite(lapNumber(row)) && Number.isFinite(lapNumber(followed))
-    ? lapNumber(row) - lapNumber(followed) : null;
+  const confirmed = confirmedGapView?.classCoordinates?.find((item) => String(item.carNumber) === String(row.carNumber));
+  const hasConfirmedGap = Number.isFinite(confirmed?.gapToUsMs) && confirmed.gapToUsMs <= 0;
+  const lapDelta = hasConfirmedGap && Number.isFinite(confirmed.lapGap) ? confirmed.lapGap
+    : Number.isFinite(lapNumber(row)) && Number.isFinite(lapNumber(followed)) ? lapNumber(row) - lapNumber(followed) : null;
   let gapMs = null;
-  const estimated = Number.isFinite(lapDelta) && lapDelta > 0;
-  if (estimated && Number.isFinite(averageLapMs)) {
+  const estimated = hasConfirmedGap ? Boolean(confirmed.estimated) : Number.isFinite(lapDelta) && lapDelta > 0;
+  if (hasConfirmedGap) {
+    gapMs = -confirmed.gapToUsMs;
+  } else if (estimated && Number.isFinite(averageLapMs)) {
     gapMs = lapDelta * averageLapMs;
   } else if (!estimated) {
     const ordered = overallSortedRows(rows);
@@ -665,9 +669,22 @@ function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) 
   const classBehind = overallBehind.filter((item) => item.row.className === followed.className);
   const followedLap = lapNumber(followed);
   const ourClassIndex = rowsInClass.indexOf(followed);
-  const allClassBehindKnown = rowsInClass.slice(ourClassIndex + 1)
-    .every((row) => classBehind.some((item) => item.row === row));
-  if (Number.isFinite(pitLossMs) && pitLossMs >= 0 && classBehind.length && allClassBehindKnown) {
+  const classRowsBehind = rowsInClass.slice(ourClassIndex + 1);
+  const knownBehindByCar = new Map(classBehind.map((item) => [String(item.row.carNumber), item]));
+  const overallIndices = new Map(overallSortedRows(rows).map((row, index) => [String(row.carNumber), index]));
+  const ourOverallIndex = overallIndices.get(String(followedCarNumber));
+  const lastKnownGap = overallBehind.at(-1);
+  const lastKnownIndex = lastKnownGap ? overallIndices.get(String(lastKnownGap.row.carNumber)) : ourOverallIndex;
+  // Once the known interval chain exceeds the pit loss, every later car stays
+  // behind us. A missing interval farther down the table (including another
+  // class's retired car) cannot block this classification result indefinitely.
+  // It still prevents us from claiming an exact gap to that later car.
+  const enoughBehindData = classRowsBehind.every((row) => {
+    const index = overallIndices.get(String(row.carNumber));
+    return index > ourOverallIndex && (knownBehindByCar.has(String(row.carNumber))
+      || (lastKnownGap?.gapFromFollowedMs > pitLossMs && index > lastKnownIndex));
+  });
+  if (Number.isFinite(pitLossMs) && pitLossMs >= 0 && enoughBehindData) {
     // A numeric DIFF must never make a lapped car pass us in classification.
     // Some feeds expose a physical interval alongside INT=5L; only same-lap
     // rivals can be consumed directly by a sub-lap pit loss.
@@ -677,10 +694,23 @@ function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) 
     });
     const passedClassCars = sameLapClassBehind.filter((item) => item.gapFromFollowedMs <= pitLossMs);
     const carAheadEntry = passedClassCars.at(-1) || null;
-    const carBehindEntry = sameLapClassBehind.find((item) => item.gapFromFollowedMs > pitLossMs) || null;
-    const nearestLappedBehind = !carBehindEntry
-      ? classBehind.find((item) => Number.isFinite(lapNumber(item.row)) && Number.isFinite(followedLap) && lapNumber(item.row) < followedLap)
-      : null;
+    const passedCars = new Set(passedClassCars.map((item) => String(item.row.carNumber)));
+    const remainingClassRows = classRowsBehind.filter((row) => !passedCars.has(String(row.carNumber)));
+    const behindItem = (row) => {
+      const known = knownBehindByCar.get(String(row.carNumber));
+      const lapDelta = Number.isFinite(lapNumber(row)) && Number.isFinite(followedLap) ? lapNumber(row) - followedLap : null;
+      const lapped = Number.isFinite(lapDelta) && lapDelta < 0;
+      return {
+        carNumber: String(row.carNumber), team: row.team || '', driver: row.driver || '',
+        currentClassPosition: row.classPosition || null,
+        lapDeltaToUs: lapDelta,
+        projectedGapToUsMs: lapped
+          ? Number.isFinite(averageLapMs) ? -lapDelta * averageLapMs - pitLossMs : null
+          : known ? known.gapFromFollowedMs - pitLossMs : null,
+        estimatedFromLapGap: lapped,
+        isOurCar: false
+      };
+    };
     const currentClassPosition = numberOrNull(followed.classPosition);
     const projectedClassPosition = currentClassPosition > 0
       ? currentClassPosition + passedClassCars.length
@@ -690,6 +720,8 @@ function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) 
       available: true,
       projectedClassPosition,
       averageLapMs,
+      gapSource: classRowsBehind.some((row) => !knownBehindByCar.has(String(row.carNumber)))
+        ? 'overall-interval-chain-bounded' : 'overall-interval-chain',
       carAhead: carAheadEntry ? {
         carNumber: String(carAheadEntry.row.carNumber),
         team: carAheadEntry.row.team || '',
@@ -698,25 +730,12 @@ function projectClassAfterPit(rows, followedCarNumber, pitLossMs, options = {}) 
         lapDeltaToUs: Number.isFinite(lapNumber(carAheadEntry.row)) && Number.isFinite(lapNumber(followed)) ? lapNumber(carAheadEntry.row) - lapNumber(followed) : null,
         projectedGapToUsMs: carAheadEntry.gapFromFollowedMs - pitLossMs,
         isOurCar: false
-      } : currentClassAheadAfterPit(rows, rowsInClass, followed, pitLossMs, averageLapMs),
-      carBehind: (carBehindEntry || nearestLappedBehind) ? {
-        carNumber: String((carBehindEntry || nearestLappedBehind).row.carNumber),
-        team: (carBehindEntry || nearestLappedBehind).row.team || '',
-        driver: (carBehindEntry || nearestLappedBehind).row.driver || '',
-        currentClassPosition: (carBehindEntry || nearestLappedBehind).row.classPosition || null,
-        lapDeltaToUs: Number.isFinite(lapNumber((carBehindEntry || nearestLappedBehind).row)) && Number.isFinite(followedLap) ? lapNumber((carBehindEntry || nearestLappedBehind).row) - followedLap : null,
-        projectedGapToUsMs: carBehindEntry
-          ? carBehindEntry.gapFromFollowedMs - pitLossMs
-          : Number.isFinite(averageLapMs)
-            ? ((followedLap - lapNumber(nearestLappedBehind.row)) * averageLapMs) - pitLossMs
-            : null,
-        estimatedFromLapGap: Boolean(nearestLappedBehind),
-        isOurCar: false
-      } : null,
+      } : currentClassAheadAfterPit(rows, rowsInClass, followed, pitLossMs, averageLapMs, options.confirmedGapView),
+      carBehind: remainingClassRows.length ? behindItem(remainingClassRows[0]) : null,
       items: [
         ...passedClassCars.map((item) => ({ carNumber: String(item.row.carNumber), projectedGapToUsMs: item.gapFromFollowedMs - pitLossMs, isOurCar: false })),
         { carNumber: String(followedCarNumber), projectedGapToUsMs: 0, isOurCar: true },
-        ...sameLapClassBehind.filter((item) => item.gapFromFollowedMs > pitLossMs).map((item) => ({ carNumber: String(item.row.carNumber), projectedGapToUsMs: item.gapFromFollowedMs - pitLossMs, isOurCar: false }))
+        ...remainingClassRows.map(behindItem)
       ]
     };
   }
