@@ -923,7 +923,7 @@ def render_pdf(filename, payload, stints, include_summary=False):
     for index, stint in enumerate(stints, 1):
         render_page(pdf, payload, stint, index)
         pdf.showPage()
-    if payload.get('caveats'):
+    if payload.get('caveats') and not (include_summary and payload.get('reportMode', 'race') == 'race'):
         render_caveats(pdf, payload)
         pdf.showPage()
     # Analysis graphs are an appendix: the detailed stint and pitstop reports

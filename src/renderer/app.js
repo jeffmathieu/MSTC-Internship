@@ -496,7 +496,7 @@ function renderLapStrip(state, precomputedHighlights = null, scrolling = false) 
   const laps = [...source].reverse();
   const currentStint = state?.stintState?.cars?.[carNumber]?.currentStint || null;
   setText('info-stint', currentStint
-    ? `Driver stint ${currentStint.driverStintNumber} · ${currentStint.drivingTimeEstimated ? '≈' : ''}${formatStintClock(currentStint.stintTimeMs)} driving / total ${formatStintClock(currentStint.totalDriverTimeMs)}${currentStint.drivingTimePaused ? ' · PIT paused' : ''}`
+    ? `Driver stint ${currentStint.driverStintNumber} · ${formatStintClock(currentStint.stintTimeMs)} driving / total ${formatStintClock(currentStint.totalDriverTimeMs)}${currentStint.drivingTimePaused ? ' · PIT paused' : ''}`
     : 'Waiting for stint data');
   setText('info-car-stint', currentStint ? `Car stint ${currentStint.stintNumber}` : '—');
   if (!list._scrollWired) {
@@ -1136,9 +1136,10 @@ function projectionLabel(projection) {
   const gapLabel = (item) => {
     if (!item) return '';
     if (Number.isFinite(item.lapDeltaToUs) && item.lapDeltaToUs !== 0) return `${Math.abs(item.lapDeltaToUs)}L`;
-    return formatMs(Math.abs(item.projectedGapToUsMs));
+    return Number.isFinite(item.projectedGapToUsMs) ? formatMs(Math.abs(item.projectedGapToUsMs)) : 'gap unknown';
   };
-  const behind = projection.carAhead ? `${gapLabel(projection.carAhead)} behind #${projection.carAhead.carNumber}` : 'class lead';
+  const behind = projection.carAhead ? `${gapLabel(projection.carAhead)} behind #${projection.carAhead.carNumber}`
+    : projection.projectedClassPosition === 1 ? 'class lead' : 'car ahead unknown';
   const ahead = projection.carBehind ? `${gapLabel(projection.carBehind)} ahead #${projection.carBehind.carNumber}` : 'no car behind';
   const label = `${position} · ${behind} · ${ahead}`;
   return projection.provisional ? `FCY gaps stabilizing · ${label}` : label;
@@ -1164,10 +1165,12 @@ function renderPitstopPlan(plan) {
   const timers = plan?.serviceTimers;
   setText('service-state', timers?.active ? `Live ${timers.phase}` : 'Last stop');
   setText('fuel-timer', timers ? pitstopPlanner.formatDuration(timers.fuelDurationMs) : '—');
-  setText('service-pit-timer', timers ? pitstopPlanner.formatDuration(timers.pitDurationMs) : '—');
+  const pitDurationMs = timers?.active ? timers.pitDurationMs : timers?.pitDurationMs ?? numericMs(plan?.lastPitDurationMs);
+  setText('service-pit-timer', pitstopPlanner.formatDuration(pitDurationMs));
   setText('service-total-timer', timers ? pitstopPlanner.formatDuration(timers.totalDurationMs) : '—');
+  $('pit-last-delta')?.classList.toggle('hidden', Boolean(timers?.active));
   if ($('service-timers')) $('service-timers').title = timers?.partial
-    ? 'Incomplete observation: collection started during a stop or feed updates were missed. Duration is unknown.'
+    ? 'Incomplete observation: collection started during a stop or feed updates were missed. Some durations are unknown.'
     : 'Fuel and pit timers are observed separately at feed polling resolution.';
   const pitWindow = $('pit-window');
   if ($('open-pit-setup')) {
@@ -1176,7 +1179,6 @@ function renderPitstopPlan(plan) {
   }
   if (!plan) {
     setText('pit-status', 'Waiting');
-    setText('pit-last', '—');
     setText('pit-last-delta', '—');
     setText('pit-next', '—');
     setText('pit-projection', '—');
@@ -1187,8 +1189,7 @@ function renderPitstopPlan(plan) {
   }
 
   setText('pit-status', plan.label || plan.status);
-  setText('pit-last', Number.isFinite(plan.lastPitDurationMs) ? pitstopPlanner.formatDuration(plan.lastPitDurationMs) : '—');
-  setText('pit-last-delta', pitDeltaLabel(plan));
+  setText('pit-last-delta', timers?.active ? '' : pitDeltaLabel({ ...plan, lastPitDurationMs: pitDurationMs }));
   setText('pit-stops-summary', `${plan.completedPitStops}/${plan.rules?.requiredPitStops ?? $('pit-required-input')?.value ?? '2'}`);
   setText('pit-next', plan.requirementsComplete
     ? (plan.canPitNow ? 'Optional' : 'Closed')

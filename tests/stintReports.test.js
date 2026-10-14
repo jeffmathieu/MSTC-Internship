@@ -129,7 +129,7 @@ class FakeBrowserWindow {
       }
     };
   }
-  async loadURL(url) { this.url = url; }
+  async loadFile(filename) { this.url = filename; }
   isDestroyed() { return this.destroyed; }
   destroy() { this.destroyed = true; }
 }

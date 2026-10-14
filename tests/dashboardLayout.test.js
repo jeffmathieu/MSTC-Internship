@@ -25,7 +25,7 @@ const timingOrder = ['last-time-card', 'best-time-card', 'ideal-time', 'referenc
 assert.ok(timingOrder.every((index) => index >= 0));
 assert.deepStrictEqual([...timingOrder].sort((a, b) => a - b), timingOrder, 'timing rows follow the requested vertical order');
 
-assert.match(css, /grid-template-columns:\s*180px minmax\(0, 1fr\) minmax\(320px, \.30fr\)/);
+assert.match(css, /grid-template-columns:\s*220px minmax\(0, 1fr\) minmax\(320px, \.30fr\)/);
 assert.match(css, /grid-template-rows:\s*auto minmax\(0, \.88fr\) minmax\(210px, 1\.05fr\) auto/, 'sector and comparison rows retain their original proportions');
 assert.match(css, /\.right-rail\s*\{[\s\S]*?grid-column:\s*3;[\s\S]*?grid-row:\s*2 \/ 4;[\s\S]*?grid-template-rows:\s*minmax\(0, 1fr\) auto;/, 'right rail spans the content height and gives remaining space to timing');
 assert.match(css, /\.comparison-average-heading\s*\{[\s\S]*?height:\s*30px;/, 'all average columns reserve the same header height as the XIC input');

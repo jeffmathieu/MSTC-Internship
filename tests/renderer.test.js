@@ -212,7 +212,7 @@ const updatedState = {
   ],
   stintState: {
     cars: {
-      13: { currentStint: { stintNumber: 3, driverStintNumber: 2, driverName: 'Nigel Moore', stintTimeMs: 3900000, totalDriverTimeMs: 8080000 } }
+      13: { currentStint: { stintNumber: 3, driverStintNumber: 2, driverName: 'Nigel Moore', stintTimeMs: 3900000, totalDriverTimeMs: 8080000, drivingTimeEstimated: true } }
     }
   },
   lapPrediction: {
@@ -654,8 +654,38 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('pit-setup-modal').classList.contains('hidden'), true);
   collectorUpdate(updatedState);
   await flushAsync();
-  assert.strictEqual(document.getElementById('pit-last').textContent, '1:18');
+  assert.strictEqual(document.getElementById('service-pit-timer').textContent, '1:18');
   assert.strictEqual(document.getElementById('pit-last-delta').textContent, '+0:03');
+  collectorUpdate({ ...updatedState, pitstopPlan: { ...updatedState.pitstopPlan,
+    serviceTimers: { active: false, fuelDurationMs: 45000, pitDurationMs: 75000, totalDurationMs: 120000 },
+    projection: { available: true, projectedClassPosition: 6,
+      carAhead: { carNumber: '96', projectedGapToUsMs: null },
+      carBehind: { carNumber: '1', projectedGapToUsMs: 531641 } }
+  } });
+  await flushAsync();
+  assert.strictEqual(document.getElementById('service-state').textContent, 'Last stop');
+  assert.strictEqual(document.getElementById('service-total-timer').textContent, '2:00');
+  assert.strictEqual(document.getElementById('service-pit-timer').textContent, '1:15');
+  assert.strictEqual(document.getElementById('fuel-timer').textContent, '0:45');
+  assert.strictEqual(document.getElementById('pit-last-delta').textContent, '+0:00');
+  assert.strictEqual(document.getElementById('pit-projection').textContent, 'PIC 6 · gap unknown behind #96 · 8:51.641 ahead #1');
+  collectorUpdate({ ...updatedState, pitstopPlan: { ...updatedState.pitstopPlan,
+    projection: { available: true, projectedClassPosition: 6, carAhead: null, carBehind: null }
+  } });
+  await flushAsync();
+  assert.ok(!document.getElementById('pit-projection').textContent.includes('class lead'), 'older saved projections cannot label sixth place a lead');
+  collectorUpdate({ ...updatedState, pitstopPlan: { ...updatedState.pitstopPlan,
+    serviceTimers: { active: true, phase: 'fuel', fuelDurationMs: 10000, pitDurationMs: 0, totalDurationMs: 10000 },
+    projection: { available: true, projectedClassPosition: 1, carAhead: null, carBehind: null }
+  } });
+  await flushAsync();
+  assert.strictEqual(document.getElementById('service-state').textContent, 'Live fuel');
+  assert.strictEqual(document.getElementById('service-pit-timer').textContent, '0:00', 'live pit time cannot reuse the previous stop');
+  assert.strictEqual(document.getElementById('pit-last-delta').classList.contains('hidden'), true);
+  assert.ok(document.getElementById('pit-projection').textContent.includes('class lead'));
+  collectorUpdate(updatedState);
+  await flushAsync();
+  assert.strictEqual(document.getElementById('pit-last-delta').classList.contains('hidden'), false);
 
   await document.getElementById('setup-add-car').trigger('click');
   const extraCars = document.getElementById('setup-extra-cars');

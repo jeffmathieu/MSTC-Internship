@@ -60,6 +60,16 @@ assert.strictEqual(projectFromConfirmedGaps(classRows, '33', 75000, {
 assert.strictEqual(projectFromConfirmedGaps(classRows, '999', 75000, {
   classCoordinates: [{ carNumber: '33', gapToUsMs: 0 }]
 }), null, 'projection requires our car in the coordinate set');
+assert.strictEqual(projectFromConfirmedGaps(classRows, '33', 75000, {
+  classCoordinates: [{ carNumber: '33', gapToUsMs: 0 }, { carNumber: '56', gapToUsMs: 90000 }]
+}), null, 'even finite coordinates cannot omit our current class predecessor');
+assert.strictEqual(projectFromConfirmedGaps(classRows, '33', 75000, {
+  classCoordinates: [
+    { carNumber: '10', gapToUsMs: 100000 },
+    { carNumber: '33', gapToUsMs: 0 },
+    { carNumber: '56', gapToUsMs: 90000 }
+  ]
+}), null, 'stale coordinates cannot put a current class predecessor behind us');
 const estimatedConfirmedProjection = projectFromConfirmedGaps(classRows, '33', 75000, {
   classCoordinates: [
     { carNumber: '10', relation: 'ahead', gapToUsMs: -250000, lapGap: 2, estimated: true },
@@ -439,6 +449,32 @@ assert.strictEqual(urgent.status, 'urgent');
 assert.strictEqual(urgent.canPitNow, true);
 
 // Basic after-pit projection with all cars on the same lap.
+// Regression: PIC 6 stays sixth when the seventh car cannot pass us. The
+// original interval fallback dropped all cars ahead, falsely implying a lead.
+const sixthPlaceRows = [45, 26, 36, 34, 96, 33, 1].map((carNumber, index) => ({
+  position: index + 1, classPosition: index + 1, carNumber, className: 'CC', lapNumber: 20,
+  lastLapMs: 125000, interval: ['--', '20.000', '20.000', '20.000', '20.000', '98.302', '606.641'][index]
+}));
+const staysSixth = projectClassAfterPit(sixthPlaceRows, '33', 75000);
+assert.strictEqual(staysSixth.projectedClassPosition, 6);
+assert.strictEqual(staysSixth.carAhead.carNumber, '96');
+assert.strictEqual(staysSixth.carAhead.projectedGapToUsMs, -173302);
+assert.strictEqual(staysSixth.carBehind.carNumber, '1');
+assert.strictEqual(staysSixth.carBehind.projectedGapToUsMs, 531641);
+const sixthWithUnknownAheadGap = projectClassAfterPit(sixthPlaceRows.map((row) =>
+  row.carNumber === 33 ? { ...row, interval: '?' } : row), '33', 75000);
+assert.strictEqual(sixthWithUnknownAheadGap.projectedClassPosition, 6);
+assert.strictEqual(sixthWithUnknownAheadGap.carAhead.carNumber, '96');
+assert.strictEqual(sixthWithUnknownAheadGap.carAhead.projectedGapToUsMs, null);
+const mixedTrafficAhead = projectClassAfterPit([
+  { position: 1, classPosition: 1, carNumber: 96, className: 'CC', lapNumber: 20 },
+  { position: 2, classPosition: 1, carNumber: 99, className: 'GT', lapNumber: 20, interval: '10.000' },
+  { position: 3, classPosition: 2, carNumber: 33, className: 'CC', lapNumber: 20, interval: '20.000' },
+  { position: 4, classPosition: 3, carNumber: 1, className: 'CC', lapNumber: 20, interval: '100.000' }
+], '33', 75000);
+assert.strictEqual(mixedTrafficAhead.carAhead.carNumber, '96');
+assert.strictEqual(mixedTrafficAhead.carAhead.projectedGapToUsMs, -105000);
+
 const projection = projectClassAfterPit(classRows, '33', 75000);
 assert.strictEqual(projection.available, true);
 assert.strictEqual(projection.projectedClassPosition, 3);
@@ -484,15 +520,13 @@ const impossibleProjection = projectClassAfterPit([
 assert.strictEqual(impossibleProjection.available, false);
 assert.strictEqual(impossibleProjection.reason, 'Our projected race distance is not reliable yet');
 
-// Other cars with unusable score data are filtered out rather than shown with a
-// fake gap.
+// Unknown rivals prevent a prediction rather than being dropped from the rank.
 const filteredUnscoredCarProjection = projectClassAfterPit([
   { position: 1, classPosition: 1, carNumber: 33, className: 'CC', interval: '--' },
   { position: 2, classPosition: 2, carNumber: 7, className: 'CC', interval: '1L' }
 ], '33', 500);
-assert.strictEqual(filteredUnscoredCarProjection.available, true);
-assert.strictEqual(filteredUnscoredCarProjection.items.length, 1);
-assert.strictEqual(filteredUnscoredCarProjection.items[0].carNumber, '33');
+assert.strictEqual(filteredUnscoredCarProjection.available, false);
+assert.deepStrictEqual(filteredUnscoredCarProjection.items, []);
 
 const fallbackLapAwareProjection = projectClassAfterPit([
   { position: 1, classPosition: 1, carNumber: 10, className: 'CC', interval: '--', lapNumber: 20, lastLapMs: 125000 },
@@ -518,7 +552,8 @@ const lappedCarProjection = projectClassAfterPit([
 ], '33', 75000, { averageLapMs: 125000 });
 assert.strictEqual(lappedCarProjection.available, true);
 assert.strictEqual(lappedCarProjection.projectedClassPosition, 2);
-assert.strictEqual(lappedCarProjection.carAhead, null);
+assert.strictEqual(lappedCarProjection.carAhead.carNumber, '10');
+assert.strictEqual(lappedCarProjection.carAhead.projectedGapToUsMs, -85000);
 assert.strictEqual(lappedCarProjection.carBehind.carNumber, '65');
 assert.strictEqual(lappedCarProjection.carBehind.lapDeltaToUs, -4);
 assert.strictEqual(lappedCarProjection.carBehind.projectedGapToUsMs, 425000);
@@ -600,5 +635,14 @@ assert.strictEqual(risLapProjection.gapSource, 'cumulative-gap-estimated');
 assert.strictEqual(risLapProjection.projectedClassPosition, 1);
 assert.strictEqual(risLapProjection.carBehind.carNumber, '65');
 assert.strictEqual(risLapProjection.carBehind.projectedGapToUsMs, 300000);
+
+for (const gap of ['?', '1.000']) {
+  const incompleteCumulative = projectClassAfterPit([
+    { position: 1, classPosition: 1, carNumber: 10, className: 'CC', lapNumber: 20, gap: '--', lastLapMs: 125000 },
+    { position: 2, classPosition: 2, carNumber: 33, className: 'CC', lapNumber: 20, gap: '100.000', lastLapMs: 125000 },
+    { position: 3, classPosition: 3, carNumber: 1, className: 'CC', lapNumber: 20, gap, lastLapMs: 125000 }
+  ], '33', 75000);
+  assert.strictEqual(incompleteCumulative.available, false, 'missing or contradictory cumulative gaps cannot invent a position');
+}
 
 console.log('Pitstop planner tests passed.');

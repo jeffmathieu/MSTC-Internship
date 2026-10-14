@@ -92,10 +92,14 @@ select:focus-visible {
   margin: 0 auto;
   padding: 12px;
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr) minmax(320px, .30fr);
+  grid-template-columns: 220px minmax(0, 1fr) minmax(320px, .30fr);
   grid-template-rows: auto minmax(0, .88fr) minmax(210px, 1.05fr) auto;
   gap: 8px;
   overflow: hidden;
+}
+
+.engineer-dashboard:has(.lap-strip.editing) {
+  grid-template-columns: 250px minmax(0, 1fr) minmax(320px, .30fr);
 }
 
 .info-strip { grid-column: 1 / -1; }
@@ -188,8 +192,8 @@ select:focus-visible {
   min-height: 42px;
   padding: 7px 7px;
   display: grid;
-  grid-template-columns: 27px minmax(0, 1fr) 22px 24px;
-  gap: 5px;
+  grid-template-columns: 27px max-content minmax(26px, 1fr) 24px;
+  gap: 8px;
   align-items: center;
   border-bottom: 1px solid var(--soft-line);
   background: var(--box);
@@ -197,10 +201,11 @@ select:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 .lap-strip.editing .lap-strip-row {
-  grid-template-columns: 27px minmax(0, 1fr) 18px 24px 47px;
+  grid-template-columns: 23px max-content minmax(26px, 1fr) 20px 43px;
+  gap: 5px;
 }
 .lap-status-select {
-  width: 47px;
+  width: 43px;
   min-width: 0;
   border: 1px solid var(--line);
   background: var(--box);
@@ -895,12 +900,18 @@ input {
 }
 .pit-header {
   display: grid;
-  grid-template-columns: minmax(205px, 1.08fr) minmax(90px, .42fr) minmax(120px, .55fr) minmax(105px, .48fr) minmax(320px, 1.55fr) 92px 42px;
+  grid-template-columns: minmax(255px, 1.1fr) minmax(145px, .6fr) minmax(105px, .48fr) minmax(320px, 1.55fr) 92px 42px;
   gap: 9px;
   align-items: center;
 }
-.service-timers { display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 6px 0; font-size: 11px; font-variant-numeric: tabular-nums; }
-.service-timers strong { margin-left: 5px; }
+.service-timer-values {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+  font-variant-numeric: tabular-nums;
+}
+.pit-header .service-timer-values span { font-size: 9px; }
 #fuel-warning { flex-basis: 100%; color: var(--bad); }
 #fuel-warning:empty { display: none; }
 #fuel-setup { margin: 12px 0; }
@@ -942,6 +953,7 @@ input {
   font-weight: 800;
   color: var(--muted);
 }
+#pit-status { white-space: normal; line-height: 1.2; }
 #pit-projection {
   white-space: normal;
   overflow: visible;
@@ -1181,6 +1193,7 @@ body.mode-qualifying .pit-window { display: none; }
 
 @media (max-width: 1050px) {
   .engineer-dashboard { padding: 16px; grid-template-columns: 1fr; }
+  .engineer-dashboard:has(.lap-strip.editing) { grid-template-columns: 1fr; }
   .info-strip,
   .lap-strip,
   .sector-panel,

@@ -9,8 +9,9 @@ const { normalizeMode } = require('../shared/sessionMode');
 const { numberOrNull, driverChange } = require('../shared/pitEvents');
 const { summarizeRaceControl } = require('../shared/raceControl');
 const crypto = require('crypto');
+const { buildCanonicalReportHtml } = require('./reports/canonicalReportHtml');
 
-const REPORT_LAYOUT_VERSION = 'canonical-landscape-v10-data-revision';
+const REPORT_LAYOUT_VERSION = 'canonical-landscape-v12-race-summary-no-notes';
 
 // Every session mode gets an end-of-session overview. Pitstop analysis remains
 // race-only, while practice and qualifying summaries contain pace/sector data.
@@ -633,18 +634,29 @@ async function printHtmlToPdf(BrowserWindow, html, pdfPath) {
     height: 1400,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
   });
+  let reportFolder;
   try {
-    await reportWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    // Full-race charts can exceed Chromium's data-URL navigation limits. A
+    // temporary local document keeps large reports reliable and stays offline.
+    reportFolder = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'mstc-pdf-'));
+    const htmlPath = path.join(reportFolder, 'report.html');
+    await fs.promises.writeFile(htmlPath, html, 'utf8');
+    await reportWindow.loadFile(htmlPath);
+    const canonicalLayout = html.includes('class="report-page"');
     const pdf = await reportWindow.webContents.printToPDF({
       printBackground: true,
       pageSize: 'A4',
-      margins: { top: 0.35, bottom: 0.35, left: 0.35, right: 0.35 }
+      preferCSSPageSize: canonicalLayout,
+      margins: canonicalLayout
+        ? { top: 0, bottom: 0, left: 0, right: 0 }
+        : { top: 0.35, bottom: 0.35, left: 0.35, right: 0.35 }
     });
     const temporary = `${pdfPath}.pending.pdf`;
     await fs.promises.writeFile(temporary, pdf);
     await fs.promises.rename(temporary, pdfPath);
   } finally {
     if (!reportWindow.isDestroyed()) reportWindow.destroy();
+    if (reportFolder) await fs.promises.rm(reportFolder, { recursive: true, force: true });
   }
 }
 
@@ -743,94 +755,10 @@ function buildEventSummaryHtml(title, payloads = []) {
   </style></head><body><header><h1>${htmlEscape(title)}</h1><p>${payloads.length} completed stint${payloads.length === 1 ? '' : 's'}</p></header>${sections}</body></html>`;
 }
 
-// Windows installations without Python still receive the same pit/fuel and
-// stint facts. Chromium paginates this table with repeating column headings.
+// Packaged installations preserve the canonical landscape layout without
+// Python. Explicit SVG pages keep charts and pitstop tables together.
 function buildCanonicalFallbackHtml(payload, includeSummary = false) {
-  const time = (value) => numberOrNull(value) === null ? '—' : formatMs(value);
-  const summary = payload.raceSummary || {};
-  const columns = ['Stop', 'Lap', 'Duration', 'Fuel*', 'Pit*', 'Total*', 'Target', 'Delta', 'Driver before', 'Driver after', 'Change'];
-  const stopValues = (stop) => [
-    stop.stopNumber ?? '—', stop.lapNumber ?? '—', time(stop.durationMs), time(stop.fuelDurationMs), time(stop.pitDurationMs),
-    time(stop.totalDurationMs), time(stop.targetDurationMs),
-    numberOrNull(stop.deltaVsTargetMs) === null ? '—' : `${stop.deltaVsTargetMs < 0 ? '-' : '+'}${time(Math.abs(stop.deltaVsTargetMs))}`,
-    stop.driverBefore || '—', stop.driverAfter || '—', stop.driverChanged == null ? 'unknown' : stop.driverChanged ? 'yes' : 'no'
-  ];
-  const stopRows = (summary.pitStops || []).map(stopValues)
-    .map((values) => `<tr>${values.map((value) => `<td>${htmlEscape(value)}</td>`).join('')}</tr>`).join('');
-  const table = (title, headings, rows) => `<section><h2>${htmlEscape(title)}</h2><table><thead><tr>${headings.map((item) => `<th>${htmlEscape(item)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((item) => `<td>${htmlEscape(item ?? '—')}</td>`).join('')}</tr>`).join('')}</tbody></table></section>`;
-  const comparison = (title, rows) => table(title, ['Driver / car', 'Average', 'Best', 'Average delta', 'Best delta'], rows.map((row) =>
-    [row.driverName || `#${row.carNumber}`, time(row.averageLapMs), time(row.bestLapMs), delta(row.averageDeltaMs), delta(row.bestDeltaMs)]));
-  const delta = (value) => numberOrNull(value) === null ? '—' : `${value < 0 ? '-' : '+'}${time(Math.abs(value))}`;
-  const metricLabel = (key) => key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/ Ms$/, '').replace(/^./, (char) => char.toUpperCase());
-  const facts = (object, prefix = '') => Object.entries(object || {}).flatMap(([key, value]) => {
-    const label = `${prefix}${metricLabel(key)}`;
-    if (value && typeof value === 'object' && !Array.isArray(value)) return facts(value, `${label} / `);
-    if (Array.isArray(value)) return value.every((item) => typeof item !== 'object') ? [[label, value.join('; ')]] : [];
-    const formatted = key.endsWith('Ms') ? (value < 0 ? delta(value) : time(value))
-      : typeof value === 'number' ? (key.endsWith('Percent') ? `${value.toFixed(2)}%`
-        : key.endsWith('MsPerLap') ? `${value.toFixed(2)} ms/lap`
-        : Number.isInteger(value) ? value : value.toFixed(3)) : value ?? '—';
-    return [[label, formatted]];
-  });
-  const overview = includeSummary ? `<section><h1>${htmlEscape(payload.race.sessionName)} · #${htmlEscape(payload.race.carNumber)}</h1>
-    <h2>${htmlEscape((payload.reportMode || 'race').toUpperCase())} OVERVIEW</h2>
-    <p>${summary.totalLaps || 0} recorded laps · average ${time(summary.stats?.averageLapMs)} · best ${time(summary.stats?.bestLapMs)}</p>
-    ${(summary.pitStops || []).length ? `<h2>Recorded pitstops and fuel</h2><table><thead><tr>${columns.map((label) => `<th>${label}</th>`).join('')}</tr></thead><tbody>${stopRows}</tbody></table>
-      <p>* Observed fuel/pit transitions at feed polling precision. Duration prefers provider L. PIT. Missing measurements stay unknown.</p>` : ''}
-    </section>${table('Pace by track condition', ['Condition', 'Laps', 'Valid', 'Average', 'Best'], Object.entries(summary.statsByCondition || {}).map(([condition, stats]) =>
-      [condition, stats.lapCount, stats.paceLapCount, time(stats.averageLapMs), time(stats.bestLapMs)]))}
-    ${table('Driver session comparison', ['Driver', 'Laps', 'Valid', 'Average', 'Best', 'S1', 'S2', 'S3'], (summary.drivers || []).map((driver) =>
-      [driver.driverName, driver.lapCount, driver.paceLapCount, time(driver.averageLapMs), time(driver.bestLapMs), time(driver.averageSector1Ms), time(driver.averageSector2Ms), time(driver.averageSector3Ms)]))}
-    ${table('Race control', ['Period', 'Count', 'Observed duration'], ['fcy', 'safetyCar', 'redFlag'].map((key) =>
-      [key, summary.raceControl?.[key] ?? '—', time(summary.raceControl?.durationsMs?.[key])]))}` : '';
-  const stints = payload.stints.map((stint) => {
-    const legacy = { session: { ...payload.race, driverName: stint.driverName }, stint: { ...stint, lapCount: stint.laps.length }, gapHistory: stint.gapHistory };
-    return (buildStintReportHtml(legacy).match(/<body>([\s\S]*)<\/body>/)?.[1] || '')
-      + comparison('Team comparison', stint.teammates || [])
-      + comparison('Class comparison', stint.classComparisons || [])
-      + (stint.endPitStop ? table('End pitstop and observed fuel/pit time', columns, [stopValues(stint.endPitStop)]) : '')
-      + table('Stint engineering insights', ['Metric', 'Value'], facts(stint.insights))
-      + table('Reference times', ['Metric', 'Time'], Object.entries(payload.referenceTimes || {}).map(([key, value]) => [metricLabel(key), value > 0 ? time(value) : '—']));
-  });
-  const style = payload.stints.length ? buildStintReportHtml({ session: { ...payload.race, driverName: '' },
-    stint: { ...payload.stints[0], lapCount: payload.stints[0].laps.length } }).match(/<style>([\s\S]*)<\/style>/)?.[1] || '' : '';
-  const graphs = summary.graphs || {};
-  const appendices = includeSummary ? [graphs.driverLaps, graphs.driverPace, graphs.driverSectors, ...(graphs.classPacePages || [graphs.classPace])]
-    .filter(Boolean).map((graph) => `<section class="stint-page"><h2>${htmlEscape(graph.title)}</h2><p>${htmlEscape(graph.subtitle)}</p>${fallbackGraphSvg(graph)}</section>`).join('') : '';
-  const caveats = payload.caveats?.length ? `<section class="report-caveats"><h2>Data quality and timing notes</h2>${payload.caveats.map((note) => `<p>${htmlEscape(note)}</p>`).join('')}</section>` : '';
-  return `<!doctype html><html><head><meta charset="utf-8"><title>MSTC session analysis</title><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><style>${style}
-    @page { size: A4 landscape; margin: 12mm; } table { width:100%; border-collapse:collapse; font-size:9px; }
-    th,td { border:1px solid #d8ddd7; padding:5px; overflow-wrap:anywhere; } thead { display:table-header-group; }
-    tr { break-inside:avoid; } .stint-page { break-before:page; } section { break-inside:auto; }
-    h2 { break-after:avoid; } svg { width:100%; height:auto; break-inside:avoid; } .report-caveats p { margin:8px 0; }
-    </style></head><body>${overview}${stints.map((html, i) => `<div class="${includeSummary || i ? 'stint-page' : ''}">${html}</div>`).join('')}${caveats}${appendices}</body></html>`;
-}
-
-function fallbackGraphSvg(graph) {
-  const colors = ['#2474b5', '#1f9d70', '#d97730', '#b54a72', '#6556ad'];
-  const series = graph.series || [];
-  const points = series.flatMap((item) => item.points || []).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
-  const values = graph.type === 'bar' ? series.flatMap((item) => item.values || []).filter(Number.isFinite) : points.map((point) => point.y);
-  if (!values.length) return '<p>No measured samples available.</p>';
-  const low = graph.type === 'bar' ? 0 : Math.min(...values) * .98;
-  const high = Math.max(low + 1, ...values) * 1.02;
-  const yy = (value) => 270 - (value - low) / (high - low) * 235;
-  const labels = series.map((item, index) => `<text x="${60 + (index % 4) * 210}" y="${312 + Math.floor(index / 4) * 16}" fill="${colors[index % colors.length]}">${htmlEscape(item.name)}</text>`).join('');
-  let drawing;
-  if (graph.type === 'bar') {
-    const categories = graph.categories || [];
-    const groupWidth = 800 / Math.max(1, categories.length), barWidth = groupWidth / Math.max(1, series.length + 1);
-    drawing = series.map((item, j) => (item.values || []).map((value, i) => Number.isFinite(value)
-      ? `<rect x="${60 + i * groupWidth + j * barWidth}" y="${yy(value)}" width="${barWidth * .85}" height="${270 - yy(value)}" fill="${colors[j % colors.length]}"/>` : '').join('')).join('')
-      + categories.map((category, i) => `<text x="${60 + i * groupWidth}" y="289">${htmlEscape(category)}</text>`).join('');
-  } else {
-    const min = Math.min(...points.map((point) => point.x)), max = Math.max(min + 1, ...points.map((point) => point.x));
-    drawing = series.map((item, j) => `<polyline fill="none" stroke="${colors[j % colors.length]}" stroke-width="1.5" points="${(item.points || []).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
-      .map((point) => `${60 + (point.x - min) / (max - min) * 800},${yy(point.y)}`).join(' ')}"/>`).join('')
-      + `<text x="60" y="289">${min}</text><text x="850" y="289">${max}</text>`;
-  }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 ${335 + Math.ceil(series.length / 4) * 16}" font-family="Arial" font-size="10"><path d="M60 30v240h800" fill="none" stroke="#68716d"/>
-    <text x="0" y="40">${htmlEscape(formatMs(high))}</text><text x="0" y="270">${htmlEscape(formatMs(low))}</text>${drawing}${labels}</svg>`;
+  return buildCanonicalReportHtml(payload, includeSummary);
 }
 
 async function writeEventSummaryArtifacts({

@@ -279,31 +279,19 @@
       </section>
 
       <section class="pit-window board-box" id="pit-window">
-        <div id="service-timers" class="service-timers" aria-label="Fuel and pit timers">
-          <span id="service-state">Last stop</span>
-          <span>Fuel<strong id="fuel-timer">—</strong></span>
-          <span>Pit<strong id="service-pit-timer">—</strong></span>
-          <span>Total<strong id="service-total-timer">—</strong></span>
-          <!-- Fuel estimation is parked until its replacement is implemented.
-          <span id="fuel-estimate">Fuel estimate: setup required</span>
-          <span id="fuel-range"></span>
-          <span id="fuel-plan"></span>
-          <small id="fuel-warning" role="status"></small>
-          -->
-        </div>
         <div class="pit-header">
-          <div>
-            <span>Pitstop window</span>
-            <strong id="pit-status">—</strong>
-          </div>
-          <div>
-            <span>Last pit</span>
-            <strong id="pit-last">—</strong>
-            <small id="pit-last-delta">—</small>
+          <div id="service-timers" class="last-stop-analysis" aria-label="Last stop analysis">
+            <span id="service-state">Last stop</span>
+            <div class="service-timer-values">
+              <div><span>Total time</span><strong id="service-total-timer">—</strong></div>
+              <div><span>Pit time</span><strong id="service-pit-timer">—</strong><small id="pit-last-delta">—</small></div>
+              <div><span>Fuel time</span><strong id="fuel-timer">—</strong></div>
+            </div>
           </div>
           <div>
             <span>Required stops</span>
             <strong id="pit-stops-summary">0/2</strong>
+            <small id="pit-status">—</small>
           </div>
           <div>
             <span>Next pit</span>
