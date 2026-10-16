@@ -330,7 +330,11 @@ function completedLapRowFromLiveRow(row, previousRow) {
     completed.lapFlag = neutralizedSectorFlag;
     completed.paceEligible = 'false';
   }
-  const pitStatus = [row.state, row.eta, row.pitStatus, row.pitInfoText]
+  // "OutLap" is shown while the car drives its out lap and is usually replaced
+  // by a countdown before the lap is completed, so the snapshot taken during
+  // the lap (previousRow) must be checked as well as the completion row.
+  const pitStatus = [row, previousRow]
+    .flatMap((source) => [source?.state, source?.eta, source?.pitStatus, source?.pitInfoText])
     .map((value) => String(value || '').trim())
     .filter(Boolean)
     .join(' ');
