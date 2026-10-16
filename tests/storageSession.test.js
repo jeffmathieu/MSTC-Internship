@@ -78,7 +78,12 @@ try {
   assert.strictEqual(resolveSessionEndAt({ lastUpdatedAt: end }, [{ collectedAt: '2026-09-08T12:04:00Z' }]), end);
   assert.strictEqual(resolveSessionEndAt({ finishedAt: end }, [], '2026-10-08T12:00:00Z'), end,
     'regenerating a finalized archive keeps the stored endpoint');
-  assert.strictEqual(resolveSessionEndAt({}, [{ collectedAt: end }]), end, 'old archives fall back to the last lap observation');
+  assert.strictEqual(resolveSessionEndAt({ finishedAt: end }, [{ collectedAt: '2026-09-08T12:03:00Z' }], null,
+  [{ entryAt: '2026-09-08T12:05:59Z' }]), end, 'data recorded before the stored endpoint changes nothing');
+assert.strictEqual(resolveSessionEndAt({ finishedAt: end }, [{ collectedAt: '2026-09-08T12:04:00Z' }], null,
+  [{ entryAt: '2026-09-08T12:30:00Z', exitAt: null }]), '2026-09-08T12:30:00.000Z',
+  'a pit stop recorded after the stored endpoint means the session resumed, so the end moves with it');
+assert.strictEqual(resolveSessionEndAt({}, [{ collectedAt: end }]), end, 'old archives fall back to the last lap observation');
   assert.strictEqual(resolveSessionEndAt({}, []), null, 'an empty archive has no invented endpoint');
   fs.writeFileSync(pitPlanPath, '{invalid json}');
   assert.throws(() => loadStoredJson(fs, pitPlanPath), SyntaxError);

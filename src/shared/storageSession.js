@@ -165,7 +165,16 @@ function resolveFinalReportSettings(settings = {}, metadata = {}, history = []) 
 // Report generation time is unrelated to when the car stopped driving. Prefer
 // an already saved endpoint, otherwise the last confirmed source observation.
 function resolveSessionEndAt(metadata = {}, history = [], lastObservedAt = null, pitEvents = []) {
-  if (Number.isFinite(Date.parse(metadata.finishedAt))) return new Date(metadata.finishedAt).toISOString();
+  const dataTimes = [...history.map((lap) => lap.recordedAt || lap.collectedAt),
+    ...pitEvents.flatMap((event) => [event.entryAt, event.exitAt])]
+    .map((value) => Date.parse(value)).filter(Number.isFinite);
+  if (Number.isFinite(Date.parse(metadata.finishedAt))) {
+    const stored = Date.parse(metadata.finishedAt);
+    // Laps or pit stops recorded after the stored endpoint mean the folder was
+    // resumed (for example after a red flag): the session end moves with them.
+    const latestData = dataTimes.length ? Math.max(...dataTimes) : null;
+    return new Date(latestData !== null && latestData > stored + 2000 ? latestData : stored).toISOString();
+  }
   const observations = [metadata.lastUpdatedAt, lastObservedAt,
     ...history.map((lap) => lap.recordedAt || lap.collectedAt),
     ...pitEvents.flatMap((event) => [event.entryAt, event.exitAt])]
