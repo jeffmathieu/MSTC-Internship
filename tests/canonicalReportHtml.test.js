@@ -22,6 +22,13 @@ const payload = {
   ] }], caveats: ['Timing notes from <stored data>.'], referenceTimes: { lapMs: 125000 }
 };
 const html = buildCanonicalFallbackHtml(payload, true);
+
+// The stop that ended a stint can carry the engineer's notes: they get a panel
+// next to the lap chart (and old reports without notes are unchanged).
+const withNotes = buildCanonicalFallbackHtml({ ...payload, stints: [{ ...payload.stints[0], endPitStop: { stopNumber: 2, notes: {
+  fuelAdded: true, tyresChanged: false, tyreSet: 'Set <4>', driverNotes: 'Car pushes in slow corners and the rear is loose on exit in the final laps', pitNotes: 'Clean stop' } } }] }, false);
+assert.ok(withNotes.includes('PIT STOP #2 NOTES') && withNotes.includes('Set &lt;4&gt;') && withNotes.includes('DRIVER NOTES ON THE STINT (JOHN CORBETT)'), 'stint notes panel is drawn and escaped');
+assert.ok(!buildCanonicalFallbackHtml(payload, false).includes('NOTES ON THE STINT'), 'stints without notes keep the original layout');
 const pages = [...html.matchAll(/<section class="report-page">([\s\S]*?)<\/section>/g)].map((match) => match[1]);
 assert.strictEqual(pages.length, 7, 'race summaries contain overview, two pit pages, one stint, team graphs and two class pages');
 assert.ok(pages[0].includes('FULL RACE OVERVIEW') && pages[0].includes('FULL-SESSION PACE STATISTICS'));

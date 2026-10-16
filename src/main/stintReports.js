@@ -11,6 +11,7 @@ const { summarizeRaceControl } = require('../shared/raceControl');
 const crypto = require('crypto');
 const { buildCanonicalReportHtml } = require('./reports/canonicalReportHtml');
 const { buildDebriefModel, buildDebriefHtml } = require('./reports/debriefHtml');
+const { notesForStop } = require('../shared/pitNotes');
 
 const REPORT_LAYOUT_VERSION = 'canonical-landscape-v12-race-summary-no-notes';
 
@@ -348,7 +349,8 @@ function buildCanonicalReportPayload({
   pitEvents = [],
   sessionMode = 'race',
   raceControlEvents = [],
-  preparedReportPayload = null
+  preparedReportPayload = null,
+  pitNotes = {}
 }) {
   if (preparedReportPayload) {
     const legacy = stints[0] ? buildStintReportPayload(stints[0], session, gapSamples) : null;
@@ -376,11 +378,15 @@ function buildCanonicalReportPayload({
   const recordedStops = pitEvents.filter((stop) => String(stop.carNumber) === followedCar && stop.closed);
   const legacyStops = pitStopsFromHistory(history, followedCar);
   const representedCounts = new Set(recordedStops.map((stop) => stop.stopNumber).filter((count) => count != null));
+  const withNotes = (stops) => stops.map((stop) => {
+    const notes = notesForStop(stop, pitNotes);
+    return notes ? { ...stop, notes } : stop;
+  });
   const pitStops = reportPolicy.includePitstops
-    ? enrichPitStops([...legacyStops.filter((stop) => !representedCounts.has(stop.stopNumber)
+    ? withNotes(enrichPitStops([...legacyStops.filter((stop) => !representedCounts.has(stop.stopNumber)
       && !recordedStops.some((event) => event.lapNumber === stop.lapNumber)), ...recordedStops]
       .sort((a, b) => a.stopNumber != null && b.stopNumber != null
-        ? a.stopNumber - b.stopNumber : (a.lapNumber ?? Infinity) - (b.lapNumber ?? Infinity)), expectedPitDurationMs)
+        ? a.stopNumber - b.stopNumber : (a.lapNumber ?? Infinity) - (b.lapNumber ?? Infinity)), expectedPitDurationMs))
     : [];
   const pitAnalysis = pitstopAnalysis(pitStops);
   const legacy = stints[0] ? buildStintReportPayload(stints[0], session, gapSamples) : null;
@@ -676,7 +682,8 @@ async function writeClosedStintArtifacts({
   sessionMode = 'race',
   raceControlEvents = [],
   preparedReportPayload = null,
-  renderPdf = renderReportLabPdf
+  renderPdf = renderReportLabPdf,
+  pitNotes = {}
 }) {
   if (!stint?.closed) return { written: false, reason: 'stint-open' };
   if (!Number(stint.lapCount ?? stint.laps?.length)) {
@@ -701,7 +708,7 @@ async function writeClosedStintArtifacts({
     pitRules,
     pitEvents,
     sessionMode,
-    raceControlEvents, preparedReportPayload,
+    raceControlEvents, preparedReportPayload, pitNotes,
     carNumber: stint.carNumber
   });
   const { generatedAt, ...revisionInputs } = payload;
@@ -823,7 +830,7 @@ async function writeEventSummaryArtifacts({
       pitRules,
       pitEvents,
       sessionMode: reportPolicy.sessionMode,
-      raceControlEvents, preparedReportPayload,
+      raceControlEvents, preparedReportPayload, pitNotes,
       carNumber
     });
     payload.title = group.title;

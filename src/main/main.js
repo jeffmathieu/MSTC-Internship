@@ -1137,7 +1137,7 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
       const end = Date.parse(stint.closedAt);
       const reportInputs = hashObject({ referenceTimes: input.referenceTimes, pitRules: input.pitRules,
         mode: reportSessionMode, startedAt: stint.startedAt, closedAt: stint.closedAt,
-        drivingTimeMs: stint.stintTimeMs,
+        drivingTimeMs: stint.stintTimeMs, notes: pitNotesStore[carNumber] || {},
         events: input.pitEvents.filter((event) => Date.parse(event.entryAt || event.exitAt) <= end
           && (!event.exitAt || Date.parse(event.exitAt) >= Date.parse(stint.startedAt))) });
       const reportKey = `${folder}|${carNumber}|${stint.stintNumber}|${stint.driverName}|${reportCorrectionsRevision}|${reportInputs}`;

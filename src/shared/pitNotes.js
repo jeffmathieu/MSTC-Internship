@@ -54,5 +54,12 @@
     return { ok: true, notes: normalizeNotes(input) };
   }
 
-  return { LIMITS, normalizeNotes, buildPitNotesView, validateSave };
+  // Notes are stored per pit event id; reports built from lap history alone only
+  // know the stop number, so fall back to that.
+  function notesForStop(stop, pitNotes = {}) {
+    if (stop.id && pitNotes[stop.id]) return pitNotes[stop.id];
+    return Object.values(pitNotes).find((notes) => notes.stopNumber != null && notes.stopNumber === stop.stopNumber) || null;
+  }
+
+  return { LIMITS, normalizeNotes, buildPitNotesView, validateSave, notesForStop };
 });

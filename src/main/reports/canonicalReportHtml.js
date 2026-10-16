@@ -183,6 +183,37 @@ function lapChart(page, x, y, width, height, title, laps, key, average, statusKe
   page.text(x + width - 14, y + 8, `Lap ${points.at(-1).lapNumber || points.length}`, 6.5, C.muted, false, 'end');
 }
 
+// Greedy word wrap for the fixed-width SVG text (about 'maxChars' per line).
+function wrapLines(text, maxChars, maxLines) {
+  const lines = [];
+  let line = '';
+  for (const word of String(text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)) {
+    if ((line + ' ' + word).trim().length > maxChars) { lines.push(line); line = word.slice(0, maxChars); } else line = (line + ' ' + word).trim();
+  }
+  if (line) lines.push(line);
+  if (lines.length > maxLines) { lines.length = maxLines; lines[maxLines - 1] = lines[maxLines - 1].replace(/.{0,2}$/, '') + '…'; }
+  return lines;
+}
+
+// The engineer's notes for the stop that ended this stint.
+function notesPanel(page, x, y, width, height, stint) {
+  const stop = stint.endPitStop, notes = stop.notes;
+  page.panel(x, y, width, height, `Pit stop #${stop.stopNumber ?? '-'} notes`);
+  const yes = (value) => (value ? 'yes' : 'no');
+  let cursor = y + height - 34;
+  page.text(x + 10, cursor, `Fuel added: ${yes(notes.fuelAdded)}   Tyres changed: ${yes(notes.tyresChanged)}`, 7, C.ink, true, 'start', width - 20);
+  cursor -= 12;
+  page.text(x + 10, cursor, `Tyre set: ${notes.tyreSet || '-'}`, 7, C.ink, false, 'start', width - 20);
+  const block = (label, text, maxLines) => {
+    cursor -= 17;
+    page.text(x + 10, cursor, label.toUpperCase(), 5.8, C.muted, true, 'start', width - 20);
+    const lines = text ? wrapLines(text, 50, maxLines) : ['-'];
+    lines.forEach((line) => { cursor -= 9.5; page.text(x + 10, cursor, line, 6.8, text ? C.ink : C.muted, false, 'start', width - 20); });
+  };
+  block(`Driver notes on the stint${stint.driverName ? ` (${stint.driverName})` : ''}`, notes.driverNotes, 6);
+  block('Pit stop notes', notes.pitNotes, 5);
+}
+
 function stintPage(payload, stint, index) {
   const detail = `Driver stint ${stint.driverStintNumber || stint.stintNumber}  |  Car stint ${stint.stintNumber}  |  ${stint.lapNumberSource === 'observed-sequence' ? 'observed laps' : 'laps'} ${stint.startLap || '-'}-${stint.endLap || '-'}`;
   const page = new Page(payload, stint.driverName, detail), stats = stint.stats || {}, laps = stint.laps || [];
@@ -190,7 +221,10 @@ function stintPage(payload, stint, index) {
     const stop = stint.endPitStop;
     page.text(PAGE_W - 28, PAGE_H - 54, `End pit #${stop.stopNumber || '-'}: ${duration(stop.durationMs)} | fuel ${duration(stop.fuelDurationMs)} | pit ${duration(stop.pitDurationMs)} (${deltaDuration(stop.deltaVsTargetMs)} vs target)${rejoin(stop) ? ` | rejoined ${rejoin(stop)}` : ''}`, 6.2, '#FFFFFF', false, 'end', 420);
   }
-  lapChart(page, 28, 328, PAGE_W - 56, 190, 'Lap times', laps, 'lapTimeMs', stats.averageLapMs, 'status');
+  const notes = stint.endPitStop?.notes;
+  const notesWidth = notes ? 244 : 0;
+  lapChart(page, 28, 328, PAGE_W - 56 - (notes ? notesWidth + 8 : 0), 190, 'Lap times', laps, 'lapTimeMs', stats.averageLapMs, 'status');
+  if (notes) notesPanel(page, PAGE_W - 28 - notesWidth, 328, notesWidth, 190, stint);
   const width = (PAGE_W - 72) / 3;
   for (let sector = 1; sector <= 3; sector++) lapChart(page, 28 + (sector - 1) * (width + 8), 184, width, 132, `Sector ${sector}`, laps, `sector${sector}Ms`, stats[`averageSector${sector}Ms`], `sector${sector}Status`);
   page.panel(28, 34, width, 138, 'Stint statistics');
