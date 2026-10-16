@@ -826,7 +826,13 @@ async function writeEventSummaryArtifacts({
     payload.title = group.title;
     payload.legacyPayloads = payloads;
     const jsonPath = path.join(carDataFolder, `${group.baseName}.json`);
-    const pdfPath = path.join(carFolder, `${group.baseName}.pdf`);
+    // The full overview is the main deliverable: it sits in the session folder
+    // itself (one file per car); driver summaries stay next to the stints.
+    const pdfPath = group.includeSummary
+      ? path.join(sessionFolder, `${group.baseName}_car-${safeFilePart(carNumber, 'unknown')}.pdf`)
+      : path.join(carFolder, `${group.baseName}.pdf`);
+    // Earlier versions saved the overview inside the car folder.
+    if (group.includeSummary) fs.rmSync(path.join(carFolder, `${group.baseName}.pdf`), { force: true });
     fs.writeFileSync(jsonPath, JSON.stringify(payload, null, 2));
     // Finalization deliberately refreshes summaries, including when reopening
     // an old session folder whose full overview did not exist yet.

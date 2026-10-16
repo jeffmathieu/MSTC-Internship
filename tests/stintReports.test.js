@@ -238,8 +238,11 @@ module.exports = (async () => {
     renderPdf: fakeCanonicalRenderer
   });
   assert.strictEqual(summaries.length, 2, 'race and driver summaries are generated at session end');
-  assert.ok(summaries.every((item) => path.dirname(item.jsonPath).endsWith(path.join('car-33', 'data')) && path.dirname(item.pdfPath).endsWith('car-33')),
-    'summary PDFs sit beside the stint folders while their JSON goes in data/');
+  assert.ok(summaries.every((item) => path.dirname(item.jsonPath).endsWith(path.join('car-33', 'data'))),
+    'summary JSON payloads go in the car data folder');
+  assert.strictEqual(path.dirname(summaries[0].pdfPath), output, 'the full overview PDF sits in the session folder');
+  assert.strictEqual(path.basename(summaries[0].pdfPath), 'RACE_SUMMARY_car-33.pdf');
+  assert.ok(path.dirname(summaries[1].pdfPath).endsWith('car-33'), 'driver summaries stay with the car stints');
   assert.strictEqual(summaries.every((summary) => fs.existsSync(summary.pdfPath)), true);
   assert.strictEqual(printCount, 6);
 
