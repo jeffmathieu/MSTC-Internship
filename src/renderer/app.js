@@ -1324,8 +1324,20 @@ function renderDetails(state) {
 
 // Central render function called on every collector:update event. Keep new UI
 // panels wired here so they update whenever live data changes.
+// The main process locks in the detected session name; mirror it into the
+// settings and the setup box so the next save does not wipe it again.
+function syncSessionNameFromState(state) {
+  const name = state?.sessionNameSetting;
+  if (typeof name !== 'string' || !currentSettings || name === (currentSettings.sessionName || '')) return;
+  currentSettings = { ...currentSettings, sessionName: name };
+  if ($('session-name')) $('session-name').value = name;
+  const box = $('setup-session-name');
+  if (box && document.activeElement !== box) box.value = name;
+}
+
 function render(state) {
   currentState = state || {};
+  syncSessionNameFromState(currentState);
   const rows = currentState.rows || [], history = currentState.lapHistory || [];
   const summaryCondition = currentState.analyticsSummary?.trackCondition;
   const summaryFilter = currentState.analyticsSummary?.analysisConditionFilter;
@@ -1398,6 +1410,7 @@ async function saveSettingsFromInputs(setupComplete = false) {
     referenceTimesByMode,
     pitCircuitId: $('pit-circuit')?.value || currentSettings?.pitCircuitId || 'zolder',
     storageFolder: $('storage-folder').value.trim(),
+    sessionName: $('session-name').value.trim(),
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     pitRules: pitRulesFromInputs()
   };
@@ -1448,6 +1461,7 @@ function syncSetupFromMain() {
   configuredFollowedCars = normalizedCarList(currentSettings?.followedCars, currentSettings?.followedCar || '33');
   $('setup-car').value = configuredFollowedCars[0] || '33';
   $('setup-folder').value = $('storage-folder').value;
+  $('setup-session-name').value = $('session-name').value;
   syncSessionMode(currentSettings?.sessionMode || 'race');
   renderExtraCarInputs();
 }
@@ -1512,6 +1526,7 @@ function syncMainFromSetup() {
   configuredFollowedCars = normalizedCarList(configuredFollowedCars, $('setup-car').value || '33');
   if (!fixedDashboardCar) $('followed-car').value = configuredFollowedCars[0] || '33';
   $('storage-folder').value = $('setup-folder').value;
+  $('session-name').value = $('setup-session-name').value;
 }
 
 // Opens or closes the first-run/setup modal.
@@ -1542,6 +1557,7 @@ async function init() {
   $('followed-car').value = fixedDashboardCar || currentSettings.followedCar || '33';
   if (fixedDashboardCar) document.title = `Race Engineer Dashboard - Car #${fixedDashboardCar}`;
   $('storage-folder').value = currentSettings.storageFolder || '';
+  $('session-name').value = currentSettings.sessionName || '';
   if ($('comparison-car')) $('comparison-car').value = currentSettings.comparisonCar || '';
   if ($('comparison-xic-car')) $('comparison-xic-car').value = currentSettings.comparisonCar || '';
   syncReferenceInputs(currentSettings);

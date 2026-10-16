@@ -1231,3 +1231,5 @@ body.mode-qualifying .pit-window { display: none; }
   line-height: 1.2;
 }
 #collector-message[hidden] { display: none; }
+
+.setup-hint { margin: 4px 0 12px; font-size: 12px; color: var(--muted, #626a66); }

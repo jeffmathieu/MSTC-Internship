@@ -59,7 +59,7 @@ const {
   updateGapMemory
 } = require('../shared/gapMemory');
 const { normalizeMode, buildComparisonView, qualifyingAdjacentView } = require('../shared/sessionMode');
-const { preferStableSessionName } = require('../shared/sessionName');
+const { preferStableSessionName, isPlausibleSessionName } = require('../shared/sessionName');
 const { drivingStintsForCar: stintsForCar, buildDrivingStintState: buildStintState } = require('../shared/stintTracker');
 const { updateSessionTiming } = require('../shared/sessionTiming');
 const { followedClassesCompletion, automaticCompletionReason: completionReason, updateFinishCountdown } = require('../shared/sessionCompletion');
@@ -168,7 +168,8 @@ let collectorState = {
   sessionTiming: null,
   finishCountdown: null,
   storageSessionFolder: '',
-  pollIntervalMs: 5000
+  pollIntervalMs: 5000,
+  sessionNameSetting: ''
 };
 
 // Electron chooses a safe OS-specific folder for app settings. Race data is
@@ -216,6 +217,10 @@ function normalizeSettings(settings) {
     followedCars,
     sessionMode,
     theme,
+    // Empty means "detect it": the first plausible scraped name is stored here
+    // (sessionNameAuto) and then stays fixed until the user edits it in setup.
+    sessionName: String(settings?.sessionName ?? '').trim().slice(0, 120),
+    sessionNameAuto: Boolean(settings?.sessionNameAuto) && Boolean(String(settings?.sessionName ?? '').trim()),
     trackCondition,
     analysisConditionFilter,
     conditionPhaseCounter,
@@ -1529,10 +1534,20 @@ async function pollLivePage() {
       return;
     }
     normalized.collectedAt = observedAt;
-    normalized.session.sessionName = preferStableSessionName(
-      normalized.session?.sessionName,
-      collectorState.session?.sessionName
-    );
+    // The session name is fixed once known: a stored (auto or manual) name
+    // always wins, otherwise the first plausible scraped name is locked in.
+    if (settings.sessionName) {
+      normalized.session.sessionName = settings.sessionName;
+    } else {
+      normalized.session.sessionName = preferStableSessionName(
+        normalized.session?.sessionName,
+        collectorState.session?.sessionName
+      );
+      if (isPlausibleSessionName(normalized.session.sessionName)) {
+        saveSettings({ ...settings, sessionName: normalized.session.sessionName, sessionNameAuto: true });
+        collectorState.sessionNameSetting = normalized.session.sessionName;
+      }
+    }
     const prepared = prepareLatestSnapshot(settings, normalized);
     const { storageRows, analysisRows, context } = prepared;
     context.sourceObservedAt = providerFreshness.lastProgressAt;
@@ -1685,6 +1700,12 @@ async function startCollector(url) {
   await snapshotWriter.flush();
   completedReportKeys.clear();
   const settings = loadSettings();
+  // A name filled in by the previous detection belongs to that session; only a
+  // name the user typed in setup survives into the next Start.
+  if (settings.sessionNameAuto) {
+    Object.assign(settings, { sessionName: '', sessionNameAuto: false });
+    saveSettings(settings);
+  }
   const startedAt = new Date().toISOString();
   const storageSessionFolder = resolveSessionFolder(settings.storageFolder, defaultStorageFolder());
   fs.mkdirSync(storageSessionFolder, { recursive: true });
@@ -1692,7 +1713,7 @@ async function startCollector(url) {
   automaticCompletionHandled = false;
   providerFreshness = {};
   gapMemoryState = null;
-  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, lapPrediction: null, lapPredictionsByCar: {}, pitstopPlan: null, pitstopPlansByCar: {}, gapMemory: null, stintState: null, sessionTiming: null, finishCountdown: null, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
+  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, lapPrediction: null, lapPredictionsByCar: {}, pitstopPlan: null, pitstopPlansByCar: {}, gapMemory: null, stintState: null, sessionTiming: null, finishCountdown: null, storageSessionFolder, sessionNameSetting: settings.sessionName || '', pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
   collectorState = { ...collectorState, lapHistory: loadExistingHistory(settings), storage: storageInfo(settings) };
   collectorState.sessionTiming = updateSessionTiming(null, {}, collectorState.lapHistory, startedAt);
   collectorState.stintState = buildStintState(collectorState.lapHistory, normalizeFollowedCars(settings), startedAt, {
@@ -1750,9 +1771,15 @@ handleTrusted('settings:set', (_event, settings) => {
   const conditionPhaseCounter = conditionChanged
     ? Math.max(1, Number(previous.conditionPhaseCounter) || 1) + 1
     : previous.conditionPhaseCounter;
+  // Any name that differs from the stored one was typed by the user.
+  const requestedSessionName = settings?.sessionName === undefined
+    ? previous.sessionName
+    : String(settings.sessionName ?? '').trim().slice(0, 120);
   const merged = normalizeSettings({
     ...previous,
     ...settings,
+    sessionName: requestedSessionName,
+    sessionNameAuto: requestedSessionName === previous.sessionName ? previous.sessionNameAuto : false,
     trackCondition: requestedCondition,
     conditionPhaseCounter,
     conditionPhaseId: conditionChanged
@@ -1763,6 +1790,12 @@ handleTrusted('settings:set', (_event, settings) => {
   // unusably fast/slow collector.
   merged.pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
   saveSettings(merged);
+  if (requestedSessionName !== previous.sessionName) {
+    collectorState.sessionNameSetting = merged.sessionName;
+    // A manual name applies to the running session straight away.
+    if (merged.sessionName && collectorState.session) collectorState.session = { ...collectorState.session, sessionName: merged.sessionName };
+    broadcastState();
+  }
   try { appendTrackConditionEvent(previous, merged); } catch (error) { addError(error, 'appendTrackConditionEvent'); }
   syncAdditionalDashboardWindows(merged);
   if (previous.theme !== merged.theme) {

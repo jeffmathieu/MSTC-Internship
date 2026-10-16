@@ -34,6 +34,9 @@
           <input id="setup-folder" type="text" readonly />
           <button id="setup-choose-folder" class="secondary">Choose session folder</button>
         </div>
+        <label for="setup-session-name">Session name (optional)</label>
+        <input id="setup-session-name" type="text" maxlength="120" placeholder="Empty = detected automatically when you press Start" />
+        <p class="setup-hint">Optional: this can stay empty. If empty, the name is read from the timing page when you press Start, shown here, and then stays fixed. You can also type your own name here before starting (or fix a wrong detected one) and it will be used instead.</p>
         <div class="button-row end">
           <button id="setup-save" class="primary">Save and open dashboards</button>
         </div>
@@ -345,6 +348,7 @@
         <input id="timing-url" type="text" value="https://livetiming.getraceresults.com/demo#screen-results" />
         <input id="followed-car" type="text" value="33" />
         <input id="storage-folder" type="text" readonly />
+        <input id="session-name" type="hidden" />
         <input id="comparison-car" type="hidden" />
         <input id="reference-lap-ms" type="hidden" />
         <input id="reference-sector1-ms" type="hidden" />
