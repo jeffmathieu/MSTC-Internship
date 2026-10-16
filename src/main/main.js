@@ -1192,6 +1192,37 @@ async function showReportGeneratedMessage(result = {}, automatic = false) {
   });
 }
 
+// Excel workbook of the whole session: green-flag laps, all laps, drivers, stints,
+// pit stops with notes, the whole field and charts, from the data in memory.
+function buildExportWorkbook(settings) {
+  const followed = normalizeFollowedCars(settings);
+  return buildSessionWorkbook({
+    sessionName: collectorState.session?.sessionName || '',
+    mode: settings.sessionMode,
+    trackCondition: settings.trackCondition,
+    timingUrl: collectorState.url || '',
+    followedCars: followed,
+    history: collectorState.lapHistory || [],
+    fieldCars: collectorState.analyticsSummary?.cars || [],
+    stintStateCars: collectorState.stintState?.cars || {},
+    pitEventsByCar: Object.fromEntries(followed.map((car) => [car, serviceStates.get(car)?.events || []])),
+    pitNotesByCar: pitNotesStore
+  });
+}
+
+// At the end of a session the workbook is saved in the main session folder
+// (RACE_DATA.xlsx, PRACTICE_DATA.xlsx, ...) and replaced if the session ends again.
+function writeFinalWorkbook(settings) {
+  try {
+    const file = path.join(ensureStorage(settings), `${normalizeMode(settings.sessionMode).toUpperCase()}_DATA.xlsx`);
+    atomicWriteFile(fs, file, buildExportWorkbook(settings));
+    return file;
+  } catch (error) {
+    addError(error, 'final-xlsx');
+    return '';
+  }
+}
+
 async function finalizeCurrentSession({ automatic = false } = {}) {
   stopCollector(true);
   await activePoll;
@@ -1224,6 +1255,7 @@ async function finalizeCurrentSession({ automatic = false } = {}) {
   const stintState = await writeStintStateAndReports(settings, context, collectorState.rows || [], { sessionFinished: true, finishedAt });
   collectorState.stintState = stintState;
   stopCollector(true);
+  writeFinalWorkbook(settings);
   await runBackup('session-ended');
   collectorState.status = 'finished';
   collectorState.message = automatic
@@ -1775,6 +1807,7 @@ async function pollLivePage() {
       snapshots: [{ at: new Date().toISOString(), checksum: hashObject(analysisRows), rowCount: analysisRows.length, newLapCount }, ...collectorState.snapshots].slice(0, 20)
     };
     if (shouldFinalizeAutomatically) {
+      writeFinalWorkbook(settings);
       try {
         await showReportGeneratedMessage(stintState || {}, true);
       } catch (error) {
@@ -2079,19 +2112,7 @@ handleTrusted('export:current', async () => {
   let xlsxPath = '';
   let xlsxError = '';
   try {
-    const followed = normalizeFollowedCars(settings);
-    const workbook = buildSessionWorkbook({
-      sessionName: collectorState.session?.sessionName || '',
-      mode: settings.sessionMode,
-      trackCondition: settings.trackCondition,
-      timingUrl: collectorState.url || '',
-      followedCars: followed,
-      history: collectorState.lapHistory || [],
-      fieldCars: collectorState.analyticsSummary?.cars || [],
-      stintStateCars: collectorState.stintState?.cars || {},
-      pitEventsByCar: Object.fromEntries(followed.map((car) => [car, serviceStates.get(car)?.events || []])),
-      pitNotesByCar: pitNotesStore
-    });
+    const workbook = buildExportWorkbook(settings);
     xlsxPath = path.join(folder, `session_${timestamp}.xlsx`);
     await fs.promises.writeFile(xlsxPath, workbook);
   } catch (error) {
