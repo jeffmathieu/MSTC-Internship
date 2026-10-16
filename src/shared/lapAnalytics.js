@@ -262,6 +262,12 @@ function rowShowsInPit(lap) {
   return /(?:^|\b)(?:in\s*pit|in-pit|pit|in|p|f|fuel)(?:\b|$)/i.test(pitStatusText(lap));
 }
 
+// Providers show "NotStr" for a car that has not left the grid/garage yet.
+function rowNotStarted(row) {
+  return /^nots*str(?:arted)?$/i.test(String(row?.eta || '').trim())
+    || /^nots*str(?:arted)?$/i.test(String(row?.state || '').trim());
+}
+
 function rowShowsOutlap(lap) {
   return /(?:^|\b)(?:out\s*lap|outlap)(?:\b|$)/i.test(pitStatusText(lap));
 }
@@ -798,6 +804,7 @@ return {
   pitAffectedLap,
   isOpeningRaceLap,
   rowShowsInPit,
+  rowNotStarted,
   rowShowsOutlap,
   annotatePitPhases,
   baseLapExclusionReasons,

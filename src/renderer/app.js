@@ -510,7 +510,7 @@ function renderLapStrip(state, precomputedHighlights = null, scrolling = false) 
   const laps = [...source].reverse();
   const currentStint = state?.stintState?.cars?.[carNumber]?.currentStint || null;
   setText('info-stint', currentStint
-    ? `Driver stint ${currentStint.driverStintNumber} · ${formatStintClock(currentStint.stintTimeMs)} driving / total ${formatStintClock(currentStint.totalDriverTimeMs)}${currentStint.drivingTimePaused ? ' · PIT paused' : ''}`
+    ? `Driver stint ${currentStint.driverStintNumber} · ${formatStintClock(currentStint.stintTimeMs)} driving / total ${formatStintClock(currentStint.totalDriverTimeMs)}${currentStint.notStarted ? ' · not started' : currentStint.drivingTimePaused ? ' · PIT paused' : ''}`
     : 'Waiting for stint data');
   setText('info-car-stint', currentStint ? `Car stint ${currentStint.stintNumber}` : '—');
   if (!list._scrollWired) {

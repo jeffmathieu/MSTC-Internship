@@ -156,4 +156,22 @@ const officiallyStartedState = buildStintState([], ['33'], '2026-06-23T12:00:05.
 });
 assert.strictEqual(officiallyStartedState.cars['33'].currentStint.stintTimeMs, 5000, 'the first stint starts at the detected official session start');
 
+// A car still showing NotStr has not left the grid: no driving time until it does.
+{
+  const { buildDrivingStintState } = require('../src/shared/stintTracker');
+  const run = (at, row, previous) => buildDrivingStintState([], ['4'], at, {
+    generatedAt: at, sessionStartedAt: '2026-06-23T12:00:00.000Z', timerRunning: true, liveRows: [row],
+    previousState: previous ? { cars: { 4: { currentStint: previous } }, generatedAt: previous.timerObservedAt } : null
+  }).cars['4'].currentStint;
+  const grid = run('2026-06-23T12:10:00.000Z', { carNumber: '4', driver: 'Max', eta: 'NotStr' });
+  assert.strictEqual(grid.stintTimeMs, 0, 'time on the grid is not driving time');
+  assert.strictEqual(grid.notStarted, true);
+  const stillGrid = run('2026-06-23T12:10:05.000Z', { carNumber: '4', driver: 'Max', eta: 'NotStr' }, grid);
+  assert.strictEqual(stillGrid.stintTimeMs, 0);
+  const left = run('2026-06-23T12:10:30.000Z', { carNumber: '4', driver: 'Max', eta: '01:20' }, stillGrid);
+  assert.strictEqual(left.notStarted, false);
+  assert.strictEqual(run('2026-06-23T12:11:30.000Z', { carNumber: '4', driver: 'Max', eta: '01:10' }, left).stintTimeMs, 60000,
+    'driving time counts from the moment the car leaves the grid');
+}
+
 console.log('Stint tracker tests passed.');
