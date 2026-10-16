@@ -382,12 +382,16 @@ function buildCanonicalReportPayload({
     const notes = notesForStop(stop, pitNotes);
     return notes ? { ...stop, notes } : stop;
   });
-  const pitStops = reportPolicy.includePitstops
-    ? withNotes(enrichPitStops([...legacyStops.filter((stop) => !representedCounts.has(stop.stopNumber)
-      && !recordedStops.some((event) => event.lapNumber === stop.lapNumber)), ...recordedStops]
-      .sort((a, b) => a.stopNumber != null && b.stopNumber != null
-        ? a.stopNumber - b.stopNumber : (a.lapNumber ?? Infinity) - (b.lapNumber ?? Infinity)), expectedPitDurationMs))
-    : [];
+  const stopsFrom = (events) => withNotes(enrichPitStops([...legacyStops.filter((stop) => !representedCounts.has(stop.stopNumber)
+    && !events.some((event) => event.lapNumber === stop.lapNumber)), ...events]
+    .sort((a, b) => a.stopNumber != null && b.stopNumber != null
+      ? a.stopNumber - b.stopNumber : (a.lapNumber ?? Infinity) - (b.lapNumber ?? Infinity)), expectedPitDurationMs));
+  const pitStops = reportPolicy.includePitstops ? stopsFrom(recordedStops) : [];
+  // Practice and qualifying reports have no pit analysis, but the stops (and the
+  // engineer's notes for them) still belong in the debrief and the stint pages.
+  // A stop that is still in progress is kept when it already has notes.
+  const sessionStops = reportPolicy.includePitstops ? pitStops
+    : stopsFrom(pitEvents.filter((stop) => String(stop.carNumber) === followedCar && (stop.closed || notesForStop(stop, pitNotes))));
   const pitAnalysis = pitstopAnalysis(pitStops);
   const legacy = stints[0] ? buildStintReportPayload(stints[0], session, gapSamples) : null;
   return {
@@ -419,6 +423,7 @@ function buildCanonicalReportPayload({
       drivers: driverStats,
       pitStops,
       pitAnalysis,
+      ...(reportPolicy.includePitstops ? {} : { sessionPitStops: sessionStops, sessionPitAnalysis: pitstopAnalysis(sessionStops) }),
       totalPitTimeMs: pitStops.length && pitStops.every((stop) => Number.isFinite(stop.durationMs))
         ? pitStops.reduce((total, stop) => total + stop.durationMs, 0)
         : null,
@@ -440,7 +445,9 @@ function buildCanonicalReportPayload({
       raceLaps.some((lap) => lap.lapNumberSource === 'observed-sequence') ? 'Observed lap numbers count recorded passages, not official race laps; missed feed updates cannot be reconstructed.' : '',
       pitStops.some((stop) => stop.durationSource === 'observed') ? 'Observed stop timers use feed transitions at polling resolution, not official timing loops.' : ''
     ].filter(Boolean),
-    stints: stints.map((stint) => canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes, pitStops)),
+    stints: stints.map((stint) => canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes,
+      // Practice/qualifying stints only show a stop when it carries the engineer's notes.
+      reportPolicy.includePitstops ? pitStops : sessionStops.filter((stop) => stop.notes))),
     // Keep the first automatic-report schema available to existing readers.
     session: legacy?.session || null,
     stint: legacy?.stint || null,

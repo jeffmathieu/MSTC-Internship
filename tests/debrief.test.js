@@ -43,4 +43,25 @@ assert.ok(html.includes('Debrief &lt;Test&gt; &amp; Co') && !html.includes('<Tes
 const empty = buildDebriefHtml(buildDebriefModel({ payload: { reportMode: 'practice', race: { carNumber: '33' }, raceSummary: {} }, history: [], stints: [] }));
 assert.ok(empty.includes('PRACTICE DEBRIEF') && empty.includes('No completed stints yet'), 'an empty session still produces a valid page');
 
+// Practice sessions have no pit analysis, but stops with notes must still reach the PDFs.
+{
+  const { buildCanonicalReportPayload } = require('../src/main/stintReports');
+  const practiceEvents = [
+    { id: '33|p1', carNumber: '33', stopNumber: null, entryAt: '2026-06-23T12:20:00.000Z', exitAt: '2026-06-23T12:23:00.000Z', lapNumber: 20,
+      driverBefore: 'Driver 1', driverAfter: 'Driver 1', durationMs: 170000, totalDurationMs: 170000, closed: true },
+    { id: '33|p2', carNumber: '33', stopNumber: null, entryAt: '2026-06-23T12:40:00.000Z', exitAt: null, lapNumber: 35,
+      driverBefore: 'Driver 1', driverAfter: '', closed: false }
+  ];
+  const practiceNotes = { '33|p1': { fuelAdded: true, tyresChanged: true, tyreSet: 'Set 5', driverNotes: 'Fast but can improve', pitNotes: 'Calm stop' },
+    '33|p2': { fuelAdded: false, tyresChanged: false, tyreSet: '', driverNotes: 'Still in the pits', pitNotes: '' } };
+  const practicePayload = buildCanonicalReportPayload({ stints, session: { sessionName: 'Free Practice 2' }, history, carNumber: '33', sessionMode: 'practice',
+    pitEvents: practiceEvents, pitNotes: practiceNotes });
+  assert.deepStrictEqual(practicePayload.raceSummary.pitStops, [], 'practice keeps its report without pit analysis');
+  assert.strictEqual(practicePayload.raceSummary.sessionPitStops.length, 2, 'stops with notes are kept, even one still in progress');
+  assert.strictEqual(practicePayload.raceSummary.sessionPitStops[0].notes.tyreSet, 'Set 5');
+  const practiceHtml = buildDebriefHtml(buildDebriefModel({ payload: practicePayload, history, stints, pitNotes: practiceNotes }));
+  assert.ok(practiceHtml.includes('Set 5') && practiceHtml.includes('Calm stop') && practiceHtml.includes('Still in the pits'), 'the practice debrief lists the stops with their notes');
+  assert.ok(!practiceHtml.includes('No pit stops recorded'));
+}
+
 console.log('Debrief tests passed.');

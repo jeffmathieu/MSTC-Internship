@@ -24,8 +24,8 @@ function buildDebriefModel({ payload, history = [], stints = [], pitNotes = {} }
   const paceLaps = laps.filter((lap) => lapAnalytics.lapPaceEligible(lap) && finite(Number(lap.lapTimeMs)));
   const fastest = overview.totals.fastestLap;
   const fastestLap = fastest ? paceLaps.find((lap) => Number(lap.lapTimeMs) === fastest.ms && lap.driverName === fastest.driverName) : null;
-  const pitStops = (summary.pitStops || []).map((stop) => ({ ...stop, notes: stop.notes || notesForStop(stop, pitNotes) }));
-  const analysis = summary.pitAnalysis || {};
+  const pitStops = (summary.pitStops?.length ? summary.pitStops : summary.sessionPitStops || []).map((stop) => ({ ...stop, notes: stop.notes || notesForStop(stop, pitNotes) }));
+  const analysis = summary.pitStops?.length ? summary.pitAnalysis || {} : summary.sessionPitAnalysis || summary.pitAnalysis || {};
   const control = summary.raceControl || {};
   const consistent = overview.drivers.filter((d) => d.paceLapCount >= 5 && finite(d.consistencyMs))
     .sort((a, b) => a.consistencyMs - b.consistencyMs)[0] || null;
