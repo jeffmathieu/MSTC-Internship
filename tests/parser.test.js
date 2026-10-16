@@ -259,6 +259,15 @@ const rejectedHistoryTitle = parseSessionInfo({
 });
 assert.notStrictEqual(rejectedHistoryTitle.sessionName, 'Leader history From lap 1 to lap 12');
 
+// The heading container also holds the connection badge, flag banner and timer.
+const chromeBody = 'LIVE Green flag To go: 10:10 EuroNASCAR V8GP - Free Practice 1 Show class All Highlight nr POS NR';
+for (const sessionName of ['LIVE Green flag To go: 10:10 EuroNASCAR V8GP - Free Practice 1', 'Green To go: 10:10 EuroNASCAR V8GP - Free Practice 1', '']) {
+  const info = parseSessionInfo({ bodyText: chromeBody, location: 'https://livetiming.getraceresults.com/', sessionFields: { sessionName } });
+  assert.strictEqual(info.sessionName, 'EuroNASCAR V8GP - Free Practice 1', 'page chrome is not part of the session name');
+  assert.strictEqual(info.timeToGo, '10:10');
+}
+assert.strictEqual(parseSessionInfo({ bodyText: 'x', sessionFields: { sessionName: 'Green Hell Race - Practice' } }).sessionName, 'Green Hell Race - Practice');
+
 const oneClassRows = applySingleClassFallback([
   { position: 1, carNumber: '555', className: '' },
   { position: 2, carNumber: '540', className: '' }
