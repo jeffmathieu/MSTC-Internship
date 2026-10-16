@@ -326,6 +326,9 @@ function annotatePitPhases(laps) {
       isPitLap = true;
       state.nextIsOutlap = false;
     }
+    // A lap already stored as the outlap (read from the timing snapshot taken
+    // during the lap) uses up the pending outlap: the lap after it is a normal lap.
+    if (lapPhase === 'outlap') state.nextIsOutlap = false;
     if (!driverChangedAtPit && explicitlyInPit) {
       lapPhase = 'inlap';
       isPitLap = true;
