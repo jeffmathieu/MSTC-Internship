@@ -51,7 +51,11 @@ server.listen(0, '127.0.0.1', async () => {
     await app.whenReady();
     await waitFor(dashboard, `document.getElementById('timing-url')?.value.startsWith('http://127.0.0.1:') && document.getElementById('info-car')?.textContent === '33'`);
     dashboard.hide();
-    await dashboard.webContents.executeJavaScript(`document.getElementById('start').click()`);
+    // Start and Stop share one button: a failed start leaves it on "Start".
+    const validUrl = await dashboard.webContents.executeJavaScript(`document.getElementById('timing-url').value`);
+    await dashboard.webContents.executeJavaScript(`document.getElementById('timing-url').value = 'file:///invalid'; document.getElementById('start').click()`);
+    await waitFor(dashboard, `document.getElementById('collector-message').textContent.startsWith('Could not start collection:') && !document.getElementById('start').disabled`);
+    await dashboard.webContents.executeJavaScript(`document.getElementById('timing-url').value = ${JSON.stringify(validUrl)}; document.getElementById('start').click()`);
     await waitFor(dashboard, `(await window.liveTiming.getCollectorState()).status === 'collecting'`);
     const collected = await dashboard.webContents.executeJavaScript('window.liveTiming.getCollectorState()');
     assert.strictEqual(collected.rows.length, 1);
@@ -61,7 +65,7 @@ server.listen(0, '127.0.0.1', async () => {
 
     // A visible inactive-session message must still stop stale timing ingestion.
     inactive = true;
-    await dashboard.webContents.executeJavaScript(`document.getElementById('start').click()`);
+    await dashboard.webContents.executeJavaScript(`window.liveTiming.startCollector(document.getElementById('timing-url').value)`);
     await waitFor(dashboard, `(await window.liveTiming.getCollectorState()).status === 'waiting' && !document.getElementById('start').disabled`);
     const waiting = await dashboard.webContents.executeJavaScript(`({
       green: document.getElementById('collector-health').classList.contains('is-ok'),
@@ -70,8 +74,7 @@ server.listen(0, '127.0.0.1', async () => {
     })`);
     assert.deepStrictEqual(waiting, { green: false, hidden: false, message: 'No active heat' });
 
-    await dashboard.webContents.executeJavaScript(`document.getElementById('timing-url').value = 'file:///invalid'; document.getElementById('start').click()`);
-    await waitFor(dashboard, `document.getElementById('collector-message').textContent.startsWith('Could not start collection:') && !document.getElementById('start').disabled`);
+    assert.strictEqual(await dashboard.webContents.executeJavaScript(`document.getElementById('start').textContent`), 'Stop', 'the single button offers Stop while a session runs');
     assert.deepStrictEqual(errors, []);
     console.log(JSON.stringify({ folder, collectedRows: collected.rows.length, storedLaps: collected.lapHistory.length,
       greenAfterStart: true, visibleWaitingMessage: waiting.message, startErrorHandled: true, errors }, null, 2));
