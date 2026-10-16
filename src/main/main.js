@@ -74,6 +74,7 @@ const { haltCollectorForCompletion } = require('./collectorCompletion');
 const { printHtmlToPdf } = require('./stintReports');
 const { createReportQueue } = require('./reportQueue');
 const { BACKUP_INTERVAL_MS, createSessionBackup } = require('./sessionBackup');
+const { buildSessionWorkbook } = require('./export/sessionWorkbook');
 const { secureContents, localPageAllowed, remoteNavigationAllowed, trustedSender } = require('./windowSecurity');
 const { nextRaceControlEvent } = require('../shared/raceControl');
 // Fuel estimation is parked for a later release; observed service timers stay active.
@@ -2048,7 +2049,32 @@ handleTrusted('export:current', async () => {
       addError(error, 'export-pdf');
     }
   }
-  return { jsonPath, csvPath, historyPath, pdfPaths, pdfError };
+  // Excel workbook: green-flag laps, all laps, drivers, stints, pit stops with
+  // notes, the whole field and charts. Built from the data already in memory.
+  let xlsxPath = '';
+  let xlsxError = '';
+  try {
+    const followed = normalizeFollowedCars(settings);
+    const workbook = buildSessionWorkbook({
+      sessionName: collectorState.session?.sessionName || '',
+      mode: settings.sessionMode,
+      trackCondition: settings.trackCondition,
+      timingUrl: collectorState.url || '',
+      followedCars: followed,
+      history: collectorState.lapHistory || [],
+      fieldCars: collectorState.analyticsSummary?.cars || [],
+      stintStateCars: collectorState.stintState?.cars || {},
+      pitEventsByCar: Object.fromEntries(followed.map((car) => [car, serviceStates.get(car)?.events || []])),
+      pitNotesByCar: pitNotesStore
+    });
+    xlsxPath = path.join(folder, `session_${timestamp}.xlsx`);
+    await fs.promises.writeFile(xlsxPath, workbook);
+  } catch (error) {
+    xlsxPath = '';
+    xlsxError = error?.message || String(error);
+    addError(error, 'export-xlsx');
+  }
+  return { jsonPath, csvPath, historyPath, xlsxPath, xlsxError, pdfPaths, pdfError };
 });
 
 // Electron app startup. Shutdown behavior is registered through appLifecycle

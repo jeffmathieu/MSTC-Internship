@@ -1795,7 +1795,8 @@ async function init() {
       const pdfNote = pdfs.length ? '\n\nThese PDFs are replaced by the final reports when the session ends.'
         : result.pdfError ? `\n\nPDF report failed: ${result.pdfError}`
           : '\n\nNo PDF yet: it needs at least one completed lap.';
-      alert(`Exported:\n${[result.csvPath, result.jsonPath, result.historyPath, ...pdfs].filter(Boolean).join('\n')}${pdfNote}`);
+      const xlsxNote = result.xlsxError ? `\n\nExcel export failed: ${result.xlsxError}` : '';
+      alert(`Exported:\n${[result.xlsxPath, result.csvPath, result.jsonPath, result.historyPath, ...pdfs].filter(Boolean).join('\n')}${pdfNote}${xlsxNote}`);
     } catch (error) {
       alert(`Export failed: ${error?.message || error}`);
     } finally {
