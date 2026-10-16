@@ -72,6 +72,7 @@ const { setupAppLifecycle } = require('./appLifecycle');
 const { haltCollectorForCompletion } = require('./collectorCompletion');
 const { printHtmlToPdf } = require('./stintReports');
 const { createReportQueue } = require('./reportQueue');
+const { BACKUP_INTERVAL_MS, createSessionBackup } = require('./sessionBackup');
 const { secureContents, localPageAllowed, remoteNavigationAllowed, trustedSender } = require('./windowSecurity');
 const { nextRaceControlEvent } = require('../shared/raceControl');
 // Fuel estimation is parked for a later release; observed service timers stay active.
@@ -91,6 +92,8 @@ const additionalDashboardWindows = new Map();
 const graphWindowsByCar = new Map();
 const driverWindowsByCar = new Map();
 let pollTimer;
+let backupTimer = null;
+let backupInFlight = null;
 let pollInFlight = false;
 let activePoll = Promise.resolve();
 let finishPoll = null;
@@ -120,7 +123,8 @@ const appLifecycle = setupAppLifecycle({
     shouldCloseLiveWindow = true;
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = null;
-    return (async () => { await activePoll; await snapshotWriter.flush(); await reportQueue.flush(); })();
+    stopBackupTimer();
+    return (async () => { await activePoll; await snapshotWriter.flush(); await reportQueue.flush(); await backupInFlight; })();
   },
   onError: (error) => addError(error, 'shutdown')
 });
@@ -458,6 +462,31 @@ function createLiveWindow() {
     shouldCloseLiveWindow = false;
   });
   return liveWindow;
+}
+
+// Copies the irreplaceable session files every 30 minutes (and at the end of a
+// session). Only a handful of small files are copied, asynchronously, so this
+// costs next to nothing next to the 5-second poll.
+function runBackup(reason) {
+  if (backupInFlight) return backupInFlight;
+  const sessionFolder = collectorState.storageSessionFolder;
+  if (!sessionFolder) return Promise.resolve(null);
+  backupInFlight = snapshotWriter.flush()
+    .then(() => createSessionBackup({ sessionFolder }))
+    .then((result) => { if (result) collectorState.lastBackupAt = result.createdAt; return result; })
+    .catch((error) => { addError(error, `backup-${reason}`); return null; })
+    .finally(() => { backupInFlight = null; });
+  return backupInFlight;
+}
+
+function stopBackupTimer() {
+  if (backupTimer) clearInterval(backupTimer);
+  backupTimer = null;
+}
+
+function startBackupTimer() {
+  stopBackupTimer();
+  backupTimer = setInterval(() => runBackup('interval'), BACKUP_INTERVAL_MS);
 }
 
 // Pushes the latest collector state to the renderer. Add new state fields to
@@ -1165,6 +1194,7 @@ async function finalizeCurrentSession({ automatic = false } = {}) {
   const stintState = await writeStintStateAndReports(settings, context, collectorState.rows || [], { sessionFinished: true, finishedAt });
   collectorState.stintState = stintState;
   stopCollector(true);
+  await runBackup('session-ended');
   collectorState.status = 'finished';
   collectorState.message = automatic
     ? 'Session completion detected; final reports generated.'
@@ -1641,6 +1671,7 @@ async function pollLivePage() {
         clearPolling: () => {
           if (pollTimer) clearInterval(pollTimer);
           pollTimer = null;
+          stopBackupTimer();
         },
         closeLiveSource: () => {
           if (liveWindow && !liveWindow.isDestroyed()) {
@@ -1659,6 +1690,7 @@ async function pollLivePage() {
         publishState: broadcastState
       });
       haltErrors.forEach(({ name, error }) => addError(error, `automaticCompletion:${name}`));
+      runBackup('session-finished');
     }
     collectorState.sessionTiming = updateSessionTiming(
       collectorState.sessionTiming,
@@ -1739,7 +1771,8 @@ function storageInfo(settings) {
     gapStateJson: path.join(data, 'gap_state.json'),
     gapHistoryJsonl: path.join(data, 'gap_history.jsonl'),
     stintStateJson: path.join(data, 'stint_state.json'),
-    stintsFolder: path.join(folder, 'stints')
+    stintsFolder: path.join(folder, 'stints'),
+    backupsFolder: path.join(folder, 'backups')
   };
 }
 
@@ -1766,7 +1799,7 @@ async function startCollector(url) {
   automaticCompletionHandled = false;
   providerFreshness = {};
   gapMemoryState = null;
-  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, lapPrediction: null, lapPredictionsByCar: {}, pitstopPlan: null, pitstopPlansByCar: {}, gapMemory: null, stintState: null, sessionTiming: null, finishCountdown: null, storageSessionFolder, sessionNameSetting: settings.sessionName || '', pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
+  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, lapPrediction: null, lapPredictionsByCar: {}, pitstopPlan: null, pitstopPlansByCar: {}, gapMemory: null, stintState: null, sessionTiming: null, finishCountdown: null, storageSessionFolder, lastBackupAt: null, sessionNameSetting: settings.sessionName || '', pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
   collectorState = { ...collectorState, lapHistory: loadExistingHistory(settings), storage: storageInfo(settings) };
   collectorState.sessionTiming = updateSessionTiming(null, {}, collectorState.lapHistory, startedAt);
   collectorState.stintState = buildStintState(collectorState.lapHistory, normalizeFollowedCars(settings), startedAt, {
@@ -1785,6 +1818,7 @@ async function startCollector(url) {
     await pollLivePage();
     if (collectorState.status !== 'finished') {
       pollTimer = setInterval(pollLivePage, Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS));
+      startBackupTimer();
     }
   } catch (error) { collectorState.status = 'error'; collectorState.message = 'Failed to start live collector.'; addError(error, 'startCollector'); broadcastState(); }
 }
@@ -1795,6 +1829,7 @@ async function startCollector(url) {
 function stopCollector(closeLiveWindow = true) {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = null;
+  stopBackupTimer();
   if (closeLiveWindow && liveWindow && !liveWindow.isDestroyed()) {
     shouldCloseLiveWindow = true;
     liveWindow.close();
