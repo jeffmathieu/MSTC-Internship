@@ -22,6 +22,32 @@ const payload = {
   ] }], caveats: ['Timing notes from <stored data>.'], referenceTimes: { lapMs: 125000 }
 };
 const html = buildCanonicalFallbackHtml(payload, true);
+
+// Stops during a stint carry the engineer's notes: one panel next to the lap chart
+// (old reports without notes are unchanged), a continuation page when they do not fit.
+const stintWith = (stops, extra = {}) => ({ ...payload, stints: [{ ...payload.stints[0], pitStopsDuring: stops, ...extra }] });
+const noteStop = (n, lap, notes) => ({ id: `s${n}`, stopNumber: n, lapNumber: lap, durationMs: 65000, closed: true, notes });
+const pageCount = (html) => (html.match(/class="report-page"/g) || []).length;
+
+const singleStop = buildCanonicalFallbackHtml(stintWith([noteStop(2, 20, { fuelAdded: true, tyresChanged: false, tyreSet: 'Set <4>',
+  driverNotes: 'Car pushes in slow corners', pitNotes: 'Clean stop' })]), false);
+assert.ok(singleStop.toUpperCase().includes('PIT STOP NOTES') && singleStop.includes('Stop 2') && singleStop.includes('Set &lt;4&gt;'), 'notes panel is drawn and escaped');
+assert.ok(singleStop.includes('Driver notes: Car pushes in slow corners'));
+assert.strictEqual(pageCount(singleStop), 1, 'short notes fit the stint page');
+
+const longText = 'The car understeers on corner entry and the front tyres drop off after twenty laps. '.repeat(6);
+const threeStops = buildCanonicalFallbackHtml(stintWith([1, 2, 3].map((n) => noteStop(n, n * 15, { fuelAdded: true, tyresChanged: n === 2, tyreSet: `Set ${n}`,
+  driverNotes: longText, pitNotes: `Remark ${n}: ${longText}` }))), false);
+assert.ok(pageCount(threeStops) >= 2, 'long notes of several stops continue on an extra page');
+['Stop 1', 'Stop 2', 'Stop 3', 'Set 3', 'Remark 3'].forEach((text) => assert.ok(threeStops.includes(text), `${text} is printed`));
+assert.ok(threeStops.toUpperCase().includes('PIT STOP NOTES (CONTINUED)') || threeStops.toUpperCase().includes('FULL NOTES ON THE NEXT PAGE'), 'the panel points to the full notes');
+const printedWords = (threeStops.match(/the front tyres drop off/g) || []).length;
+assert.ok(printedWords >= 6, 'the full text of every note is printed on the continuation page');
+
+const unnoted = buildCanonicalFallbackHtml(stintWith([noteStop(1, 10, null)]), false);
+assert.ok(!unnoted.toUpperCase().includes('PIT STOP NOTES'), 'stops without any notes add no panel');
+assert.ok(buildCanonicalFallbackHtml(stintWith([], { preliminary: true }), false).includes('PRELIMINARY: stint in progress'), 'running stints are marked preliminary');
+assert.ok(!buildCanonicalFallbackHtml(payload, false).toUpperCase().includes('NOTES'), 'stints without stop data keep the original layout');
 const pages = [...html.matchAll(/<section class="report-page">([\s\S]*?)<\/section>/g)].map((match) => match[1]);
 assert.strictEqual(pages.length, 7, 'race summaries contain overview, two pit pages, one stint, team graphs and two class pages');
 assert.ok(pages[0].includes('FULL RACE OVERVIEW') && pages[0].includes('FULL-SESSION PACE STATISTICS'));
@@ -33,10 +59,10 @@ assert.ok(pages[1].includes('PIC 6'), 'pitstop rejoin classification is preserve
 assert.ok(pages[3].includes('TEAM AND CLASS COMPARISON') && pages[3].includes('STINT ENGINEERING INSIGHTS'));
 assert.ok(pages[3].includes('FAST 2:04.000') && !pages[3].includes('3:20.000'), 'the charts exclude neutralized pace samples');
 assert.ok(html.includes('&lt;Race &amp; summary&gt;'), 'feed text is escaped in SVG and HTML');
-assert.ok(!html.includes('DATA QUALITY AND TIMING NOTES') && !html.includes('&lt;stored data&gt;'), 'race summaries omit the timing-notes page');
+assert.ok(!html.includes('DATA QUALITY AND TIMING NOTES') && !html.includes('&lt;stored data&gt;'), 'reports never include the timing-notes page');
 assert.match(html, /@page \{ size: A4 landscape; margin: 0; \}/);
-assert.strictEqual((buildCanonicalFallbackHtml(payload, false).match(/class="report-page"/g) || []).length, 2, 'single-stint exports keep their original one-page analysis and timing notes');
-assert.ok(buildCanonicalFallbackHtml({ ...payload, reportMode: 'practice' }, true).includes('DATA QUALITY AND TIMING NOTES'), 'practice summaries retain their timing notes');
+assert.strictEqual((buildCanonicalFallbackHtml(payload, false).match(/class="report-page"/g) || []).length, 1, 'single-stint exports are one analysis page without a timing-notes page');
+assert.ok(!buildCanonicalFallbackHtml({ ...payload, reportMode: 'practice' }, true).includes('DATA QUALITY AND TIMING NOTES'), 'no report mode creates the timing-notes page');
 
 module.exports = (async () => {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'mstc-portable-report-test-'));

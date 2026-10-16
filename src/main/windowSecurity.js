@@ -5,7 +5,7 @@ function localPageAllowed(url, rendererFolder) {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== 'file:') return false;
-    return ['index.html', 'graphs.html'].some((name) => fileURLToPath(parsed) === path.join(rendererFolder, name));
+    return ['index.html', 'graphs.html', 'drivers.html'].some((name) => fileURLToPath(parsed) === path.join(rendererFolder, name));
   } catch { return false; }
 }
 

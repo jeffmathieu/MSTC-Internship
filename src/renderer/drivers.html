@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Driver overview</title>
+    <link rel="stylesheet" href="drivers.css" />
+  </head>
+  <body>
+    <main class="drivers-page">
+      <header class="page-head">
+        <div>
+          <h1 id="title">Driver overview</h1>
+          <p id="subtitle">Waiting for timing data</p>
+        </div>
+        <div class="head-chips">
+          <span class="chip" id="current-driver">No driver yet</span>
+          <span class="chip muted" id="condition">Pace view: full</span>
+        </div>
+      </header>
+
+      <section class="kpis" id="kpis" aria-label="Summary"></section>
+
+      <section class="panel" aria-label="Driving time share">
+        <h2>Driving time share</h2>
+        <div class="share-bar" id="share-bar"></div>
+        <div class="share-legend" id="share-legend"></div>
+      </section>
+
+      <section class="panel grow" aria-label="Drivers">
+        <h2>Drivers <small>net driving time excludes pit time; green marks the best value in each column</small></h2>
+        <div class="table-wrap"><table id="driver-table"><thead></thead><tbody></tbody></table></div>
+      </section>
+
+      <section class="panel grow" aria-label="Stints">
+        <h2>Stints <small>every driver stint of this car, in order</small></h2>
+        <div class="table-wrap"><table id="stint-table"><thead></thead><tbody></tbody></table></div>
+      </section>
+    </main>
+    <script src="drivers.js"></script>
+  </body>
+</html>

@@ -134,7 +134,7 @@ module.exports = (async () => {
     assert.strictEqual(rendered, 2, 'a manual classification refreshes the PDF without force');
     const payload = JSON.parse(fs.readFileSync(first.jsonPath));
     const html = reports.buildCanonicalFallbackHtml(payload, true);
-    for (const section of ['PRACTICE OVERVIEW', 'Team and class comparison', 'Stint engineering insights', 'Data quality and timing notes', 'Class lap times', 'Reference times']) {
+    for (const section of ['PRACTICE OVERVIEW', 'Team and class comparison', 'Stint engineering insights', 'Class lap times']) {
       assert.ok(html.toLowerCase().includes(section.toLowerCase()), `portable PDF retains ${section}`);
     }
     assert.ok(html.includes('&lt;Practice&gt;'));

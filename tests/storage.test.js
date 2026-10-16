@@ -261,4 +261,13 @@ assert.strictEqual(detectSourceProvider({ timingUrl: 'https://example.com/RISTim
 assert.strictEqual(detectSourceProvider({ timingUrl: 'https://example.com/RIS TIMING/live' }), 'ris-timing');
 assert.strictEqual(detectSourceProvider({}), 'unknown');
 
+// ETA shows "OutLap" during the lap but a countdown once the line is crossed;
+// the snapshot taken during the lap decides that the completed lap is the outlap.
+const outlapDuringLap = { carNumber: '4', eta: 'OutLap', sector1: '30.100' };
+const outlapAtLine = { carNumber: '4', eta: '01:22', lastLap: '1:50.596', lapNumber: '1' };
+const completedOutlap = completedLapRowFromLiveRow(outlapAtLine, outlapDuringLap);
+assert.strictEqual(completedOutlap.lapPhase, 'outlap');
+assert.strictEqual(completedOutlap.paceEligible, 'false');
+assert.strictEqual(completedLapRowFromLiveRow(outlapAtLine, { carNumber: '4', eta: '01:25' }).lapPhase, undefined, 'ordinary laps stay normal');
+
 console.log('Storage schema tests passed.');

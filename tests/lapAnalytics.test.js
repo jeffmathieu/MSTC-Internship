@@ -402,6 +402,19 @@ assert.strictEqual(etaPitSequence[2].lapPhase, 'outlap', 'the first completed la
 assert.deepStrictEqual(baseLapExclusionReasons(etaPitSequence[1]), ['pit-in']);
 assert.deepStrictEqual(baseLapExclusionReasons(etaPitSequence[2]), ['pit-out']);
 
+// An outlap that is already stored as such (OutLap seen on the timing page
+// during the lap) must not turn the following lap into a second outlap.
+const storedOutlapSequence = annotatePitPhases([
+  normalizeLap({ carNumber: 27, lapNumber: 15, lapTimeMs: 94510, eta: '01:29' }),
+  normalizeLap({ carNumber: 27, lapNumber: 16, lapTimeMs: 99158, eta: 'In Pit' }),
+  normalizeLap({ carNumber: 27, lapNumber: 17, lapTimeMs: 299991, eta: '01:28', lapPhase: 'outlap', isPitLap: true }),
+  normalizeLap({ carNumber: 27, lapNumber: 18, lapTimeMs: 100338, eta: '01:29' }),
+  normalizeLap({ carNumber: 27, lapNumber: 19, lapTimeMs: 91009, eta: '01:29' })
+]);
+assert.deepStrictEqual(storedOutlapSequence.map((lap) => lap.lapPhase), ['', 'inlap', 'outlap', '', ''],
+  'two flagged laps per stop: the lap after the outlap is a normal lap');
+assert.strictEqual(lapPaceEligible(storedOutlapSequence[3]), true, 'the lap after the outlap counts for pace again');
+
 const driverChangePitSequence = annotatePitPhases([
   normalizeLap({ carNumber: 12, driverName: 'Alessandro Bressan', lapNumber: 55, lapTimeMs: 126375, pitInfo: '2', state: 'RUN' }),
   normalizeLap({ carNumber: 12, driverName: 'Alessandro Bressan', lapNumber: 56, lapTimeMs: 126398, pitInfo: '2', state: 'RUN' }),

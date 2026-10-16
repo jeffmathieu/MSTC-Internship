@@ -296,6 +296,14 @@ function looksLikeTimingHeaders(headers) {
 // Extracts provider-independent session metadata from the flattened page text.
 // GetRaceResults labels the countdown "To go", while current RIS Timing pages
 // use "Elapsed" and "Remaining" in their top status bar.
+// The heading's container also holds page chrome (connection badge, current flag
+// banner, "To go:" timer) in front of the real "Event - Session" title. Drop
+// those prefixes so the name stays stable while the clock and flag change.
+const SESSION_NAME_NOISE = /^(?:(?:LIVE DATA|LIVE|OFFLINE|COMPACT|FULLSCREEN|green flag|full course yellow|fcy|safety car|red flag|yellow flag|code 60|finish(?:ed)? flag|(?:green|red|yellow)(?=\s+To go:)|(?:To go|Remaining|Elapsed):\s*\d{1,2}:\d{2}(?::\d{2})?)\s+)+/i;
+function stripSessionNameNoise(value) {
+  return cleanText(value).replace(SESSION_NAME_NOISE, '');
+}
+
 function parseSessionInfo(snapshot = {}) {
   const text = cleanText(snapshot.bodyText || '');
   const fields = snapshot.sessionFields || {};
@@ -313,7 +321,8 @@ function parseSessionInfo(snapshot = {}) {
 
   if (fields.remaining) session.timeToGo = cleanText(fields.remaining);
   if (fields.elapsed) session.elapsed = cleanText(fields.elapsed);
-  if (isPlausibleSessionName(fields.sessionName)) session.sessionName = cleanText(fields.sessionName);
+  const headingName = stripSessionNameNoise(fields.sessionName);
+  if (isPlausibleSessionName(headingName)) session.sessionName = headingName;
 
   const risRemaining = text.match(/\bRemaining:\s*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)/i);
   const risElapsed = text.match(/\bElapsed:\s*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)/i);
@@ -347,7 +356,7 @@ function parseSessionInfo(snapshot = {}) {
     if (eventName && sessionType) session.sessionName = `${eventName} - ${sessionType}`;
   }
 
-  const toGo = text.match(/To go:\s*([^A-Z\n\r]+?)\s+([A-Z][A-Za-z0-9 .:&'()\-]+?\s-\s(?:Race|Qualifying|Practice|Session|Warm.?up))/i);
+  const toGo = text.match(/To go:\s*([^A-Z\n\r]+?)\s+([A-Z][A-Za-z0-9 .:&'()\-]+?\s-\s(?:Race|Qualifying|Qualification|(?:Free )?Practice|Session|Warm.?up)(?:\s+\d+)?)/i);
   if (toGo) {
     if (!session.timeToGo) session.timeToGo = cleanText(toGo[1]);
     session.sessionName = cleanText(toGo[2]);
@@ -391,7 +400,7 @@ function parseSessionInfo(snapshot = {}) {
   if (foundStatus) session.statusText = foundStatus;
 
   if (!session.sessionName) {
-    const sessionMatches = Array.from(text.matchAll(/([A-Z][A-Za-z0-9 .:&'()\-]+?\s-\s(?:Race|Qualifying|Qualification|Free Practice|Practice|Session|Warm.?up))/gi));
+    const sessionMatches = Array.from(text.matchAll(/([A-Z][A-Za-z0-9 .:&'()\-]+?\s-\s(?:Race|Qualifying|Qualification|Free Practice|Practice|Session|Warm.?up)(?:\s+\d+)?)/gi));
     const sessionMatch = sessionMatches.find((match) => isPlausibleSessionName(match[1]));
     if (sessionMatch) session.sessionName = cleanText(sessionMatch[1]);
   }
@@ -401,11 +410,26 @@ function parseSessionInfo(snapshot = {}) {
   return session;
 }
 
+// Cars without class info (mixed grids) compete together as their own class,
+// so they are compared, ranked and reported like any other class.
+const NO_CLASS_LABEL = 'No class';
+function withNoClassGroup(rows) {
+  if (rows.every((row) => cleanText(row.className))) return rows;
+  const ranked = rows.filter((row) => !cleanText(row.className))
+    .sort((a, b) => (Number(a.position) || Infinity) - (Number(b.position) || Infinity));
+  return rows.map((row) => cleanText(row.className) ? row : {
+    ...row,
+    className: NO_CLASS_LABEL,
+    classPosition: row.classPosition || ranked.indexOf(row) + 1
+  });
+}
+
 // Some single-make timing pages omit CLASS and PIC entirely because every car
 // competes together. Assign one synthetic class so all class-based comparison,
 // gap and report functions keep working without provider-specific branches.
 function applySingleClassFallback(rows = [], fallbackName = 'Overall') {
-  if (!rows.length || rows.some((row) => cleanText(row.className))) return rows;
+  if (!rows.length) return rows;
+  if (rows.some((row) => cleanText(row.className))) return withNoClassGroup(rows);
   return rows.map((row, index) => ({
     ...row,
     className: fallbackName,
@@ -426,5 +450,6 @@ module.exports = {
   parseTimingRow,
   looksLikeTimingHeaders,
   parseSessionInfo,
-  applySingleClassFallback
+  applySingleClassFallback,
+  NO_CLASS_LABEL
 };

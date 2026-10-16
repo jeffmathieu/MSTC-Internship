@@ -34,8 +34,41 @@
           <input id="setup-folder" type="text" readonly />
           <button id="setup-choose-folder" class="secondary">Choose session folder</button>
         </div>
+        <label for="setup-session-name">Session name (optional)</label>
+        <input id="setup-session-name" type="text" maxlength="120" placeholder="Empty = detected automatically when you press Start" />
+        <p class="setup-hint">Optional: this can stay empty. If empty, the name is read from the timing page when you press Start, shown here, and then stays fixed. You can also type your own name here before starting (or fix a wrong detected one) and it will be used instead.</p>
         <div class="button-row end">
           <button id="setup-save" class="primary">Save and open dashboards</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="pit-notes-modal" class="setup-modal hidden" role="dialog" aria-modal="true" aria-labelledby="pit-notes-title">
+      <div class="setup-card pit-notes-card">
+        <p class="eyebrow">Pit stop notes</p>
+        <h1 id="pit-notes-title">Pit stop notes</h1>
+        <p id="pit-notes-stop" class="subtitle">No pit stop detected yet.</p>
+        <p id="pit-notes-hint" class="setup-hint">You can keep editing and saving until the next pit stop is detected.</p>
+        <fieldset id="pit-notes-form" class="pit-notes-form">
+          <div class="pit-notes-checks">
+            <label class="check"><input id="pit-notes-fuel" type="checkbox" /><span>Fuel added</span></label>
+            <label class="check"><input id="pit-notes-tyres" type="checkbox" /><span>Tyres changed</span></label>
+          </div>
+          <label for="pit-notes-tyreset">Tyre set on the car</label>
+          <input id="pit-notes-tyreset" type="text" maxlength="80" placeholder="e.g. Set 3, new softs" />
+          <label for="pit-notes-driver">Driver notes on the stint <span id="pit-notes-driver-name" class="pit-notes-driver-name"></span></label>
+          <textarea id="pit-notes-driver" rows="4" maxlength="2000" placeholder="Feedback on the stint that just ended"></textarea>
+          <label for="pit-notes-pit">Pit stop notes</label>
+          <textarea id="pit-notes-pit" rows="4" maxlength="2000" placeholder="What happened in the pit box"></textarea>
+        </fieldset>
+        <p id="pit-notes-status" class="setup-hint" role="status"></p>
+        <details id="pit-notes-history" class="pit-notes-history hidden">
+          <summary>Earlier pit stops</summary>
+          <div id="pit-notes-history-list"></div>
+        </details>
+        <div class="button-row end">
+          <button id="pit-notes-close" class="secondary">Close</button>
+          <button id="pit-notes-save" class="primary">Save notes</button>
         </div>
       </div>
     </div>
@@ -166,11 +199,16 @@
               <path d="m7 15 4-4 3 3 5-6"></path>
             </svg>
           </button>
+          <button id="open-pit-notes" class="secondary icon-button pit-notes-button" title="Pit stop notes" aria-label="Pit stop notes">
+            <svg class="graph-icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="1.5"></rect><path d="M9 8h6M9 12h6M9 16h4"></path></svg>
+          </button>
+          <button id="open-drivers" class="secondary icon-button" title="Open driver overview" aria-label="Open driver overview">
+            <svg class="graph-icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"></circle><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"></path><path d="M16 5.2a3.2 3.2 0 0 1 0 5.6M18 14.4c1.8.8 3 2.6 3 5.6"></path></svg>
+          </button>
           <button id="export" class="secondary icon-button" title="Export current session data" aria-label="Export current session data">
             <svg class="graph-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M4 15v6h16v-6"></path></svg>
           </button>
-          <button id="start" class="primary compact-control">Start</button>
-          <button id="stop" class="secondary compact-control">Stop</button>
+          <button id="start" class="primary compact-control" title="Start live collection">Start</button>
           <button id="open-setup" class="secondary">Setup</button>
           <button id="theme-toggle" class="secondary icon-button theme-toggle" title="Switch to dark mode" aria-label="Switch to dark mode">☾</button>
         </div>
@@ -345,6 +383,7 @@
         <input id="timing-url" type="text" value="https://livetiming.getraceresults.com/demo#screen-results" />
         <input id="followed-car" type="text" value="33" />
         <input id="storage-folder" type="text" readonly />
+        <input id="session-name" type="hidden" />
         <input id="comparison-car" type="hidden" />
         <input id="reference-lap-ms" type="hidden" />
         <input id="reference-sector1-ms" type="hidden" />
