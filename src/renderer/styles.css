@@ -1233,3 +1233,34 @@ body.mode-qualifying .pit-window { display: none; }
 #collector-message[hidden] { display: none; }
 
 .setup-hint { margin: 4px 0 12px; font-size: 12px; color: var(--muted, #626a66); }
+
+/* Pit stop notes: the header button changes colour while the latest detected
+   stop has no saved notes yet. */
+.pit-notes-button { position: relative; }
+.pit-notes-button.needs-notes {
+  background: var(--yellow-status);
+  color: #1b201e;
+  border-color: #1b201e;
+  animation: pit-notes-pulse 1.6s ease-in-out infinite;
+}
+.pit-notes-button.has-notes::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1e9f67;
+}
+@keyframes pit-notes-pulse { 50% { box-shadow: 0 0 0 4px rgba(252, 238, 89, .45); } }
+.pit-notes-card { max-height: calc(100vh - 48px); overflow-y: auto; }
+.pit-notes-form { border: 0; margin: 0; padding: 0; min-width: 0; }
+.pit-notes-form:disabled { opacity: .5; }
+.pit-notes-checks { display: flex; gap: 22px; margin-top: 6px; }
+.setup-card label.check { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; font-size: 14px; text-transform: none; cursor: pointer; }
+.pit-notes-card textarea, .pit-notes-card input[type="text"] { width: 100%; font: inherit; padding: 8px 10px; border: 2px solid var(--line); background: var(--control, var(--box)); color: inherit; resize: vertical; }
+.pit-notes-history { margin-top: 10px; }
+.pit-notes-history summary { cursor: pointer; font-weight: 900; font-size: 13px; }
+.pit-notes-old { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--soft-line, var(--line)); font-size: 12.5px; white-space: pre-wrap; }
+.pit-notes-old strong { display: block; margin-bottom: 3px; }

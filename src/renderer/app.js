@@ -106,6 +106,117 @@ function syncCollectionButton(status) {
   button.title = collectionActive ? 'Stop collection and close the session' : 'Start live collection';
 }
 
+// ---- Pit stop notes -------------------------------------------------------
+// The header button turns yellow when a pit stop was detected and has no saved
+// notes yet. Notes stay editable until the next stop is detected.
+let pitNotesFormEventId = null;
+let pitNotesOpen = false;
+
+function pitNotesView(state = currentState) {
+  return state?.pitNotesByCar?.[activeCarNumber()] || null;
+}
+
+function pitNotesVisible() {
+  return pitNotesOpen;
+}
+
+function describePitStop(stop) {
+  if (!stop) return 'No pit stop detected yet.';
+  const when = stop.detectedAt ? new Date(stop.detectedAt).toLocaleTimeString() : 'time unknown';
+  const drivers = stop.driverBefore || stop.driverAfter ? ` · ${stop.driverBefore || '?'} → ${stop.driverAfter || (stop.closed ? '?' : 'still in the pits')}` : '';
+  const length = Number.isFinite(stop.durationMs) ? ` · ${Math.floor(stop.durationMs / 60000)}:${String(Math.floor((stop.durationMs % 60000) / 1000)).padStart(2, '0')} in pit` : '';
+  return `Stop ${stop.stopNumber ?? '#'} · detected ${when}${drivers}${length}${stop.closed ? '' : ' · in progress'}`;
+}
+
+function fillPitNotesForm(latest) {
+  const notes = latest?.notes || {};
+  $('pit-notes-fuel').checked = Boolean(notes.fuelAdded);
+  $('pit-notes-tyres').checked = Boolean(notes.tyresChanged);
+  $('pit-notes-tyreset').value = notes.tyreSet || '';
+  $('pit-notes-driver').value = notes.driverNotes || '';
+  $('pit-notes-pit').value = notes.pitNotes || '';
+  pitNotesFormEventId = latest?.eventId || null;
+}
+
+function renderPitNotesHistory(view) {
+  const list = $('pit-notes-history-list');
+  list.innerHTML = '';
+  const history = (view?.history || []).filter((stop) => stop.notes);
+  $('pit-notes-history').classList.toggle('hidden', !history.length);
+  history.forEach((stop) => {
+    const box = document.createElement('div');
+    box.className = 'pit-notes-old';
+    const heading = document.createElement('strong');
+    heading.textContent = describePitStop(stop);
+    const body = document.createElement('span');
+    const n = stop.notes;
+    body.textContent = [
+      `Fuel added: ${n.fuelAdded ? 'yes' : 'no'} · Tyres changed: ${n.tyresChanged ? 'yes' : 'no'}${n.tyreSet ? ` · Tyre set: ${n.tyreSet}` : ''}`,
+      n.driverNotes && `Driver notes: ${n.driverNotes}`,
+      n.pitNotes && `Pit stop notes: ${n.pitNotes}`
+    ].filter(Boolean).join('\n');
+    box.append(heading, body);
+    list.append(box);
+  });
+}
+
+function renderPitNotes(state = currentState) {
+  const button = $('open-pit-notes');
+  if (!button) return;
+  const view = pitNotesView(state);
+  const latest = view?.latest || null;
+  button.classList.toggle('needs-notes', Boolean(latest?.needsAttention));
+  button.classList.toggle('has-notes', Boolean(latest && !latest.needsAttention));
+  button.title = !latest ? 'Pit stop notes (no pit stop detected yet)'
+    : latest.needsAttention ? `Pit stop ${latest.stopNumber ?? ''} detected: fill in the notes`
+      : `Pit stop notes (stop ${latest.stopNumber ?? ''} saved)`;
+  if (!pitNotesVisible()) return;
+  $('pit-notes-title').textContent = `Pit stop notes · Car #${activeCarNumber()}`;
+  $('pit-notes-stop').textContent = describePitStop(latest);
+  $('pit-notes-form').disabled = !latest;
+  $('pit-notes-save').disabled = !latest;
+  if ((latest?.eventId || null) !== pitNotesFormEventId) {
+    // A new stop was detected while the popup was open: start a fresh form.
+    const hadForm = pitNotesFormEventId !== null;
+    fillPitNotesForm(latest);
+    $('pit-notes-status').textContent = hadForm && latest ? 'A new pit stop was detected. These notes belong to the new stop.' : '';
+  }
+  renderPitNotesHistory(view);
+}
+
+function showPitNotes(show = true) {
+  pitNotesOpen = show;
+  $('pit-notes-modal').classList.toggle('hidden', !show);
+  if (!show) return;
+  pitNotesFormEventId = undefined;
+  $('pit-notes-status').textContent = '';
+  renderPitNotes();
+}
+
+async function savePitNotes() {
+  const latest = pitNotesView()?.latest;
+  if (!latest) return;
+  const status = $('pit-notes-status');
+  try {
+    const result = await window.liveTiming.savePitNotes({
+      carNumber: activeCarNumber(),
+      eventId: latest.eventId,
+      notes: {
+        fuelAdded: $('pit-notes-fuel').checked,
+        tyresChanged: $('pit-notes-tyres').checked,
+        tyreSet: $('pit-notes-tyreset').value,
+        driverNotes: $('pit-notes-driver').value,
+        pitNotes: $('pit-notes-pit').value
+      }
+    });
+    if (result.state) currentState = result.state;
+    status.textContent = result.ok ? `Saved at ${new Date().toLocaleTimeString()}. You can keep editing until the next pit stop is detected.` : result.error;
+    renderPitNotes();
+  } catch (error) {
+    status.textContent = `Could not save: ${error.message}`;
+  }
+}
+
 // Displays missing table values consistently.
 function rowValue(value) { return value === null || value === undefined || value === '' ? '—' : value; }
 
@@ -1367,6 +1478,7 @@ function render(state) {
   syncConditionControlTitles();
   setStatus(currentState.status, currentState.message);
   syncCollectionButton(currentState.status);
+  renderPitNotes(currentState);
   updateSession(currentState.session || {}, rows.length > 0, currentState.finishCountdown);
   $('row-count').textContent = String(rows.length);
   $('history-count').textContent = String(currentState.historyCount ?? history.length);
@@ -1618,6 +1730,9 @@ async function init() {
       setStatus('error', `Could not start collection: ${error.message}`);
     } finally { button.disabled = false; }
   });
+  $('open-pit-notes')?.addEventListener('click', () => showPitNotes(true));
+  $('pit-notes-close')?.addEventListener('click', () => showPitNotes(false));
+  $('pit-notes-save')?.addEventListener('click', savePitNotes);
   $('open-drivers')?.addEventListener('click', () => window.liveTiming.openDriversWindow(activeCarNumber()));
   $('show-live')?.addEventListener('click', () => window.liveTiming.openLiveWindow());
   $('open-graphs')?.addEventListener('click', () => window.liveTiming.openGraphsWindow(activeCarNumber()));

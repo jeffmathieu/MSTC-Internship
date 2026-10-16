@@ -34,6 +34,10 @@ contextBridge.exposeInMainWorld('liveTiming', {
     const result = await ipcRenderer.invoke('fuel:update', payload);
     return { ...result, state: acceptState(result.state) };
   },
+  savePitNotes: async (payload) => {
+    const result = await ipcRenderer.invoke('pitNotes:save', payload);
+    return { ...result, state: acceptState(result.state) };
+  },
   updateLapStatus: async (payload) => {
     const result = await ipcRenderer.invoke('laps:updateStatus', payload);
     return result.state ? { ...result, state: acceptState(result.state) } : result;

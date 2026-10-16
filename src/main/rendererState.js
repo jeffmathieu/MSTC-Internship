@@ -70,11 +70,12 @@ function createRendererChannel() {
     const nextStrip = graphs ? [] : summary.timingHighlightsByCar?.[car]?.lapStrip || [];
     const payload = {
       ...compactView(Object.fromEntries(Object.entries(state).filter(([key]) => !['lapHistory', 'analyticsSummary',
-        'stintState', 'gapMemory', 'pitstopPlan', 'lapPrediction', 'pitstopPlansByCar', 'lapPredictionsByCar'].includes(key)))),
+        'stintState', 'gapMemory', 'pitstopPlan', 'lapPrediction', 'pitstopPlansByCar', 'lapPredictionsByCar', 'pitNotesByCar'].includes(key)))),
       analyticsSummary: compactView(viewForCar(summary, car, graphs)),
       stintState: graphs ? null : compactView({ cars: { [car]: state.stintState?.cars?.[car] } }),
       pitstopPlansByCar: graphs ? {} : compactView({ [car]: state.pitstopPlansByCar?.[car] }),
       lapPredictionsByCar: graphs ? {} : compactView({ [car]: state.lapPredictionsByCar?.[car] }),
+      pitNotesByCar: graphs ? {} : { [car]: state.pitNotesByCar?.[car] },
       historyCount: state.lapHistory?.length || 0,
       historyPatch: arrayPatch(history, nextHistory, reset),
       stripPatch: arrayPatch(strip, nextStrip, reset),

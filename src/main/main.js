@@ -54,6 +54,7 @@ const { pitstopCircuitById, normalizePitstopCircuitId } = require('../shared/pit
 const { buildLapPrediction } = require('../shared/lapPrediction');
 const { buildAdjacentClassBattles } = require('../shared/classBattle');
 const { buildDriverOverview } = require('../shared/driverOverview');
+const { buildPitNotesView, validateSave: validatePitNotesSave } = require('../shared/pitNotes');
 const {
   DEFAULT_PACE_WINDOW: DEFAULT_GAP_PACE_WINDOW,
   DEFAULT_PIT_SUPPRESSION_LAPS,
@@ -106,6 +107,8 @@ let providerFreshness = {};
 let raceControlEvents = [];
 const lapReconciliationByCar = new Map();
 const serviceStates = new Map();
+// Engineer notes per followed car and pit event id, persisted in data/pit_notes.json.
+let pitNotesStore = {};
 const fuelStates = new Map();
 const sequenceByCar = new Map();
 const checkedCsvHeaders = new Set();
@@ -1263,6 +1266,7 @@ function loadExistingHistory(settings) {
   sequenceByCar.clear();
   checkedCsvHeaders.clear();
   serviceStates.clear();
+  pitNotesStore = {};
   fuelStates.clear();
   const folder = ensureDataFolder(settings);
   try { raceControlEvents = readJsonLines(fs, path.join(folder, 'race_control_events.jsonl')).entries; }
@@ -1303,6 +1307,8 @@ function loadExistingHistory(settings) {
         serviceStates.set(event.carNumber, state);
       });
     }
+    try { pitNotesStore = loadStoredJson(fs, path.join(folder, 'pit_notes.json'))?.cars || {}; }
+    catch (error) { pitNotesStore = {}; addError(error, 'loadPitNotes'); }
     feedState = loadStoredJson(fs, path.join(folder, 'timing_feed_state.json')) || {};
     return prepareHistory(entries);
   } catch (error) {
@@ -1428,6 +1434,14 @@ function updateLapHistory(settings, storageRows) {
   return newEntries.length;
 }
 
+// Notes view per followed car: the latest detected stop is editable (and flagged
+// until its notes are saved), earlier stops are read-only history.
+function pitNotesViewByCar(settings) {
+  return Object.fromEntries(normalizeFollowedCars(settings).map((car) => [
+    car, buildPitNotesView(serviceStates.get(car)?.events || [], pitNotesStore[car] || {})
+  ]));
+}
+
 function updateServiceEvents(settings, rows, context) {
   const folder = ensureDataFolder(settings);
   const followed = new Set(normalizeFollowedCars(settings));
@@ -1445,6 +1459,7 @@ function updateServiceEvents(settings, rows, context) {
       events: result.state.events, config: settings.fuelByCar?.[key] }));
   });
   snapshotWriter.write(path.join(folder, 'pit_event_state.json'), JSON.stringify(Object.fromEntries(serviceStates)));
+  collectorState.pitNotesByCar = pitNotesViewByCar(settings);
   snapshotWriter.write(path.join(folder, 'timing_feed_state.json'), JSON.stringify(feedState));
   if (FUEL_ESTIMATION_ENABLED) snapshotWriter.write(path.join(folder, 'fuel_state.json'), JSON.stringify(Object.fromEntries(fuelStates)));
 }
@@ -1808,6 +1823,7 @@ async function startCollector(url) {
   });
   loadExistingPitStates(settings);
   loadExistingGapMemory(settings);
+  collectorState.pitNotesByCar = pitNotesViewByCar(settings);
   broadcastState();
   try {
     const win = createLiveWindow();
@@ -1897,6 +1913,7 @@ handleTrusted('settings:set', (_event, settings) => {
     const lapHistory = loadExistingHistory(merged);
     loadExistingPitStates(merged);
     loadExistingGapMemory(merged);
+    collectorState.pitNotesByCar = pitNotesViewByCar(merged);
     const sessionTiming = updateSessionTiming(null, {}, lapHistory);
     collectorState = {
       ...collectorState,
@@ -1975,6 +1992,22 @@ handleTrusted('fuel:update', async (event, payload = {}) => {
   const updated = await updateFuelSettingsAndState(payload);
   broadcastState();
   return { settings: updated, state: stateForRenderer(event.sender) };
+});
+// Saves the engineer notes of the latest detected pit stop of a followed car.
+handleTrusted('pitNotes:save', (event, payload = {}) => {
+  const settings = loadSettings();
+  const car = String(payload.carNumber || '').trim();
+  const reply = (extra) => ({ ...extra, state: stateForRenderer(event.sender) });
+  if (!normalizeFollowedCars(settings).includes(car)) return reply({ ok: false, error: 'Select a followed car.' });
+  const checked = validatePitNotesSave(serviceStates.get(car)?.events || [], String(payload.eventId || ''), payload.notes);
+  if (!checked.ok) return reply({ ok: false, error: checked.error });
+  const stop = serviceStates.get(car).events.at(-1);
+  pitNotesStore[car] = { ...(pitNotesStore[car] || {}),
+    [stop.id]: { ...checked.notes, stopNumber: stop.stopNumber ?? null, savedAt: new Date().toISOString() } };
+  atomicWriteFile(fs, path.join(ensureDataFolder(settings), 'pit_notes.json'), JSON.stringify({ version: 1, cars: pitNotesStore }, null, 2));
+  collectorState.pitNotesByCar = pitNotesViewByCar(settings);
+  broadcastState();
+  return reply({ ok: true });
 });
 handleTrusted('laps:updateStatus', (event, payload) => {
   const result = updateStoredLapManualStatus(payload);

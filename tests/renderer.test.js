@@ -782,6 +782,18 @@ module.exports = (async () => {
   assert.strictEqual(lastSettingsPatch.pollIntervalMs, 5000);
   assert.strictEqual(lastSettingsPatch.pitRules.pitStopDurationMs, 75000);
 
+  // Pit stop notes: the header button asks for notes after a stop is detected
+  // and settles once they are saved.
+  const notesButton = document.getElementById('open-pit-notes');
+  const stopView = (needsAttention) => ({ latest: { eventId: '13|a', stopNumber: 1, detectedAt: '2026-10-16T14:00:00.000Z', closed: true,
+    driverBefore: 'A', driverAfter: 'B', durationMs: 50000, editable: true, needsAttention, notes: needsAttention ? null : { tyresChanged: true } }, history: [] });
+  collectorUpdate({ ...updatedState, pitNotesByCar: { 13: stopView(true) } });
+  await flushAsync();
+  assert.ok(notesButton.classList.contains('needs-notes'), 'a detected stop without notes colours the notes button');
+  collectorUpdate({ ...updatedState, pitNotesByCar: { 13: stopView(false) } });
+  await flushAsync();
+  assert.ok(!notesButton.classList.contains('needs-notes') && notesButton.classList.contains('has-notes'), 'saved notes clear the colour');
+
   console.log('Renderer UI tests passed.');
 })().catch((error) => {
   console.error(error);
