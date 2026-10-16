@@ -33,10 +33,10 @@ assert.ok(pages[1].includes('PIC 6'), 'pitstop rejoin classification is preserve
 assert.ok(pages[3].includes('TEAM AND CLASS COMPARISON') && pages[3].includes('STINT ENGINEERING INSIGHTS'));
 assert.ok(pages[3].includes('FAST 2:04.000') && !pages[3].includes('3:20.000'), 'the charts exclude neutralized pace samples');
 assert.ok(html.includes('&lt;Race &amp; summary&gt;'), 'feed text is escaped in SVG and HTML');
-assert.ok(!html.includes('DATA QUALITY AND TIMING NOTES') && !html.includes('&lt;stored data&gt;'), 'race summaries omit the timing-notes page');
+assert.ok(!html.includes('DATA QUALITY AND TIMING NOTES') && !html.includes('&lt;stored data&gt;'), 'reports never include the timing-notes page');
 assert.match(html, /@page \{ size: A4 landscape; margin: 0; \}/);
-assert.strictEqual((buildCanonicalFallbackHtml(payload, false).match(/class="report-page"/g) || []).length, 2, 'single-stint exports keep their original one-page analysis and timing notes');
-assert.ok(buildCanonicalFallbackHtml({ ...payload, reportMode: 'practice' }, true).includes('DATA QUALITY AND TIMING NOTES'), 'practice summaries retain their timing notes');
+assert.strictEqual((buildCanonicalFallbackHtml(payload, false).match(/class="report-page"/g) || []).length, 1, 'single-stint exports are one analysis page without a timing-notes page');
+assert.ok(!buildCanonicalFallbackHtml({ ...payload, reportMode: 'practice' }, true).includes('DATA QUALITY AND TIMING NOTES'), 'no report mode creates the timing-notes page');
 
 module.exports = (async () => {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'mstc-portable-report-test-'));

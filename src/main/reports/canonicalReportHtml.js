@@ -311,34 +311,10 @@ function graph(page, x, y, width, height, data = {}) {
   });
 }
 
-function notesPages(payload) {
-  const notes = payload.caveats || [];
-  if (!notes.length) return [];
-  const pages = [], makePage = () => new Page(payload, pages.length ? 'TIMING NOTES (CONTINUED)' : 'DATA QUALITY AND TIMING NOTES');
-  let page = makePage(), y = PAGE_H - 95;
-  for (const note of notes) {
-    const words = String(note).split(/\s+/); let line = '';
-    for (const word of words) {
-      if (`${line} ${word}`.trim().length > 125) {
-        page.text(40, y, line, 10); y -= 16; line = '';
-        if (y < 60) { pages.push(page); page = makePage(); y = PAGE_H - 95; }
-      }
-      line = `${line} ${word}`.trim();
-    }
-    page.text(40, y, line, 10); y -= 30;
-    if (y < 60) { pages.push(page); page = makePage(); y = PAGE_H - 95; }
-  }
-  // These inputs remain explicit in portable exports rather than disappearing.
-  page.text(40, y, 'Reference times', 10, C.muted, true);
-  page.text(40, y - 18, Object.entries(payload.referenceTimes || {}).map(([key, value]) => `${key.replace(/Ms$/, '')}: ${value > 0 ? time(value) : '-'}`).join(' | ') || 'Not configured', 8, C.muted);
-  pages.push(page); return pages;
-}
-
 function buildCanonicalReportHtml(payload, includeSummary = false) {
   const pages = [];
   if (includeSummary) pages.push(...overview(payload), ...pitPages(payload));
   (payload.stints || []).forEach((stint, index) => pages.push(stintPage(payload, stint, index + 1)));
-  if (!(includeSummary && (payload.reportMode || 'race') === 'race')) pages.push(...notesPages(payload));
   if (includeSummary) {
     const graphs = payload.raceSummary?.graphs || {};
     if (graphs.driverLaps || graphs.driverPace || graphs.driverSectors) {
