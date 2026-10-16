@@ -9,6 +9,7 @@ const { writeClosedStintArtifacts, writeEventSummaryArtifacts, buildCanonicalRep
 
 (async () => {
   const input = workerData;
+  const dataFolder = prepareDataFolder(fs, path, input.sessionFolder);
   const { entries } = loadSessionHistory({ fs, jsonlPath: path.join(dataFolder, 'lap_history.jsonl'), identityForLap: lapIdentity });
   const history = prepareHistory(entries);
   const allStints = stintsForCar(history, input.carNumber, { ...input.stintOptions, pitEvents: input.pitEvents });
