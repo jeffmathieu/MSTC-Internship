@@ -64,7 +64,7 @@ const { drivingStintsForCar: stintsForCar, buildDrivingStintState: buildStintSta
 const { updateSessionTiming } = require('../shared/sessionTiming');
 const { followedClassesCompletion, automaticCompletionReason: completionReason, updateFinishCountdown } = require('../shared/sessionCompletion');
 const { buildTimingHighlights } = require('../shared/timingHighlights');
-const { resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalReportSettings,
+const { prepareDataFolder, DATA_FOLDER, EXPORTS_FOLDER, resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalReportSettings,
   readJsonLines, appendJsonLines, atomicWriteFile, resolveSessionEndAt } = require('../shared/storageSession');
 const { setupAutoUpdates } = require('./autoUpdater');
 const { setupAppLifecycle } = require('./appLifecycle');
@@ -282,7 +282,7 @@ function appendTrackConditionEvent(previous, next) {
     collectorState.storageSessionFolder || next.storageFolder,
     defaultStorageFolder()
   );
-  fs.mkdirSync(folder, { recursive: true });
+  const dataFolder = prepareDataFolder(fs, path, folder);
   const event = {
     changedAt: new Date().toISOString(),
     source: 'manual',
@@ -295,8 +295,8 @@ function appendTrackConditionEvent(previous, next) {
       .filter((row) => normalizeFollowedCars(next).includes(String(row.carNumber)))
       .map((row) => [String(row.carNumber), row.lapNumber ?? row.laps ?? null]))
   };
-  fs.appendFileSync(path.join(folder, 'track_condition_events.jsonl'), `${JSON.stringify(event)}\n`);
-  snapshotWriter.write(path.join(folder, 'track_condition_state.json'), JSON.stringify(event, null, 2));
+  fs.appendFileSync(path.join(dataFolder, 'track_condition_events.jsonl'), `${JSON.stringify(event)}\n`);
+  snapshotWriter.write(path.join(dataFolder, 'track_condition_state.json'), JSON.stringify(event, null, 2));
   return event;
 }
 
@@ -597,6 +597,11 @@ function ensureStorage(settings) {
   return folder;
 }
 
+// Machine-readable session files (JSON/JSONL/CSV) live in <session>/data.
+function ensureDataFolder(settings) {
+  return prepareDataFolder(fs, path, ensureStorage(settings));
+}
+
 function storageContext(settings, normalized, collectedAt = new Date().toISOString()) {
   const timingUrl = normalized.session?.url || collectorState.url || loadSettings().timingUrl || '';
   return {
@@ -656,7 +661,7 @@ function updatePitState(settings, rows, context, carNumber = settings.followedCa
 // receives this same object through collectorState, while pitstop_plan.json lets
 // external/debug tools inspect the current strategy state.
 function buildAndWritePitstopPlan(settings, context, rows, carNumber) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   const followedCarNumber = String(carNumber || '');
   const pitState = updatePitState(settings, rows, context, followedCarNumber);
   const fcyGapState = nextFcyGapState({
@@ -731,7 +736,7 @@ function annotateLiveSectorFlags(storageRows, context) {
 }
 
 function writeLatestRows(settings, normalizedRows) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   snapshotWriter.write(path.join(folder, 'latest_live_rows.json'), JSON.stringify(normalizedRows, null, 2));
   snapshotWriter.write(path.join(folder, 'latest_live_rows.csv'), toCsvRows(normalizedRows));
 }
@@ -740,7 +745,7 @@ function writeLatestRows(settings, normalizedRows) {
 // overwritten for crash recovery; the append-only history supports later gap
 // graphs and auditing without storing every volatile five-second poll.
 function updateAndWriteGapMemory(settings, context, rows) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   gapMemoryState = updateGapMemory(gapMemoryState || {}, {
     rows,
     followedCars: normalizeFollowedCars(settings),
@@ -757,7 +762,7 @@ function updateAndWriteGapMemory(settings, context, rows) {
 }
 
 function loadExistingGapMemory(settings) {
-  const folder = resolveSessionFolder(collectorState.storageSessionFolder || settings.storageFolder, defaultStorageFolder());
+  const folder = ensureDataFolder(settings);
   try {
     const stored = loadStoredJson(fs, path.join(folder, 'gap_state.json'));
     gapMemoryState = stored && typeof stored === 'object' ? stored : null;
@@ -774,7 +779,7 @@ function loadExistingGapMemory(settings) {
 // readable after schema changes.
 function appendLapHistory(settings, lapRecords) {
   if (!lapRecords.length) return;
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   const jsonlPath = path.join(folder, 'lap_history.jsonl');
   const csvPath = path.join(folder, 'lap_history.csv');
   // Commit the canonical journal first. A failed CSV export must never cause
@@ -798,14 +803,14 @@ function appendLapHistory(settings, lapRecords) {
 // how rows were normalized. Inspect this first when a timing provider changes
 // its HTML/column names.
 function writeParserDebug(settings, debugInfo) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   snapshotWriter.write(path.join(folder, 'parser_debug.json'), JSON.stringify(debugInfo, null, 2));
 }
 
 // Writes session-level metadata beside the latest rows/history so every session
 // folder is self-describing.
 function writeSessionMetadata(settings, context, options = {}) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   const metadataPath = path.join(folder, 'session_metadata.json');
   let previousMetadata = {};
   try {
@@ -980,7 +985,7 @@ function buildAnalyticsSummary(settings, context, rows = []) {
 
 // Writes analytics_summary.json and mirrors it into collectorState for the UI.
 function writeAnalyticsSummary(settings, context, rows = []) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   const summary = buildAnalyticsSummary(settings, context, rows);
   snapshotWriter.write(path.join(folder, 'analytics_summary.json'), JSON.stringify(summary));
   collectorState.analyticsSummary = summary;
@@ -991,6 +996,7 @@ function writeAnalyticsSummary(settings, context, rows = []) {
 // a serial worker queue. Only session finalization waits for those jobs.
 async function writeStintStateAndReports(settings, context, rows = [], options = {}) {
   const folder = ensureStorage(settings);
+  const dataFolder = ensureDataFolder(settings);
   const followedCars = normalizeFollowedCars(settings);
   const generatedAt = context?.collectedAt || new Date().toISOString();
   const sessionFinished = Boolean(options.sessionFinished);
@@ -1006,7 +1012,7 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
     sessionStartedAt: collectorState.sessionTiming?.startedAt || null
   };
   const stintState = buildStintState(collectorState.lapHistory || [], followedCars, generatedAt, stintOptions);
-  snapshotWriter.write(path.join(folder, 'stint_state.json'), JSON.stringify(stintState));
+  snapshotWriter.write(path.join(dataFolder, 'stint_state.json'), JSON.stringify(stintState));
   collectorState.stintState = stintState;
   const generatedStintReports = [];
   const generatedEventSummaries = [];
@@ -1069,12 +1075,11 @@ async function finalizeCurrentSession({ automatic = false } = {}) {
   await snapshotWriter.flush();
   await reportQueue.flush();
   const configuredSettings = loadSettings();
-  const folder = ensureStorage(configuredSettings);
   const storedHistory = loadExistingHistory(configuredSettings);
   if (storedHistory.length) collectorState.lapHistory = storedHistory;
   let metadata = {};
   try {
-    metadata = loadStoredJson(fs, path.join(folder, 'session_metadata.json')) || {};
+    metadata = loadStoredJson(fs, path.join(ensureDataFolder(configuredSettings), 'session_metadata.json')) || {};
   } catch (error) {
     addError(error, 'loadFinalReportMetadata');
   }
@@ -1109,7 +1114,7 @@ async function finalizeCurrentSession({ automatic = false } = {}) {
 // lap history. The renderer only displays this object; all prediction rules stay
 // in src/shared/lapPrediction.js where they are covered by focused tests.
 function buildAndWriteLapPrediction(settings, context, rows, carNumber) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   const followedCarNumber = String(carNumber || '');
   const liveRow = (rows || []).find((row) => String(row.carNumber) === String(followedCarNumber));
   const prediction = buildLapPrediction({
@@ -1165,7 +1170,7 @@ function loadExistingHistory(settings) {
   checkedCsvHeaders.clear();
   serviceStates.clear();
   fuelStates.clear();
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   try { raceControlEvents = readJsonLines(fs, path.join(folder, 'race_control_events.jsonl')).entries; }
   catch (error) { raceControlEvents = []; addError(error, 'load-race-control-events'); }
   const jsonlPath = path.join(folder, 'lap_history.jsonl');
@@ -1217,7 +1222,7 @@ function loadExistingHistory(settings) {
 // poll. Without this, restarting shortly after a stop would incorrectly reopen
 // the pit window even though lap history itself resumed correctly.
 function loadExistingPitStates(settings) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   normalizeFollowedCars(settings).forEach((carNumber) => {
     const filePath = path.join(folder, `pitstop_plan_car-${slugPart(carNumber, 'unknown')}.json`);
     try {
@@ -1330,7 +1335,7 @@ function updateLapHistory(settings, storageRows) {
 }
 
 function updateServiceEvents(settings, rows, context) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   const followed = new Set(normalizeFollowedCars(settings));
   rows.filter((row) => followed.has(String(row.carNumber))).forEach((row) => {
     const key = String(row.carNumber);
@@ -1411,7 +1416,7 @@ function manualLapTargetMatches(entry, target = {}) {
 }
 
 function rewriteLapHistoryFiles(settings, history) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   atomicWriteFile(fs,
     path.join(folder, 'lap_history.jsonl'),
     history.map((entry) => JSON.stringify(entry)).join('\n') + (history.length ? '\n' : '')
@@ -1438,7 +1443,7 @@ function rebuildCollectorDerivedState(settings, context = null, rows = collector
       || (!collectorState.sessionTiming && Boolean(collectorState.lapHistory?.length)),
     sessionStartedAt: collectorState.sessionTiming?.startedAt || null
   });
-  snapshotWriter.write(path.join(ensureStorage(settings), 'stint_state.json'), JSON.stringify(collectorState.stintState, null, 2));
+  snapshotWriter.write(path.join(ensureDataFolder(settings), 'stint_state.json'), JSON.stringify(collectorState.stintState, null, 2));
   collectorState.analyticsSummary = writeAnalyticsSummary(settings, context || { collectedAt: generatedAt, session: collectorState.session || {} }, rows);
   collectorState.lapPredictionsByCar = writeLapPredictions(settings, context || { collectedAt: generatedAt }, rows);
   if (normalizeMode(settings.sessionMode) === 'race') {
@@ -1533,7 +1538,7 @@ async function pollLivePage() {
     updateServiceEvents(settings, analysisRows, context);
     const raceControlEvent = nextRaceControlEvent(raceControlEvents.at(-1), normalized.session, observedAt);
     if (raceControlEvent) {
-      appendJsonLines(fs, path.join(ensureStorage(settings), 'race_control_events.jsonl'), [raceControlEvent]);
+      appendJsonLines(fs, path.join(ensureDataFolder(settings), 'race_control_events.jsonl'), [raceControlEvent]);
       raceControlEvents.push(raceControlEvent);
     }
     const primaryStats = carStats(collectorState.lapHistory || [], primaryCar);
@@ -1644,21 +1649,22 @@ async function pollLivePage() {
 // here if the renderer should display their locations.
 function storageInfo(settings) {
   const folder = resolveSessionFolder(collectorState.storageSessionFolder || settings.storageFolder, defaultStorageFolder());
+  const data = path.join(folder, DATA_FOLDER);
   return {
     baseFolder: folder,
     folder,
-    latestRowsCsv: path.join(folder, 'latest_live_rows.csv'),
-    latestRowsJson: path.join(folder, 'latest_live_rows.json'),
-    lapHistoryCsv: path.join(folder, 'lap_history.csv'),
-    lapHistoryJsonl: path.join(folder, 'lap_history.jsonl'),
-    parserDebugJson: path.join(folder, 'parser_debug.json'),
-    sessionMetadataJson: path.join(folder, 'session_metadata.json'),
-    analyticsSummaryJson: path.join(folder, 'analytics_summary.json'),
-    lapPredictionJson: path.join(folder, 'lap_prediction.json'),
-    pitstopPlanJson: path.join(folder, 'pitstop_plan.json'),
-    gapStateJson: path.join(folder, 'gap_state.json'),
-    gapHistoryJsonl: path.join(folder, 'gap_history.jsonl'),
-    stintStateJson: path.join(folder, 'stint_state.json'),
+    latestRowsCsv: path.join(data, 'latest_live_rows.csv'),
+    latestRowsJson: path.join(data, 'latest_live_rows.json'),
+    lapHistoryCsv: path.join(data, 'lap_history.csv'),
+    lapHistoryJsonl: path.join(data, 'lap_history.jsonl'),
+    parserDebugJson: path.join(data, 'parser_debug.json'),
+    sessionMetadataJson: path.join(data, 'session_metadata.json'),
+    analyticsSummaryJson: path.join(data, 'analytics_summary.json'),
+    lapPredictionJson: path.join(data, 'lap_prediction.json'),
+    pitstopPlanJson: path.join(data, 'pitstop_plan.json'),
+    gapStateJson: path.join(data, 'gap_state.json'),
+    gapHistoryJsonl: path.join(data, 'gap_history.jsonl'),
+    stintStateJson: path.join(data, 'stint_state.json'),
     stintsFolder: path.join(folder, 'stints')
   };
 }
@@ -1832,7 +1838,7 @@ async function updateFuelSettingsAndState(payload = {}) {
   const updated = { ...settings, fuelByCar: { ...settings.fuelByCar, [car]: config } };
   saveSettings(updated);
   fuelStates.set(car, state);
-  snapshotWriter.write(path.join(ensureStorage(updated), 'fuel_state.json'), JSON.stringify(Object.fromEntries(fuelStates)));
+  snapshotWriter.write(path.join(ensureDataFolder(updated), 'fuel_state.json'), JSON.stringify(Object.fromEntries(fuelStates)));
   await snapshotWriter.flush();
   rebuildCollectorDerivedState(updated);
   return updated;
@@ -1851,7 +1857,8 @@ handleTrusted('laps:updateStatus', (event, payload) => {
 // The always-overwritten "latest_*" files are written by saveLatestSnapshot().
 handleTrusted('export:current', async () => {
   const settings = loadSettings();
-  const folder = ensureStorage(settings);
+  const folder = path.join(ensureStorage(settings), EXPORTS_FOLDER);
+  fs.mkdirSync(folder, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const jsonPath = path.join(folder, `live_rows_${timestamp}.json`);
   const csvPath = path.join(folder, `live_rows_${timestamp}.csv`);

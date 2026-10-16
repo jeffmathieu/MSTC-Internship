@@ -783,7 +783,9 @@ async function writeEventSummaryArtifacts({
   const closed = stints.filter((stint) => stint.closed);
   if (!closed.length) return [];
   const carFolder = path.join(sessionFolder, 'stints', `car-${safeFilePart(carNumber, 'unknown')}`);
-  fs.mkdirSync(carFolder, { recursive: true });
+  // Summary PDFs stay next to the stint folders; their JSON payloads go in data/.
+  const carDataFolder = path.join(carFolder, 'data');
+  fs.mkdirSync(carDataFolder, { recursive: true });
   const summaryPrefix = reportPolicy.sessionMode === 'race'
     ? 'RACE'
     : reportPolicy.sessionMode === 'qualifying'
@@ -823,7 +825,7 @@ async function writeEventSummaryArtifacts({
     });
     payload.title = group.title;
     payload.legacyPayloads = payloads;
-    const jsonPath = path.join(carFolder, `${group.baseName}.json`);
+    const jsonPath = path.join(carDataFolder, `${group.baseName}.json`);
     const pdfPath = path.join(carFolder, `${group.baseName}.pdf`);
     fs.writeFileSync(jsonPath, JSON.stringify(payload, null, 2));
     // Finalization deliberately refreshes summaries, including when reopening

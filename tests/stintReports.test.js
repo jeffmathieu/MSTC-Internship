@@ -238,6 +238,8 @@ module.exports = (async () => {
     renderPdf: fakeCanonicalRenderer
   });
   assert.strictEqual(summaries.length, 2, 'race and driver summaries are generated at session end');
+  assert.ok(summaries.every((item) => path.dirname(item.jsonPath).endsWith(path.join('car-33', 'data')) && path.dirname(item.pdfPath).endsWith('car-33')),
+    'summary PDFs sit beside the stint folders while their JSON goes in data/');
   assert.strictEqual(summaries.every((summary) => fs.existsSync(summary.pdfPath)), true);
   assert.strictEqual(printCount, 6);
 
