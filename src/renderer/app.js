@@ -1634,9 +1634,21 @@ async function init() {
   $('open-setup')?.addEventListener('click', () => showSetup(true));
   $('comparison-prev-tab')?.addEventListener('click', () => setComparisonTab(currentComparisonTab - 1));
   $('comparison-next-tab')?.addEventListener('click', () => setComparisonTab(currentComparisonTab + 1));
-  $('export')?.addEventListener('click', async () => {
-    const result = await window.liveTiming.exportCurrent();
-    alert(`Exported:\n${[result.csvPath, result.jsonPath, result.pdfPath, result.historyPath].filter(Boolean).join('\n')}`);
+  $('export')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const result = await window.liveTiming.exportCurrent();
+      const pdfs = result.pdfPaths || [];
+      const pdfNote = pdfs.length ? '\n\nThese PDFs are replaced by the final reports when the session ends.'
+        : result.pdfError ? `\n\nPDF report failed: ${result.pdfError}`
+          : '\n\nNo PDF yet: it needs at least one completed lap.';
+      alert(`Exported:\n${[result.csvPath, result.jsonPath, result.historyPath, ...pdfs].filter(Boolean).join('\n')}${pdfNote}`);
+    } catch (error) {
+      alert(`Export failed: ${error?.message || error}`);
+    } finally {
+      button.disabled = false;
+    }
   });
 
   // Persist settings immediately when hidden inputs change. If new settings are

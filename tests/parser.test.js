@@ -266,6 +266,10 @@ const oneClassRows = applySingleClassFallback([
 assert.deepStrictEqual(oneClassRows.map((row) => row.className), ['Overall', 'Overall']);
 assert.deepStrictEqual(oneClassRows.map((row) => row.classPosition), [1, 2]);
 const existingClassRows = [{ position: 1, carNumber: '1', className: 'A' }, { position: 2, carNumber: '2', className: '' }];
-assert.strictEqual(applySingleClassFallback(existingClassRows), existingClassRows, 'mixed/real class data is not rewritten');
+const allClassedRows = [{ position: 1, carNumber: '1', className: 'A' }, { position: 2, carNumber: '2', className: 'B' }];
+assert.strictEqual(applySingleClassFallback(allClassedRows), allClassedRows, 'fully classed data is not rewritten');
+const mixedRows = applySingleClassFallback([...existingClassRows, { position: 3, carNumber: '3', className: '' }]);
+assert.deepStrictEqual(mixedRows.map((row) => row.className), ['A', 'No class', 'No class'], 'cars without class form their own class');
+assert.deepStrictEqual(mixedRows.map((row) => row.classPosition), [undefined, 1, 2], 'no-class cars are ranked among themselves');
 
 console.log('Parser tests passed.');

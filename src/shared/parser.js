@@ -401,11 +401,26 @@ function parseSessionInfo(snapshot = {}) {
   return session;
 }
 
+// Cars without class info (mixed grids) compete together as their own class,
+// so they are compared, ranked and reported like any other class.
+const NO_CLASS_LABEL = 'No class';
+function withNoClassGroup(rows) {
+  if (rows.every((row) => cleanText(row.className))) return rows;
+  const ranked = rows.filter((row) => !cleanText(row.className))
+    .sort((a, b) => (Number(a.position) || Infinity) - (Number(b.position) || Infinity));
+  return rows.map((row) => cleanText(row.className) ? row : {
+    ...row,
+    className: NO_CLASS_LABEL,
+    classPosition: row.classPosition || ranked.indexOf(row) + 1
+  });
+}
+
 // Some single-make timing pages omit CLASS and PIC entirely because every car
 // competes together. Assign one synthetic class so all class-based comparison,
 // gap and report functions keep working without provider-specific branches.
 function applySingleClassFallback(rows = [], fallbackName = 'Overall') {
-  if (!rows.length || rows.some((row) => cleanText(row.className))) return rows;
+  if (!rows.length) return rows;
+  if (rows.some((row) => cleanText(row.className))) return withNoClassGroup(rows);
   return rows.map((row, index) => ({
     ...row,
     className: fallbackName,
@@ -426,5 +441,6 @@ module.exports = {
   parseTimingRow,
   looksLikeTimingHeaders,
   parseSessionInfo,
-  applySingleClassFallback
+  applySingleClassFallback,
+  NO_CLASS_LABEL
 };

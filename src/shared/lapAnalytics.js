@@ -137,7 +137,8 @@ function normalizeLap(entry) {
   return {
     ...entry,
     carNumber: String(entry.carNumber ?? ''),
-    className: String(entry.className ?? ''),
+    // Laps without class info form their own class (same label as the parser).
+    className: String(entry.className ?? '').trim() || (entry.carNumber ? 'No class' : ''),
     teamName: String(entry.teamName ?? entry.team ?? ''),
     driverName: String(entry.driverName ?? entry.driver ?? ''),
     lastPit: entry.lastPit || entry.raw?.['PIT TIME'] || '',

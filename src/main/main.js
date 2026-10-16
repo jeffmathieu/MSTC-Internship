@@ -999,7 +999,11 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
   const dataFolder = ensureDataFolder(settings);
   const followedCars = normalizeFollowedCars(settings);
   const generatedAt = context?.collectedAt || new Date().toISOString();
-  const sessionFinished = Boolean(options.sessionFinished);
+  // A preview (manual export) renders the same final reports as the end of a
+  // session, closing the open stint only inside the report, and leaves live
+  // collector state untouched. Ending the session later overwrites these files.
+  const preview = Boolean(options.preview);
+  const sessionFinished = Boolean(options.sessionFinished) || preview;
   const reportSessionMode = normalizeMode(settings.sessionMode);
   const stintOptions = {
     pitEventsByCar: Object.fromEntries([...serviceStates].map(([car, state]) => [car, state.events || []])),
@@ -1012,8 +1016,10 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
     sessionStartedAt: collectorState.sessionTiming?.startedAt || null
   };
   const stintState = buildStintState(collectorState.lapHistory || [], followedCars, generatedAt, stintOptions);
-  snapshotWriter.write(path.join(dataFolder, 'stint_state.json'), JSON.stringify(stintState));
-  collectorState.stintState = stintState;
+  if (!preview) {
+    snapshotWriter.write(path.join(dataFolder, 'stint_state.json'), JSON.stringify(stintState));
+    collectorState.stintState = stintState;
+  }
   const generatedStintReports = [];
   const generatedEventSummaries = [];
 
@@ -1868,7 +1874,25 @@ handleTrusted('export:current', async () => {
   fs.writeFileSync(jsonPath, JSON.stringify(storageRows, null, 2));
   fs.writeFileSync(csvPath, toCsvRows(storageRows));
   fs.writeFileSync(historyPath, JSON.stringify({ session: collectorState.session, lapHistory: collectorState.lapHistory }, null, 2));
-  return { jsonPath, csvPath, historyPath };
+  // Also render the report PDFs from the data collected so far. They use the
+  // same file names as the end-of-session reports, which replace them on stop.
+  const pdfPaths = [];
+  let pdfError = '';
+  if ((collectorState.lapHistory || []).length) {
+    try {
+      await snapshotWriter.flush();
+      const now = new Date().toISOString();
+      const reportContext = storageContext(settings, { session: collectorState.session || {} }, now);
+      const result = await writeStintStateAndReports(settings, reportContext, collectorState.rows || [], { preview: true, finishedAt: now });
+      const eventPdfs = (result.generatedEventSummaries || []).map((report) => report.pdfPath).filter(Boolean);
+      const stintPdfs = (result.generatedStintReports || []).map((report) => report.pdfPath).filter(Boolean);
+      pdfPaths.push(...(eventPdfs.length ? eventPdfs : stintPdfs));
+    } catch (error) {
+      pdfError = error?.message || String(error);
+      addError(error, 'export-pdf');
+    }
+  }
+  return { jsonPath, csvPath, historyPath, pdfPaths, pdfError };
 });
 
 // Electron app startup. Shutdown behavior is registered through appLifecycle
