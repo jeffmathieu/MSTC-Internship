@@ -1264,3 +1264,5 @@ body.mode-qualifying .pit-window { display: none; }
 .pit-notes-history summary { cursor: pointer; font-weight: 900; font-size: 13px; }
 .pit-notes-old { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--soft-line, var(--line)); font-size: 12.5px; white-space: pre-wrap; }
 .pit-notes-old strong { display: block; margin-bottom: 3px; }
+
+.pit-notes-driver-name { text-transform: none; color: var(--muted, #626a66); font-weight: 800; }

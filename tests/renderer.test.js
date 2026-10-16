@@ -793,6 +793,8 @@ module.exports = (async () => {
   collectorUpdate({ ...updatedState, pitNotesByCar: { 13: stopView(false) } });
   await flushAsync();
   assert.ok(!notesButton.classList.contains('needs-notes') && notesButton.classList.contains('has-notes'), 'saved notes clear the colour');
+  await notesButton.trigger('click');
+  assert.strictEqual(document.getElementById('pit-notes-driver-name').textContent, '(A)', 'the stint notes name the driver of the stint that ended');
 
   console.log('Renderer UI tests passed.');
 })().catch((error) => {

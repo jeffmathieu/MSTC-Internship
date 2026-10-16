@@ -173,6 +173,8 @@ function renderPitNotes(state = currentState) {
   if (!pitNotesVisible()) return;
   $('pit-notes-title').textContent = `Pit stop notes · Car #${activeCarNumber()}`;
   $('pit-notes-stop').textContent = describePitStop(latest);
+  // The notes describe the stint that just ended: name its driver.
+  $('pit-notes-driver-name').textContent = latest?.driverBefore ? `(${latest.driverBefore})` : '';
   $('pit-notes-form').disabled = !latest;
   $('pit-notes-save').disabled = !latest;
   if ((latest?.eventId || null) !== pitNotesFormEventId) {
