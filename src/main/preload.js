@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('liveTiming', {
   getCollectorState: async () => acceptState(await ipcRenderer.invoke('collector:getState')),
   openLiveWindow: () => ipcRenderer.invoke('collector:openLiveWindow'),
   openGraphsWindow: (carNumber) => ipcRenderer.invoke('graphs:open', carNumber),
+  openDriversWindow: (carNumber) => ipcRenderer.invoke('drivers:open', carNumber),
   updateFuel: async (payload) => {
     const result = await ipcRenderer.invoke('fuel:update', payload);
     return { ...result, state: acceptState(result.state) };

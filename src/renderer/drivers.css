@@ -1,0 +1,54 @@
+:root {
+  /* Same palette as graphs.css / styles.css so all windows match. */
+  --page: #f1f3f0; --ink: #1b201e; --muted: #626a66; --line: #242a27; --soft-line: #d3d8d4;
+  --box: #fafbf9; --control: #f7f8f6; --best: #1e9f67; --best-bg: rgba(30, 159, 103, .14);
+  --current-bg: rgba(49, 95, 199, .12); --accent: #315fc7;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --page: #151b20; --ink: #edf1ef; --muted: #aab5b0; --line: #c9d1cd; --soft-line: #46525a;
+  --box: #20282e; --control: #273139; --best: #4fd49a; --best-bg: rgba(79, 212, 154, .16);
+  --current-bg: rgba(126, 168, 255, .16); --accent: #7ea8ff;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; height: 100%; }
+body { background: var(--page); color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+.drivers-page { height: 100vh; padding: 10px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.page-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+.page-head h1 { margin: 0; font-size: 20px; font-weight: 900; }
+.page-head p { margin: 2px 0 0; color: var(--muted); font-size: 12px; font-weight: 700; }
+.head-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { padding: 4px 10px; border: 2px solid var(--line); background: var(--box); font-size: 12px; font-weight: 850; }
+.chip.muted { color: var(--muted); border-color: var(--soft-line); }
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.kpi { padding: 8px 10px; border: 3px solid var(--line); background: var(--box); display: flex; flex-direction: column; min-width: 0; }
+.kpi-label { color: var(--muted); font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
+.kpi-value { font-size: 21px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.kpi-note { color: var(--muted); font-size: 11px; font-weight: 750; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.panel { padding: 8px 10px; border: 3px solid var(--line); background: var(--box); min-height: 0; display: flex; flex-direction: column; }
+.panel.grow { flex: 1 1 0; }
+.panel h2 { margin: 0 0 6px; font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
+.panel h2 small { margin-left: 8px; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: none; letter-spacing: 0; }
+
+.share-bar { display: flex; height: 28px; border: 2px solid var(--line); overflow: hidden; background: var(--control); }
+.share-segment { display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; font-weight: 900; min-width: 2px; }
+.share-segment.current { box-shadow: inset 0 -4px 0 rgba(255, 255, 255, .55); }
+.share-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 12px; font-weight: 800; }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.legend-swatch { width: 12px; height: 12px; display: inline-block; border: 1px solid var(--line); }
+
+.table-wrap { overflow: auto; min-height: 0; flex: 1 1 auto; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+th, td { padding: 5px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--soft-line); }
+th { position: sticky; top: 0; background: var(--box); color: var(--muted); font-size: 10.5px; font-weight: 900; text-transform: uppercase; letter-spacing: .03em; border-bottom: 2px solid var(--line); }
+th.left, td.left { text-align: left; }
+td.left { font-weight: 850; }
+td.best { color: var(--best); font-weight: 900; background: var(--best-bg); }
+tr.current-row td { background: var(--current-bg); }
+tr.current-row td.best { background: var(--best-bg); }
+td.empty, .empty { text-align: center; color: var(--muted); padding: 14px; font-weight: 750; }
+.badge { margin-left: 8px; padding: 1px 6px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 900; text-transform: uppercase; }

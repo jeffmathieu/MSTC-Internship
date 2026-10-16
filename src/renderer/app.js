@@ -92,6 +92,20 @@ function setStatus(status, message) {
   }
 }
 
+// One button starts and stops collection: it reads "Stop" while a session is
+// being collected and "Start" otherwise (idle, finished or a failed start).
+const COLLECTING_STATUSES = ['loading', 'connected', 'waiting', 'collecting', 'stale', 'disconnected', 'parser_error'];
+let collectionActive = false;
+function syncCollectionButton(status) {
+  const button = $('start');
+  if (!button) return;
+  collectionActive = COLLECTING_STATUSES.includes(String(status || 'idle').toLowerCase());
+  button.textContent = collectionActive ? 'Stop' : 'Start';
+  button.classList.toggle('primary', !collectionActive);
+  button.classList.toggle('secondary', collectionActive);
+  button.title = collectionActive ? 'Stop collection and close the session' : 'Start live collection';
+}
+
 // Displays missing table values consistently.
 function rowValue(value) { return value === null || value === undefined || value === '' ? '—' : value; }
 
@@ -1352,6 +1366,7 @@ function render(state) {
   if ($('analysis-condition')) $('analysis-condition').value = normalizeAnalysisSelectValue($('analysis-condition').value);
   syncConditionControlTitles();
   setStatus(currentState.status, currentState.message);
+  syncCollectionButton(currentState.status);
   updateSession(currentState.session || {}, rows.length > 0, currentState.finishCountdown);
   $('row-count').textContent = String(rows.length);
   $('history-count').textContent = String(currentState.historyCount ?? history.length);
@@ -1589,6 +1604,12 @@ async function init() {
   // invokes the matching ipcMain handler in main.js.
   $('start')?.addEventListener('click', async () => {
     const button = $('start');
+    if (collectionActive) {
+      button.disabled = true;
+      try { await window.liveTiming.stopCollector(); } catch (error) { setStatus('error', `Could not stop collection: ${error.message}`); }
+      finally { button.disabled = false; }
+      return;
+    }
     button.disabled = true;
     try {
       await saveSettingsFromInputs(true);
@@ -1597,7 +1618,7 @@ async function init() {
       setStatus('error', `Could not start collection: ${error.message}`);
     } finally { button.disabled = false; }
   });
-  $('stop')?.addEventListener('click', () => window.liveTiming.stopCollector());
+  $('open-drivers')?.addEventListener('click', () => window.liveTiming.openDriversWindow(activeCarNumber()));
   $('show-live')?.addEventListener('click', () => window.liveTiming.openLiveWindow());
   $('open-graphs')?.addEventListener('click', () => window.liveTiming.openGraphsWindow(activeCarNumber()));
   $('lap-edit-toggle')?.addEventListener('click', () => {

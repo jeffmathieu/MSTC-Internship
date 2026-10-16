@@ -46,7 +46,7 @@ function viewForCar(summary, car, graphs) {
     dashboardAnalysis: undefined, comparisonView: undefined, adjacentClassBattles: undefined,
     gapModel: summary.gapModel ? { ...summary.gapModel, viewsByCar: own(summary.gapModel.viewsByCar) } : null,
     ...Object.fromEntries(['timingHighlightsByCar', 'adjacentClassBattlesByCar', 'comparisonViewsByCar',
-      'modeAdjacentViewsByCar', 'dashboardAnalysisByCar'].map((key) => [key, own(summary[key])])) };
+      'modeAdjacentViewsByCar', 'dashboardAnalysisByCar', 'driverOverviewByCar'].map((key) => [key, own(summary[key])])) };
 }
 
 function createRendererChannel() {

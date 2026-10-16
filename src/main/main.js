@@ -53,6 +53,7 @@ const {
 const { pitstopCircuitById, normalizePitstopCircuitId } = require('../shared/pitstopCircuits');
 const { buildLapPrediction } = require('../shared/lapPrediction');
 const { buildAdjacentClassBattles } = require('../shared/classBattle');
+const { buildDriverOverview } = require('../shared/driverOverview');
 const {
   DEFAULT_PACE_WINDOW: DEFAULT_GAP_PACE_WINDOW,
   DEFAULT_PIT_SUPPRESSION_LAPS,
@@ -88,6 +89,7 @@ let mainWindow;
 let liveWindow;
 const additionalDashboardWindows = new Map();
 const graphWindowsByCar = new Map();
+const driverWindowsByCar = new Map();
 let pollTimer;
 let pollInFlight = false;
 let activePoll = Promise.resolve();
@@ -401,6 +403,38 @@ function openGraphsWindow(carNumber = loadSettings().followedCar) {
   return true;
 }
 
+// Driver overview window: one live table of every driver of a followed car
+// (driving time, stints, pace deltas). Like the graphs window it only reads
+// the per-car view of collectorState; closing it does not affect collection.
+function openDriversWindow(carNumber = loadSettings().followedCar) {
+  const key = String(carNumber || loadSettings().followedCar || '').trim();
+  const existing = driverWindowsByCar.get(key);
+  if (existing && !existing.isDestroyed()) {
+    existing.show();
+    existing.focus();
+    return true;
+  }
+  const driversWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 900,
+    minHeight: 600,
+    backgroundColor: '#f1f3f0',
+    title: `Driver overview - Car #${key}`,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  secureContents(driversWindow.webContents, (url) => localPageAllowed(url, path.resolve(__dirname, '../renderer')));
+  driverWindowsByCar.set(key, driversWindow);
+  driversWindow.on('closed', () => driverWindowsByCar.delete(key));
+  driversWindow.loadFile(path.join(__dirname, '../renderer/drivers.html'), { query: { car: key } });
+  return true;
+}
+
 // Creates the hidden browser window used to load the live timing website.
 // show:false keeps it invisible during normal collection; the debug button can
 // reveal it through collector:openLiveWindow. Closing the debug window only
@@ -434,6 +468,9 @@ function broadcastState() {
     if (!win.isDestroyed()) win.webContents.send('collector:update', stateForRenderer(win.webContents));
   });
   graphWindowsByCar.forEach((win) => {
+    if (!win.isDestroyed()) win.webContents.send('collector:update', stateForRenderer(win.webContents));
+  });
+  driverWindowsByCar.forEach((win) => {
     if (!win.isDestroyed()) win.webContents.send('collector:update', stateForRenderer(win.webContents));
   });
 }
@@ -932,6 +969,21 @@ function buildAnalyticsSummary(settings, context, rows = []) {
     buildTimingHighlights(history, carNumber, { conditionFilter: resolvedConditionFilter, rows })
   ]));
   const primaryCar = String(settings.followedCar || followedCars[0] || '');
+  // Driver overview shares the stint state, so a followed car's drivers appear
+  // in one place: driving time, stints and pace differences per driver.
+  const driverOverviewByCar = Object.fromEntries(followedCars.map((carNumber) => [
+    carNumber,
+    buildDriverOverview({
+      laps: analysisHistory,
+      stintCar: collectorState.stintState?.cars?.[carNumber] || null,
+      carNumber,
+      conditionFilter: resolvedConditionFilter,
+      liveDriver: (() => {
+        const liveRow = rows.find((row) => String(row.carNumber) === String(carNumber));
+        return liveRow?.driver || liveRow?.driverName || '';
+      })()
+    })
+  ]));
 
   return {
     storageSchemaVersion: 2,
@@ -982,6 +1034,7 @@ function buildAnalyticsSummary(settings, context, rows = []) {
     comparisonViewsByCar,
     modeAdjacentViewsByCar,
     dashboardAnalysisByCar,
+    driverOverviewByCar,
     adjacentClassBattles: modeAdjacentViewsByCar[primaryCar] || null,
     comparisonView: comparisonViewsByCar[primaryCar] || null,
     dashboardAnalysis: dashboardAnalysisByCar[primaryCar] || null
@@ -1752,7 +1805,7 @@ function stopCollector(closeLiveWindow = true) {
 
 function handleTrusted(channel, handler) {
   ipcMain.handle(channel, (event, ...args) => {
-    const windows = [mainWindow, ...additionalDashboardWindows.values(), ...graphWindowsByCar.values()];
+    const windows = [mainWindow, ...additionalDashboardWindows.values(), ...graphWindowsByCar.values(), ...driverWindowsByCar.values()];
     if (!trustedSender(event, windows, path.resolve(__dirname, '../renderer'))) throw new Error('Untrusted IPC sender');
     return handler(event, ...args);
   });
@@ -1857,6 +1910,7 @@ handleTrusted('collector:stop', async (event) => {
 handleTrusted('collector:getState', (event) => stateForRenderer(event.sender, true));
 handleTrusted('collector:openLiveWindow', () => { if (liveWindow && !liveWindow.isDestroyed()) { liveWindow.show(); liveWindow.focus(); return true; } return false; });
 handleTrusted('graphs:open', (_event, carNumber) => openGraphsWindow(carNumber));
+handleTrusted('drivers:open', (_event, carNumber) => openDriversWindow(carNumber));
 async function updateFuelSettingsAndState(payload = {}) {
   if (!FUEL_ESTIMATION_ENABLED) throw new Error('Fuel estimation is temporarily disabled.');
   const settings = loadSettings();
