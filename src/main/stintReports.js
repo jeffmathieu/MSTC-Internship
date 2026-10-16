@@ -10,6 +10,7 @@ const { numberOrNull, driverChange } = require('../shared/pitEvents');
 const { summarizeRaceControl } = require('../shared/raceControl');
 const crypto = require('crypto');
 const { buildCanonicalReportHtml } = require('./reports/canonicalReportHtml');
+const { buildDebriefModel, buildDebriefHtml } = require('./reports/debriefHtml');
 
 const REPORT_LAYOUT_VERSION = 'canonical-landscape-v12-race-summary-no-notes';
 
@@ -776,7 +777,8 @@ async function writeEventSummaryArtifacts({
   sessionMode = 'race',
   raceControlEvents = [],
   preparedReportPayload = null,
-  renderPdf = renderReportLabPdf
+  renderPdf = renderReportLabPdf,
+  pitNotes = {}
 }) {
   const reportPolicy = reportPolicyForSessionMode(sessionMode);
   if (!reportPolicy.writeEventSummaries) return [];
@@ -809,6 +811,7 @@ async function writeEventSummaryArtifacts({
   }));
 
   const results = [];
+  let overviewPayload = null;
   for (const group of groups) {
     const payloads = group.stints.map((stint) => buildStintReportPayload(stint, session, gapSamples));
     const payload = buildCanonicalReportPayload({
@@ -825,6 +828,7 @@ async function writeEventSummaryArtifacts({
     });
     payload.title = group.title;
     payload.legacyPayloads = payloads;
+    if (group.includeSummary) overviewPayload = payload;
     const jsonPath = path.join(carDataFolder, `${group.baseName}.json`);
     // The full overview is the main deliverable: it sits in the session folder
     // itself (one file per car); driver summaries stay next to the stints.
@@ -843,6 +847,13 @@ async function writeEventSummaryArtifacts({
       await printFallback(buildCanonicalFallbackHtml(payload, Boolean(group.includeSummary)), pdfPath);
     }
     results.push({ jsonPath, pdfPath });
+  }
+  // One-page debrief next to the overview. It always uses the built-in
+  // printer, so it looks the same whichever engine rendered the overview.
+  if (overviewPayload) {
+    const debriefPath = path.join(sessionFolder, `${summaryPrefix}_DEBRIEF_car-${safeFilePart(carNumber, 'unknown')}.pdf`);
+    await printFallback(buildDebriefHtml(buildDebriefModel({ payload: overviewPayload, history, stints: closed, pitNotes })), debriefPath);
+    results.push({ jsonPath: null, pdfPath: debriefPath, kind: 'debrief' });
   }
   return results;
 }

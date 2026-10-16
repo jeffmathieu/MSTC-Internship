@@ -237,14 +237,17 @@ module.exports = (async () => {
     history,
     renderPdf: fakeCanonicalRenderer
   });
-  assert.strictEqual(summaries.length, 2, 'race and driver summaries are generated at session end');
-  assert.ok(summaries.every((item) => path.dirname(item.jsonPath).endsWith(path.join('car-33', 'data'))),
+  assert.strictEqual(summaries.length, 3, 'race summary, driver summary and debrief are generated at session end');
+  const debrief = summaries.find((item) => item.kind === 'debrief');
+  assert.strictEqual(path.basename(debrief.pdfPath), 'RACE_DEBRIEF_car-33.pdf');
+  assert.strictEqual(path.dirname(debrief.pdfPath), output, 'the debrief PDF sits in the session folder');
+  assert.ok(summaries.filter((item) => item !== debrief).every((item) => path.dirname(item.jsonPath).endsWith(path.join('car-33', 'data'))),
     'summary JSON payloads go in the car data folder');
   assert.strictEqual(path.dirname(summaries[0].pdfPath), output, 'the full overview PDF sits in the session folder');
   assert.strictEqual(path.basename(summaries[0].pdfPath), 'RACE_SUMMARY_car-33.pdf');
   assert.ok(path.dirname(summaries[1].pdfPath).endsWith('car-33'), 'driver summaries stay with the car stints');
   assert.strictEqual(summaries.every((summary) => fs.existsSync(summary.pdfPath)), true);
-  assert.strictEqual(printCount, 6);
+  assert.strictEqual(printCount, 7);
 
   const practiceOutput = path.join(output, 'practice');
   const practice = await writeClosedStintArtifacts({
@@ -263,7 +266,7 @@ module.exports = (async () => {
   assert.strictEqual(storedPractice.reportScope, 'session-and-stints');
   assert.deepStrictEqual(storedPractice.raceSummary.pitStops, []);
   assert.strictEqual(storedPractice.stints[0].endPitStop, null);
-  assert.strictEqual(printCount, 7);
+  assert.strictEqual(printCount, 8);
 
   const practiceSummaries = await writeEventSummaryArtifacts({
     BrowserWindow: FakeBrowserWindow,
@@ -275,9 +278,9 @@ module.exports = (async () => {
     sessionMode: 'practice',
     renderPdf: fakeCanonicalRenderer
   });
-  assert.strictEqual(practiceSummaries.length, 2, 'practice writes session and driver summaries without pit analysis');
+  assert.strictEqual(practiceSummaries.length, 3, 'practice writes session summary, driver summaries and a debrief without pit analysis');
   assert.strictEqual(practiceSummaries.every((summary) => fs.existsSync(summary.pdfPath)), true);
-  assert.strictEqual(printCount, 9);
+  assert.strictEqual(printCount, 11);
 
   const migrationOutput = path.join(output, 'old-layout');
   const oldPaths = artifactPaths(migrationOutput, closedStint);
@@ -293,7 +296,7 @@ module.exports = (async () => {
     renderPdf: fakeCanonicalRenderer
   });
   assert.strictEqual(migrated.pdfCreated, true, 'old automatic reports are regenerated once');
-  assert.strictEqual(printCount, 10);
+  assert.strictEqual(printCount, 12);
   assert.strictEqual(fs.readFileSync(oldPaths.pdfPath, 'utf8'), '%PDF-canonical-fake');
 
   const openStint = stintsForCar(history, 33).at(-1);

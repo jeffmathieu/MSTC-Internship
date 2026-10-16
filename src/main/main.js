@@ -1121,6 +1121,7 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
       pdfEngine: app.isPackaged ? 'electron' : 'auto',
       gapSamples: gapMemoryState?.samples || [],
       pitEvents: serviceStates.get(carNumber)?.events || [],
+      pitNotes: pitNotesStore[carNumber] || {},
       referenceTimes: settings.referenceTimes || {}, pitRules: settings.pitRules || {}, sessionMode: reportSessionMode,
       stintOptions: { closeFinalAt: stintOptions.closeFinalAt, generatedAt, liveRow } };
     if (sessionFinished && closedStints.length) {

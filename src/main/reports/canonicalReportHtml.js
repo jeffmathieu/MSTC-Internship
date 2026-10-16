@@ -330,11 +330,16 @@ function buildCanonicalReportHtml(payload, includeSummary = false) {
       graph(page, 24, 35, PAGE_W - 48, 490, data); pages.push(page);
     });
   }
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${escape(payload.race?.sessionName)} stint analysis</title>
+  return wrapDocument(payload, pages, 'stint analysis');
+}
+
+// Shared print document: every Page is one A4 landscape sheet.
+function wrapDocument(payload, pages, label) {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escape(payload.race?.sessionName)} ${label}</title>
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
     <style>@page { size: A4 landscape; margin: 0; } * { box-sizing: border-box; } html,body { margin:0; padding:0; }
     .report-page { width:297mm; height:210mm; overflow:hidden; break-after:page; } .report-page:last-child { break-after:auto; }
     .report-page svg { display:block; width:100%; height:100%; } </style></head><body>${pages.map((page) => page.html()).join('')}</body></html>`;
 }
 
-module.exports = { buildCanonicalReportHtml };
+module.exports = { buildCanonicalReportHtml, wrapDocument, Page, graph, C, COLORS, PAGE_W, PAGE_H, time, duration, deltaDuration, finite };
