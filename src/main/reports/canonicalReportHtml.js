@@ -183,48 +183,121 @@ function lapChart(page, x, y, width, height, title, laps, key, average, statusKe
   page.text(x + width - 14, y + 8, `Lap ${points.at(-1).lapNumber || points.length}`, 6.5, C.muted, false, 'end');
 }
 
-// Greedy word wrap for the fixed-width SVG text (about 'maxChars' per line).
-function wrapLines(text, maxChars, maxLines) {
+// ---- Pit stop notes on the stint page ---------------------------------------
+// A stint ends when the driver changes, so one stint can contain several pit
+// stops. Their notes share one panel next to the lap chart; when they do not fit
+// at a readable size the panel shows excerpts and a continuation page prints
+// every note in full.
+const wrapAll = (text, maxChars) => {
   const lines = [];
   let line = '';
   for (const word of String(text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)) {
-    if ((line + ' ' + word).trim().length > maxChars) { lines.push(line); line = word.slice(0, maxChars); } else line = (line + ' ' + word).trim();
+    if ((line + ' ' + word).trim().length > maxChars && line) { lines.push(line); line = ''; }
+    line = (line + ' ' + word).trim();
+    while (line.length > maxChars) { lines.push(line.slice(0, maxChars)); line = line.slice(maxChars); }
   }
   if (line) lines.push(line);
-  if (lines.length > maxLines) { lines.length = maxLines; lines[maxLines - 1] = lines[maxLines - 1].replace(/.{0,2}$/, '') + '…'; }
   return lines;
+};
+
+function stopsForNotes(stint) {
+  const list = [...(stint.pitStopsDuring || [])];
+  const end = stint.endPitStop;
+  if (end && !list.some((stop) => (end.id && stop.id === end.id)
+    || (end.stopNumber != null && stop.stopNumber === end.stopNumber && stop.lapNumber === end.lapNumber))) list.push(end);
+  return list;
 }
 
-// The engineer's notes for the stop that ended this stint.
-function notesPanel(page, x, y, width, height, stint) {
-  const stop = stint.endPitStop, notes = stop.notes;
-  page.panel(x, y, width, height, `Pit stop #${stop.stopNumber ?? '-'} notes`);
+const hasStopNotes = (stint) => stopsForNotes(stint).some((stop) => stop.notes);
+
+// One stop as drawable lines. maxTextLines caps each note text (null = full text).
+function stopBlock(stop, maxChars, maxTextLines, ordinal) {
   const yes = (value) => (value ? 'yes' : 'no');
-  let cursor = y + height - 34;
-  page.text(x + 10, cursor, `Fuel added: ${yes(notes.fuelAdded)}   Tyres changed: ${yes(notes.tyresChanged)}`, 7, C.ink, true, 'start', width - 20);
-  cursor -= 12;
-  page.text(x + 10, cursor, `Tyre set: ${notes.tyreSet || '-'}`, 7, C.ink, false, 'start', width - 20);
-  const block = (label, text, maxLines) => {
-    cursor -= 17;
-    page.text(x + 10, cursor, label.toUpperCase(), 5.8, C.muted, true, 'start', width - 20);
-    const lines = text ? wrapLines(text, 50, maxLines) : ['-'];
-    lines.forEach((line) => { cursor -= 9.5; page.text(x + 10, cursor, line, 6.8, text ? C.ink : C.muted, false, 'start', width - 20); });
-  };
-  block(`Driver notes on the stint${stint.driverName ? ` (${stint.driverName})` : ''}`, notes.driverNotes, 6);
-  block('Pit stop notes', notes.pitNotes, 5);
+  const head = `Stop ${stop.stopNumber ?? ordinal}${stop.lapNumber ? ` · lap ${stop.lapNumber}` : ''}${finite(stop.durationMs) ? ` · ${duration(stop.durationMs)}` : ''}${stop.closed === false ? ' · in progress' : ''}`;
+  const notes = stop.notes;
+  if (!notes) return { head, lines: [{ text: 'No notes saved', muted: true }], truncated: false };
+  const lines = [{ text: `Fuel added: ${yes(notes.fuelAdded)}   Tyres changed: ${yes(notes.tyresChanged)}   Tyre set: ${notes.tyreSet || '-'}`, bold: true }];
+  let truncated = false;
+  [['Driver notes', notes.driverNotes], ['Pit stop notes', notes.pitNotes]].forEach(([label, text]) => {
+    if (!text) return;
+    const wrapped = wrapAll(`${label}: ${text}`, maxChars);
+    if (maxTextLines && wrapped.length > maxTextLines) {
+      truncated = true;
+      wrapped.length = maxTextLines;
+      wrapped[maxTextLines - 1] = `${wrapped[maxTextLines - 1].replace(/.{0,2}$/, '')}…`;
+    }
+    wrapped.forEach((line) => lines.push({ text: line }));
+  });
+  return { head, lines, truncated };
+}
+
+// Chooses full text when it fits the panel, otherwise equal excerpts per stop.
+function planStopNotes(stops, maxChars, capacityLines) {
+  const full = stops.map((stop, i) => stopBlock(stop, maxChars, null, i + 1));
+  const used = (blocks) => blocks.reduce((sum, block) => sum + 1 + block.lines.length, 0) + Math.max(0, blocks.length - 1) * 0.6;
+  if (used(full) <= capacityLines) return { blocks: full, truncated: false };
+  const perText = Math.max(1, Math.floor((capacityLines - stops.length * 2.6) / (stops.length * 2)));
+  const cut = stops.map((stop, i) => stopBlock(stop, maxChars, perText, i + 1));
+  return { blocks: cut, truncated: true };
+}
+
+const NOTES_PANEL_WIDTH = 244;
+const NOTE_LINE = 8.1;
+
+function notesPanel(page, x, y, width, height, stint) {
+  const stops = stopsForNotes(stint);
+  const plan = planStopNotes(stops, 60, Math.floor((height - 40) / NOTE_LINE));
+  page.panel(x, y, width, height, `Pit stop notes${stops.length > 1 ? ` (${stops.length} stops)` : ''}`);
+  let cursor = y + height - 32;
+  plan.blocks.forEach((block, index) => {
+    if (index) cursor -= NOTE_LINE * 0.6;
+    page.text(x + 10, cursor, block.head, 6.8, C.blue, true, 'start', width - 20);
+    block.lines.forEach((line) => {
+      cursor -= NOTE_LINE;
+      page.text(x + 10, cursor, line.text, 6.2, line.muted ? C.muted : C.ink, Boolean(line.bold), 'start', width - 20);
+    });
+    cursor -= NOTE_LINE;
+  });
+  if (plan.truncated) page.text(x + width - 10, y + 7, 'Shortened here; full notes on the next page', 5.6, C.muted, false, 'end');
+  return plan.truncated;
+}
+
+// Full-width continuation pages with every note in full.
+function stopNotesPages(payload, stint, index) {
+  const stops = stopsForNotes(stint);
+  if (!hasStopNotes(stint) || !planStopNotes(stops, 60, Math.floor(150 / NOTE_LINE)).truncated) return [];
+  const pages = [];
+  const detail = `${stint.driverName || ''}  |  Car stint ${stint.stintNumber}`;
+  const make = () => new Page(payload, pages.length ? 'PIT STOP NOTES (CONTINUED)' : 'PIT STOP NOTES', detail);
+  let page = make(), cursor = PAGE_H - 90;
+  const lineHeight = 11.5;
+  stops.forEach((stop, i) => {
+    const block = stopBlock(stop, 150, null, i + 1);
+    if (cursor - (1 + Math.min(block.lines.length, 3)) * lineHeight < 40) { pages.push(page); page = make(); cursor = PAGE_H - 90; }
+    page.text(40, cursor, block.head, 9, C.blue, true);
+    block.lines.forEach((line) => {
+      cursor -= lineHeight;
+      if (cursor < 36) { pages.push(page); page = make(); cursor = PAGE_H - 90; }
+      page.text(52, cursor, line.text, 8, line.muted ? C.muted : C.ink, Boolean(line.bold), 'start', PAGE_W - 92);
+    });
+    cursor -= lineHeight * 1.6;
+  });
+  pages.push(page);
+  pages.forEach((item) => item.footer(`Pit stop notes | stint ${index} | page ${pages.indexOf(item) + 1}/${pages.length}`));
+  return pages;
 }
 
 function stintPage(payload, stint, index) {
   const detail = `Driver stint ${stint.driverStintNumber || stint.stintNumber}  |  Car stint ${stint.stintNumber}  |  ${stint.lapNumberSource === 'observed-sequence' ? 'observed laps' : 'laps'} ${stint.startLap || '-'}-${stint.endLap || '-'}`;
-  const page = new Page(payload, stint.driverName, detail), stats = stint.stats || {}, laps = stint.laps || [];
+  const page = new Page(payload, stint.driverName, stint.preliminary ? `PRELIMINARY: stint in progress  |  ${detail}` : detail), stats = stint.stats || {}, laps = stint.laps || [];
   if (stint.endPitStop) {
     const stop = stint.endPitStop;
     page.text(PAGE_W - 28, PAGE_H - 54, `End pit #${stop.stopNumber || '-'}: ${duration(stop.durationMs)} | fuel ${duration(stop.fuelDurationMs)} | pit ${duration(stop.pitDurationMs)} (${deltaDuration(stop.deltaVsTargetMs)} vs target)${rejoin(stop) ? ` | rejoined ${rejoin(stop)}` : ''}`, 6.2, '#FFFFFF', false, 'end', 420);
   }
-  const notes = stint.endPitStop?.notes;
-  const notesWidth = notes ? 244 : 0;
-  lapChart(page, 28, 328, PAGE_W - 56 - (notes ? notesWidth + 8 : 0), 190, 'Lap times', laps, 'lapTimeMs', stats.averageLapMs, 'status');
-  if (notes) notesPanel(page, PAGE_W - 28 - notesWidth, 328, notesWidth, 190, stint);
+  const showNotes = hasStopNotes(stint);
+  const notesWidth = showNotes ? NOTES_PANEL_WIDTH : 0;
+  lapChart(page, 28, 328, PAGE_W - 56 - (showNotes ? notesWidth + 8 : 0), 190, 'Lap times', laps, 'lapTimeMs', stats.averageLapMs, 'status');
+  if (showNotes) notesPanel(page, PAGE_W - 28 - notesWidth, 328, notesWidth, 190, stint);
   const width = (PAGE_W - 72) / 3;
   for (let sector = 1; sector <= 3; sector++) lapChart(page, 28 + (sector - 1) * (width + 8), 184, width, 132, `Sector ${sector}`, laps, `sector${sector}Ms`, stats[`averageSector${sector}Ms`], `sector${sector}Status`);
   page.panel(28, 34, width, 138, 'Stint statistics');
@@ -348,7 +421,7 @@ function graph(page, x, y, width, height, data = {}) {
 function buildCanonicalReportHtml(payload, includeSummary = false) {
   const pages = [];
   if (includeSummary) pages.push(...overview(payload), ...pitPages(payload));
-  (payload.stints || []).forEach((stint, index) => pages.push(stintPage(payload, stint, index + 1)));
+  (payload.stints || []).forEach((stint, index) => pages.push(stintPage(payload, stint, index + 1), ...stopNotesPages(payload, stint, index + 1)));
   if (includeSummary) {
     const graphs = payload.raceSummary?.graphs || {};
     if (graphs.driverLaps || graphs.driverPace || graphs.driverSectors) {

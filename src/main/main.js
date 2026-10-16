@@ -1148,6 +1148,31 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
         .catch((error) => addError(error, 'stint-report-worker'))
         .finally(() => pendingStintReports.delete(reportKey));
     }
+
+    // A stint only ends when the driver changes, so a driver can pit several
+    // times inside one stint. Write a preliminary PDF of the running stint when
+    // the car is back on track after a stop and whenever the stop notes change;
+    // the final report replaces it (same file) when the driver leaves.
+    const openStint = stintState.cars[carNumber].stints.at(-1);
+    if (!sessionFinished && openStint && !openStint.closed && openStint.lapCount > 0) {
+      const startedAt = Date.parse(openStint.startedAt);
+      const stops = (serviceStates.get(carNumber)?.events || []).filter((event) => Number.isFinite(startedAt)
+        && Date.parse(event.entryAt || '') >= startedAt - 1000);
+      const notes = pitNotesStore[carNumber] || {};
+      const trigger = stops.filter((event) => event.closed || notes[event.id]);
+      if (trigger.length) {
+        const signature = hashObject({ driver: openStint.driverName, stops: trigger.map((event) => [event.id, event.closed, notes[event.id] || null]),
+          corrections: reportCorrectionsRevision });
+        const reportKey = `${folder}|${carNumber}|preliminary|${openStint.stintNumber}|${signature}`;
+        if (!pendingStintReports.has(reportKey) && !completedReportKeys.has(reportKey)) {
+          pendingStintReports.add(reportKey);
+          reportQueue.enqueue(reportKey, { ...input, stintNumber: openStint.stintNumber, preliminary: true })
+            .then(() => completedReportKeys.add(reportKey))
+            .catch((error) => addError(error, 'preliminary-stint-report-worker'))
+            .finally(() => pendingStintReports.delete(reportKey));
+        }
+      }
+    }
   }
   return { ...stintState, generatedStintReports, generatedEventSummaries };
 }

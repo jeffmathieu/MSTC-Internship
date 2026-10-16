@@ -23,12 +23,31 @@ const payload = {
 };
 const html = buildCanonicalFallbackHtml(payload, true);
 
-// The stop that ended a stint can carry the engineer's notes: they get a panel
-// next to the lap chart (and old reports without notes are unchanged).
-const withNotes = buildCanonicalFallbackHtml({ ...payload, stints: [{ ...payload.stints[0], endPitStop: { stopNumber: 2, notes: {
-  fuelAdded: true, tyresChanged: false, tyreSet: 'Set <4>', driverNotes: 'Car pushes in slow corners and the rear is loose on exit in the final laps', pitNotes: 'Clean stop' } } }] }, false);
-assert.ok(withNotes.includes('PIT STOP #2 NOTES') && withNotes.includes('Set &lt;4&gt;') && withNotes.includes('DRIVER NOTES ON THE STINT (JOHN CORBETT)'), 'stint notes panel is drawn and escaped');
-assert.ok(!buildCanonicalFallbackHtml(payload, false).includes('NOTES ON THE STINT'), 'stints without notes keep the original layout');
+// Stops during a stint carry the engineer's notes: one panel next to the lap chart
+// (old reports without notes are unchanged), a continuation page when they do not fit.
+const stintWith = (stops, extra = {}) => ({ ...payload, stints: [{ ...payload.stints[0], pitStopsDuring: stops, ...extra }] });
+const noteStop = (n, lap, notes) => ({ id: `s${n}`, stopNumber: n, lapNumber: lap, durationMs: 65000, closed: true, notes });
+const pageCount = (html) => (html.match(/class="report-page"/g) || []).length;
+
+const singleStop = buildCanonicalFallbackHtml(stintWith([noteStop(2, 20, { fuelAdded: true, tyresChanged: false, tyreSet: 'Set <4>',
+  driverNotes: 'Car pushes in slow corners', pitNotes: 'Clean stop' })]), false);
+assert.ok(singleStop.toUpperCase().includes('PIT STOP NOTES') && singleStop.includes('Stop 2') && singleStop.includes('Set &lt;4&gt;'), 'notes panel is drawn and escaped');
+assert.ok(singleStop.includes('Driver notes: Car pushes in slow corners'));
+assert.strictEqual(pageCount(singleStop), 1, 'short notes fit the stint page');
+
+const longText = 'The car understeers on corner entry and the front tyres drop off after twenty laps. '.repeat(6);
+const threeStops = buildCanonicalFallbackHtml(stintWith([1, 2, 3].map((n) => noteStop(n, n * 15, { fuelAdded: true, tyresChanged: n === 2, tyreSet: `Set ${n}`,
+  driverNotes: longText, pitNotes: `Remark ${n}: ${longText}` }))), false);
+assert.ok(pageCount(threeStops) >= 2, 'long notes of several stops continue on an extra page');
+['Stop 1', 'Stop 2', 'Stop 3', 'Set 3', 'Remark 3'].forEach((text) => assert.ok(threeStops.includes(text), `${text} is printed`));
+assert.ok(threeStops.toUpperCase().includes('PIT STOP NOTES (CONTINUED)') || threeStops.toUpperCase().includes('FULL NOTES ON THE NEXT PAGE'), 'the panel points to the full notes');
+const printedWords = (threeStops.match(/the front tyres drop off/g) || []).length;
+assert.ok(printedWords >= 6, 'the full text of every note is printed on the continuation page');
+
+const unnoted = buildCanonicalFallbackHtml(stintWith([noteStop(1, 10, null)]), false);
+assert.ok(!unnoted.toUpperCase().includes('PIT STOP NOTES'), 'stops without any notes add no panel');
+assert.ok(buildCanonicalFallbackHtml(stintWith([], { preliminary: true }), false).includes('PRELIMINARY: stint in progress'), 'running stints are marked preliminary');
+assert.ok(!buildCanonicalFallbackHtml(payload, false).toUpperCase().includes('NOTES'), 'stints without stop data keep the original layout');
 const pages = [...html.matchAll(/<section class="report-page">([\s\S]*?)<\/section>/g)].map((match) => match[1]);
 assert.strictEqual(pages.length, 7, 'race summaries contain overview, two pit pages, one stint, team graphs and two class pages');
 assert.ok(pages[0].includes('FULL RACE OVERVIEW') && pages[0].includes('FULL-SESSION PACE STATISTICS'));

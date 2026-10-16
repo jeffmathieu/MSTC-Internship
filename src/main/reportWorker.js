@@ -22,11 +22,11 @@ const { writeClosedStintArtifacts, writeEventSummaryArtifacts, buildCanonicalRep
     ? readJsonLines(fs, gapsPath).entries : input.gapSamples || [];
   const raceControlEvents = readJsonLines(fs, path.join(dataFolder, 'race_control_events.jsonl')).entries;
   const preparedReportPayload = buildCanonicalReportPayload({ ...input, history, gapSamples, raceControlEvents,
-    stints: allStints.filter((stint) => stint.closed && stint.lapCount > 0) });
+    stints: allStints.filter((stint) => (stint.closed || input.preliminary) && stint.lapCount > 0) });
   const options = { ...input, history, gapSamples, printFallback, raceControlEvents, preparedReportPayload,
     renderPdf: input.pdfEngine === 'electron' ? () => ({ rendered: false, reason: 'built-in-electron-engine' }) : renderReportLabPdf };
   const results = [];
-  for (const stint of allStints.filter((item) => item.closed && item.lapCount > 0)) {
+  for (const stint of allStints.filter((item) => (item.closed || input.preliminary) && item.lapCount > 0)) {
     if (input.stintNumber != null && stint.stintNumber !== input.stintNumber) continue;
     results.push(await writeClosedStintArtifacts({ ...options, stint, force: Boolean(input.final) }));
   }

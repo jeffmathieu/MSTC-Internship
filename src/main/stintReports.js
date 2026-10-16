@@ -289,7 +289,23 @@ function endPitStopForStint(stint = {}, pitStops = []) {
   return pitStops.find((stop) => Number(stop.lapNumber) === endLap + 1) || null;
 }
 
-function canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes, pitStops = []) {
+// Every pit stop that happened while this stint was running (a stint only ends
+// when the driver changes, so a driver can stop several times inside one stint).
+function stopsDuringStint(stint = {}, stops = []) {
+  const start = Date.parse(stint.startedAt || '');
+  const end = stint.closedAt ? Date.parse(stint.closedAt) + 60000 : Infinity;
+  const firstLap = Number(stint.startLap), lastLap = Number(stint.endLap);
+  return stops.filter((stop) => {
+    const at = Date.parse(stop.entryAt || '');
+    if (Number.isFinite(at) && Number.isFinite(start)) return at >= start - 1000 && at <= end;
+    const lap = Number(stop.lapNumber);
+    return Number.isFinite(lap) && Number.isFinite(firstLap) && lap >= firstLap && lap <= (Number.isFinite(lastLap) ? lastLap + 1 : Infinity);
+  }).map((stop) => ({ id: stop.id, stopNumber: stop.stopNumber ?? null, lapNumber: stop.lapNumber ?? null, entryAt: stop.entryAt || null,
+    exitAt: stop.exitAt || null, durationMs: stop.durationMs ?? stop.totalDurationMs ?? null, closed: Boolean(stop.closed),
+    driverBefore: stop.driverBefore || '', driverAfter: stop.driverAfter || '', notes: stop.notes || null }));
+}
+
+function canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes, pitStops = [], allStops = pitStops) {
   const legacy = buildStintReportPayload(stint, session, gapSamples);
   const stats = legacy.stint.stats || {};
   const firstLap = legacy.stint.laps[0];
@@ -307,6 +323,7 @@ function canonicalStint(stint, session, gapSamples, driverStats, history, refere
         ? driver.bestLapMs - stats.bestLapMs
         : null
     }));
+  const stopsInStint = stopsDuringStint(stint, allStops);
   const classComparisons = classComparisonsForStint(history, stint.laps || [], stint.carNumber, legacy.session.className);
   const insights = buildStintInsights(stint.laps || [], referenceTimes);
   insights.classRanking = classRankingForStint(stint.laps || [], classComparisons);
@@ -330,6 +347,8 @@ function canonicalStint(stint, session, gapSamples, driverStats, history, refere
     classComparisons,
     insights,
     endPitStop: endPitStopForStint(stint, pitStops),
+    ...(stopsInStint.length ? { pitStopsDuring: stopsInStint } : {}),
+    ...(stint.closed === false ? { preliminary: true } : {}),
     laps: legacy.stint.laps,
     gapHistory: legacy.gapHistory
   };
@@ -447,7 +466,7 @@ function buildCanonicalReportPayload({
     ].filter(Boolean),
     stints: stints.map((stint) => canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes,
       // Practice/qualifying stints only show a stop when it carries the engineer's notes.
-      reportPolicy.includePitstops ? pitStops : sessionStops.filter((stop) => stop.notes))),
+      reportPolicy.includePitstops ? pitStops : sessionStops.filter((stop) => stop.notes), sessionStops)),
     // Keep the first automatic-report schema available to existing readers.
     session: legacy?.session || null,
     stint: legacy?.stint || null,
@@ -690,9 +709,12 @@ async function writeClosedStintArtifacts({
   raceControlEvents = [],
   preparedReportPayload = null,
   renderPdf = renderReportLabPdf,
-  pitNotes = {}
+  pitNotes = {},
+  preliminary = false
 }) {
-  if (!stint?.closed) return { written: false, reason: 'stint-open' };
+  // A preliminary report covers a stint that is still running; it is replaced by
+  // the final report (same file) once the driver leaves.
+  if (!stint?.closed && !preliminary) return { written: false, reason: 'stint-open' };
   if (!Number(stint.lapCount ?? stint.laps?.length)) {
     return { written: false, reason: 'stint-empty' };
   }
