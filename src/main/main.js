@@ -1128,7 +1128,8 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
     if (sessionFinished && closedStints.length) {
       const result = await reportQueue.enqueue(`${folder}|${carNumber}|final`, { ...input, final: true });
       generatedStintReports.push(...result.results);
-      generatedEventSummaries.push(...result.summaries);
+      generatedEventSummaries.push(...result.summaries.filter((summary) => !summary.error));
+      result.summaries.filter((summary) => summary.error).forEach((summary) => addError(new Error(summary.error), 'debrief-pdf'));
       continue;
     }
     for (const stint of closedStints) {

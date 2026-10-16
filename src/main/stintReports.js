@@ -888,8 +888,13 @@ async function writeEventSummaryArtifacts({
   // printer, so it looks the same whichever engine rendered the overview.
   if (overviewPayload) {
     const debriefPath = path.join(sessionFolder, `${summaryPrefix}_DEBRIEF_car-${safeFilePart(carNumber, 'unknown')}.pdf`);
-    await printFallback(buildDebriefHtml(buildDebriefModel({ payload: overviewPayload, history, stints: closed, pitNotes })), debriefPath);
-    results.push({ jsonPath: null, pdfPath: debriefPath, kind: 'debrief' });
+    // A debrief problem must never take down the overview and driver summaries.
+    try {
+      await printFallback(buildDebriefHtml(buildDebriefModel({ payload: overviewPayload, history, stints: closed, pitNotes })), debriefPath);
+      results.push({ jsonPath: null, pdfPath: debriefPath, kind: 'debrief' });
+    } catch (error) {
+      results.push({ jsonPath: null, pdfPath: null, kind: 'debrief', error: error?.message || String(error) });
+    }
   }
   return results;
 }
