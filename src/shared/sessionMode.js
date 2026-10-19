@@ -90,13 +90,29 @@
     });
   }
 
-  function isRunningClassRow(row, classLeaderLap) {
+  // Only an explicit retirement removes a car from the class lists. Cars in the
+  // pits stay (also long repairs), and "out" / "finished" are no retirement:
+  // some pages use "out" for the out lap and every car finishes at the end.
+  // Lap counts are not used: on a rotating GAP page they are often stale.
+  function isRetiredRow(row) {
+    const state = [row?.state, row?.status, row?.eta].map((value) => String(value || '')).join(' ').toLowerCase();
+    return /\b(ret|retired|dnf|dns|dq|dsq|disq|excluded)\b/.test(state);
+  }
+
+  function rowInPit(row) {
     const state = String(row?.state || row?.status || '').trim().toLowerCase();
-    if (/\b(ret|dnf|dns|out|stop|finished|finish|disq|dq)\b/.test(state)) return false;
-    const pitLike = /\b(p|pit|in pit)\b/.test(state) || /in pit/i.test(String(row?.eta || row?.pitStatus || ''));
-    const lap = lapNumberFromRow(row);
-    if (pitLike && Number.isFinite(classLeaderLap) && Number.isFinite(lap) && classLeaderLap - lap >= 5) return false;
-    return true;
+    return /^(p|pit|in pit|in|f|fuel)$/.test(state) || /in pit/i.test(String(row?.eta || row?.pitStatus || ''));
+  }
+
+  // How many laps we completed since this car last crossed the line. A car that
+  // is not in the pits and has not crossed for several of our laps has
+  // probably stopped on track.
+  const STOPPED_AFTER_OUR_LAPS = 3;
+  function ourLapsSinceSeen(history, ourCarNumber, carNumber) {
+    const at = (lap) => Date.parse(lap?.recordedAt || lap?.collectedAt || '');
+    const lastSeen = at(lapAnalytics.lapsForCar(history, carNumber).at(-1));
+    if (!Number.isFinite(lastSeen)) return null;
+    return lapAnalytics.lapsForCar(history, ourCarNumber).filter((lap) => at(lap) > lastSeen).length;
   }
 
   function statsForCar(history, rows, carNumber, conditionFilter = 'combined') {
@@ -142,8 +158,7 @@
     const classRows = (rows || [])
       .filter((row) => row.className === className)
       .sort((a, b) => (Number(a.classPosition) || 999999) - (Number(b.classPosition) || 999999));
-    const classLeaderLap = Math.max(...classRows.map(lapNumberFromRow).filter(Number.isFinite));
-    const activeRows = classRows.filter((row) => isRunningClassRow(row, classLeaderLap));
+    const activeRows = classRows.filter((row) => !isRetiredRow(row));
     const bic = lapAnalytics.bestCarInClassByAverage(history, className);
 
     const cars = activeRows.map((row) => {
@@ -156,6 +171,12 @@
         teamName: row.team || row.teamName || stats.teamName || '',
         isOurCar: String(row.carNumber) === String(ourCarNumber),
         isBic: bic && String(row.carNumber) === String(bic.carNumber),
+        ...(() => {
+          if (String(row.carNumber) === String(ourCarNumber)) return { status: rowInPit(row) ? 'pit' : '', lapsSinceSeen: 0 };
+          const lapsSinceSeen = ourLapsSinceSeen(history, ourCarNumber, row.carNumber);
+          const status = rowInPit(row) ? 'pit' : lapsSinceSeen >= STOPPED_AFTER_OUR_LAPS ? 'stopped' : '';
+          return { status, lapsSinceSeen };
+        })(),
         metrics: [
           targetMetric('Best', ourCar.bestLapMs, stats.bestLapMs),
           targetMetric('Last', ourCar.lastLapMs, stats.lastLapMs),

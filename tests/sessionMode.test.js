@@ -131,7 +131,18 @@ const longPitRows = [
   { position: 3, carNumber: '9', className: 'LMP3', classPosition: 3, driver: 'Rival B', lapNumber: 14, state: 'P' }
 ];
 const longPitView = buildComparisonView({ history, rows: longPitRows, ourCarNumber: 13, selectedCarNumber: 9, mode: 'race' });
-assert.deepStrictEqual(longPitView.matrix.classCars.map((car) => car.carNumber), ['2', '13'], 'cars that are 5+ laps down in pit are hidden without changing PIC order');
+assert.deepStrictEqual(longPitView.matrix.classCars.map((car) => car.carNumber), ['2', '13', '9'],
+  'a car in the pits stays in the class list, even when its (possibly stale) lap count looks far behind');
+assert.strictEqual(longPitView.matrix.classCars[2].status, 'pit', 'and is marked as in the pits');
+
+const retiredRows = longPitRows.map((row) => (row.carNumber === '9' ? { ...row, state: 'RET' } : row));
+assert.deepStrictEqual(buildComparisonView({ history, rows: retiredRows, ourCarNumber: 13, selectedCarNumber: 9, mode: 'race' })
+  .matrix.classCars.map((car) => car.carNumber), ['2', '13'], 'only an explicit retirement removes a car');
+for (const state of ['OUT', 'Finished', 'OutLap']) {
+  const rowsWithState = longPitRows.map((row) => (row.carNumber === '9' ? { ...row, state } : row));
+  assert.strictEqual(buildComparisonView({ history, rows: rowsWithState, ourCarNumber: 13, selectedCarNumber: 9, mode: 'race' })
+    .matrix.classCars.length, 3, `state ${state} is not a retirement`);
+}
 
 const missingPicRows = [
   { position: 3, carNumber: '9', className: 'LMP3', driver: 'Rival B' },
@@ -260,5 +271,23 @@ const officialAdjacent = qualifyingAdjacentView(history, officialBestRows, 13);
 assert.strictEqual(officialAdjacent.ahead.ourBestLapMs, 97000);
 assert.strictEqual(officialAdjacent.ahead.rivalBestLapMs, 96000);
 assert.strictEqual(officialAdjacent.ahead.bestLapDeltaMs, -1000);
+
+// A car that stopped crossing the line while we did 3+ laps (and is not in the
+// pits) stays listed but is marked as possibly out.
+const stoppedHistory = [
+  ...Array.from({ length: 10 }, (_, i) => lap({ carNumber: 13, teamName: 'Us', driverName: 'Driver B', lapNumber: i + 1, lapTimeMs: 100000, sector1Ms: 30000, sector2Ms: 40000, sector3Ms: 30000 })),
+  ...Array.from({ length: 5 }, (_, i) => lap({ carNumber: 9, teamName: 'Them', driverName: 'Rival B', lapNumber: i + 1, lapTimeMs: 100500, sector1Ms: 30000, sector2Ms: 40000, sector3Ms: 30500 }))
+];
+const stoppedRows = [
+  { position: 1, carNumber: '13', className: 'LMP3', classPosition: 1, driver: 'Driver B' },
+  { position: 2, carNumber: '9', className: 'LMP3', classPosition: 2, driver: 'Rival B', eta: '00:30' }
+];
+const stoppedCar = buildComparisonView({ history: stoppedHistory, rows: stoppedRows, ourCarNumber: 13, selectedCarNumber: 9, mode: 'race' })
+  .matrix.classCars.find((car) => car.carNumber === '9');
+assert.strictEqual(stoppedCar.status, 'stopped', 'not seen at the line for several of our laps');
+assert.strictEqual(stoppedCar.lapsSinceSeen, 5);
+const pittingCar = buildComparisonView({ history: stoppedHistory, rows: stoppedRows.map((row) => (row.carNumber === '9' ? { ...row, eta: 'In Pit' } : row)),
+  ourCarNumber: 13, selectedCarNumber: 9, mode: 'race' }).matrix.classCars.find((car) => car.carNumber === '9');
+assert.strictEqual(pittingCar.status, 'pit', 'a long pit stop is shown as in the pits, not as out');
 
 console.log('Session mode tests passed.');

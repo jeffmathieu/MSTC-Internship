@@ -1046,6 +1046,15 @@ function comparisonCarLabel(car, fallback = '—') {
     badge.textContent = 'BIC';
     label.appendChild(badge);
   }
+  // Cars stay listed while in the pits; a car not seen for a few of our laps
+  // (and not in the pits) is marked as possibly stopped.
+  if (car?.status === 'pit' || car?.status === 'stopped') {
+    const tag = document.createElement('small');
+    tag.className = `car-status-tag ${car.status}`;
+    tag.textContent = car.status === 'pit' ? 'PIT' : 'OUT?';
+    tag.title = car.status === 'pit' ? 'In the pits' : `Not seen at the line for ${car.lapsSinceSeen} of our laps`;
+    label.appendChild(tag);
+  }
   return label;
 }
 
