@@ -1304,3 +1304,15 @@ body.mode-qualifying .pit-window { display: none; }
 .car-status-tag { padding: 0 4px; font-size: 10px; font-weight: 900; letter-spacing: .03em; color: #fff; background: #626a66; }
 .car-status-tag.pit { background: #315fc7; }
 .car-status-tag.stopped { background: #d94c5f; }
+
+/* "Ending the session" overlay while the final reports are written. */
+.finalizing-overlay { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--modal-overlay, rgba(10, 14, 20, .55)); }
+.finalizing-overlay.hidden { display: none; }
+.finalizing-card { width: min(520px, 92vw); padding: 30px 32px 24px; background: var(--box); border: 3px solid var(--line); text-align: center; }
+.finalizing-card h1 { margin: 16px 0 6px; font-size: 24px; }
+.finalizing-detail { margin: 0 0 14px; font-size: 15px; font-weight: 800; min-height: 1.4em; }
+.finalizing-warning { margin: 0; padding: 8px 10px; background: rgba(230, 173, 47, .18); border: 2px solid #e6ad2f; font-weight: 900; }
+.finalizing-elapsed { margin: 10px 0 0; color: var(--muted, #626a66); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.finalizing-spinner { width: 54px; height: 54px; margin: 0 auto; border-radius: 50%; border: 6px solid var(--soft-line, #d3d8d4); border-top-color: #3399ff; animation: finalizing-spin .9s linear infinite; }
+@keyframes finalizing-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .finalizing-spinner { animation-duration: 3s; } }

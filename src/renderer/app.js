@@ -106,6 +106,23 @@ function syncCollectionButton(status) {
   button.title = collectionActive ? 'Stop collection and close the session' : 'Start live collection';
 }
 
+// ---- Ending-session overlay -------------------------------------------------
+let finalizingTimer = null;
+function renderFinalizing(state = currentState) {
+  const overlay = $('finalizing-overlay');
+  if (!overlay) return;
+  const info = state?.finalizing;
+  overlay.classList.toggle('hidden', !info?.active);
+  if (!info?.active) { if (finalizingTimer) { clearInterval(finalizingTimer); finalizingTimer = null; } return; }
+  $('finalizing-detail').textContent = info.detail || 'Generating the final reports…';
+  const tick = () => {
+    const seconds = Math.max(0, Math.round((Date.now() - Date.parse(info.startedAt)) / 1000));
+    if ($('finalizing-elapsed')) $('finalizing-elapsed').textContent = Number.isFinite(seconds) ? `Busy for ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : '';
+  };
+  tick();
+  if (!finalizingTimer && typeof setInterval === 'function') finalizingTimer = setInterval(() => tick(), 1000);
+}
+
 // ---- Race control messages ------------------------------------------------
 // Steward / penalty messages from the timing page. New messages make the header
 // button flash; a new message that mentions this dashboard's car opens the
@@ -1666,6 +1683,7 @@ function render(state) {
   syncCollectionButton(currentState.status);
   renderPitNotes(currentState);
   renderRaceMessages(currentState);
+  renderFinalizing(currentState);
   updateSession(currentState.session || {}, rows.length > 0, currentState.finishCountdown);
   $('row-count').textContent = String(rows.length);
   $('history-count').textContent = String(currentState.historyCount ?? history.length);

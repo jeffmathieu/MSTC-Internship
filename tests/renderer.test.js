@@ -829,6 +829,18 @@ module.exports = (async () => {
   assert.strictEqual(document.getElementById('collector-message').textContent, 'The timing page is filtered on class LMP3.',
     'a class filter on the timing page is shown as a warning');
 
+  // Ending a session: a "please wait" overlay shows the current step until the
+  // final reports are written.
+  await document.getElementById('messages-close').trigger('click');
+  collectorUpdate({ ...updatedState, finalizing: { active: true, detail: 'Generating the final reports: stints, overview and debrief…', startedAt: new Date(Date.now() - 65000).toISOString() } });
+  await flushAsync();
+  assert.ok(!document.getElementById('finalizing-overlay').classList.contains('hidden'), 'the overlay is shown while the session ends');
+  assert.strictEqual(document.getElementById('finalizing-detail').textContent, 'Generating the final reports: stints, overview and debrief…');
+  assert.strictEqual(document.getElementById('finalizing-elapsed').textContent, 'Busy for 1:05');
+  collectorUpdate({ ...updatedState, finalizing: null });
+  await flushAsync();
+  assert.ok(document.getElementById('finalizing-overlay').classList.contains('hidden'), 'and hidden when the reports are done');
+
   // Race control messages: a general message makes the button flash, a message
   // about this dashboard's car opens the popup by itself.
   const messagesButton = document.getElementById('open-messages');

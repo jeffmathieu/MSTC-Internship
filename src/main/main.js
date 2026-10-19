@@ -1256,7 +1256,21 @@ function writeFinalWorkbook(settings) {
   }
 }
 
-async function finalizeCurrentSession({ automatic = false } = {}) {
+// While the final reports are written the dashboards show a "please wait"
+// overlay, so nobody closes the app halfway through.
+let finalizingFromPoll = false;
+function setFinalizing(detail) {
+  collectorState.finalizing = detail ? { active: true, detail, startedAt: collectorState.finalizing?.startedAt || new Date().toISOString() } : null;
+  broadcastState();
+}
+
+async function finalizeCurrentSession(options = {}) {
+  try { return await finalizeCurrentSessionSteps(options); }
+  finally { if (collectorState.finalizing) setFinalizing(null); }
+}
+
+async function finalizeCurrentSessionSteps({ automatic = false } = {}) {
+  setFinalizing('Stopping collection and saving the session data…');
   stopCollector(true);
   await activePoll;
   await snapshotWriter.flush();
@@ -1285,16 +1299,18 @@ async function finalizeCurrentSession({ automatic = false } = {}) {
   context.sourceObservedAt = metadata.lastUpdatedAt || finishedAt;
   try { writeSessionMetadata(settings, context, { finishedAt }); }
   catch (error) { addError(error, 'save-session-endpoint'); }
+  setFinalizing('Generating the final reports: stints, overview and debrief…');
   const stintState = await writeStintStateAndReports(settings, context, collectorState.rows || [], { sessionFinished: true, finishedAt });
   collectorState.stintState = stintState;
   stopCollector(true);
+  setFinalizing('Writing the Excel file and the backup…');
   writeFinalWorkbook(settings);
   await runBackup('session-ended');
   collectorState.status = 'finished';
   collectorState.message = automatic
     ? 'Session completion detected; final reports generated.'
     : 'Session ended after confirmation.';
-  broadcastState();
+  setFinalizing(null);
   await showReportGeneratedMessage(stintState, automatic);
   return collectorState;
 }
@@ -1828,6 +1844,7 @@ async function pollLivePage() {
     let analyticsSummary = collectorState.analyticsSummary;
     let lapPredictionsByCar = collectorState.lapPredictionsByCar;
     let pitstopPlansByCar = collectorState.pitstopPlansByCar;
+    if (shouldFinalizeAutomatically) { finalizingFromPoll = true; setFinalizing('Session finished: generating the final reports…'); }
     try { stintState = await writeStintStateAndReports(settings, context, analysisRows, { sessionFinished: shouldFinalizeAutomatically }); } catch (error) { addError(error, 'writeStintStateAndReports'); }
     try { analyticsSummary = writeAnalyticsSummary(settings, context, analysisRows); } catch (error) { addError(error, 'writeAnalyticsSummary'); }
     try { lapPredictionsByCar = writeLapPredictions(settings, context, analysisRows); } catch (error) { addError(error, 'writeLapPredictions'); }
@@ -1858,7 +1875,10 @@ async function pollLivePage() {
       snapshots: [{ at: new Date().toISOString(), checksum: hashObject(analysisRows), rowCount: analysisRows.length, newLapCount }, ...collectorState.snapshots].slice(0, 20)
     };
     if (shouldFinalizeAutomatically) {
+      setFinalizing('Writing the Excel file…');
       writeFinalWorkbook(settings);
+      finalizingFromPoll = false;
+      setFinalizing(null);
       try {
         await showReportGeneratedMessage(stintState || {}, true);
       } catch (error) {
@@ -1870,6 +1890,7 @@ async function pollLivePage() {
   } catch (error) {
     collectorState.status = 'error'; collectorState.message = 'Could not read the live timing page. See Debug for details.'; addError(error, 'pollLivePage');
   } finally {
+    if (finalizingFromPoll) { finalizingFromPoll = false; collectorState.finalizing = null; }
     pollInFlight = false;
     finishPoll?.();
     finishPoll = null;
