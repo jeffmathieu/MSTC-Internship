@@ -116,6 +116,12 @@ jobs:
       - name: Build release files
         shell: bash
         run: |
+          # Missing secrets arrive as empty strings; electron-builder would read an
+          # empty CSC_LINK as a path (the project folder) and stop.
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID APPLE_API_KEY_ID \
+            APPLE_API_ISSUER WIN_CSC_LINK WIN_CSC_KEY_PASSWORD AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET; do
+            if [ -z "${!name}" ]; then unset "$name"; fi
+          done
           if [ -n "$AZURE_PUBLISHER_NAME" ]; then
             ${{ matrix.build-command }} ${{ steps.signing.outputs.args }} "-c.win.azureSignOptions.publisherName=$AZURE_PUBLISHER_NAME"
           else
