@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
@@ -2207,7 +2207,8 @@ app.whenReady().then(() => {
     dialog,
     autoUpdater,
     getParentWindow: () => mainWindow,
-    onBeforeQuitAndInstall: () => appLifecycle.beginQuit()
+    onBeforeQuitAndInstall: () => appLifecycle.beginQuit(),
+    openExternal: (url) => shell.openExternal(url)
   });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

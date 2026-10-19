@@ -74,6 +74,10 @@
       ],
       "icon": "docs/mstc_app_icons/electron-builder/build/icon.icns",
       "category": "public.app-category.sports",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "docs/mstc_app_icons/electron-builder/build/entitlements.mac.plist",
+      "entitlementsInherit": "docs/mstc_app_icons/electron-builder/build/entitlements.mac.plist",
       "artifactName": "MSTC-Dashboard-${version}-${arch}.${ext}"
     }
   },

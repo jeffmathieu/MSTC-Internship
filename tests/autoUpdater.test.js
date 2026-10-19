@@ -165,6 +165,41 @@ module.exports = (async () => {
   assert.strictEqual(installPromptFailureUpdater.installCount, 0);
   assert.ok(logEntries.some((entry) => String(entry[1]).includes('Update install prompt failed')));
 
+  // macOS: an unsigned update cannot be installed, so offer the download page once.
+  const opened = [];
+  const macUpdater = fakeUpdater();
+  let macPrompts = 0;
+  setupAutoUpdates({
+    app: { isPackaged: true, getVersion: () => '1.0.0' },
+    dialog: { showMessageBox: async () => { macPrompts += 1; return { response: 0 }; } },
+    autoUpdater: macUpdater,
+    logger,
+    platform: 'darwin',
+    openExternal: async (url) => { opened.push(url); }
+  });
+  macUpdater.emit('error', new Error('network unavailable'));
+  await flushAsyncEvents();
+  assert.strictEqual(macPrompts, 0, 'other errors are only logged');
+  macUpdater.emit('error', new Error('Code signature at URL file:///x did not pass validation'));
+  await flushAsyncEvents();
+  macUpdater.emit('error', new Error('Code signature at URL file:///x did not pass validation'));
+  await flushAsyncEvents();
+  assert.strictEqual(macPrompts, 1, 'the manual download prompt is shown once');
+  assert.deepStrictEqual(opened, ['https://github.com/jeffmathieu/MSTC-Internship/releases/latest']);
+
+  const winUpdater = fakeUpdater();
+  setupAutoUpdates({
+    app: { isPackaged: true, getVersion: () => '1.0.0' },
+    dialog: { showMessageBox: async () => { macPrompts += 1; return { response: 0 }; } },
+    autoUpdater: winUpdater,
+    logger,
+    platform: 'win32',
+    openExternal: async (url) => { opened.push(url); }
+  });
+  winUpdater.emit('error', new Error('New version is not signed by the application owner'));
+  await flushAsyncEvents();
+  assert.strictEqual(macPrompts, 1, 'no manual download prompt on Windows');
+
   console.log('Auto updater tests passed.');
 })().catch((error) => {
   console.error(error);
