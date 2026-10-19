@@ -1,7 +1,7 @@
 // Parser utilities shared by the Electron main process and tests. This file is
 // intentionally dependency-free so timing formats and table headers can be
 // validated without launching Electron.
-const { isPlausibleSessionName } = require('./sessionName');
+const { isPlausibleSessionName, isTransientSessionText } = require('./sessionName');
 
 // Normalizes text extracted from timing pages. Live timing HTML often contains
 // non-breaking spaces and inconsistent whitespace, so all parser entry points
@@ -407,6 +407,16 @@ function parseSessionInfo(snapshot = {}) {
 
   const updated = text.match(/Page updated\s*([0-9:]+\s*\(UTC\))?/i);
   if (updated) session.pageUpdated = cleanText(updated[1] || '');
+
+  // GetRaceResults shows the session title in its own element. It wins over the
+  // text heuristics above, which can pick up penalty or steward messages.
+  const heatName = stripSessionNameNoise(fields.heatName);
+  if (heatName && !isTransientSessionText(heatName)) {
+    session.sessionName = heatName;
+    session.sessionNameSource = 'heat-name';
+  }
+  session.screenMessages = (Array.isArray(fields.screenMessages) ? fields.screenMessages : [])
+    .map(cleanText).filter(Boolean).slice(0, 10);
   return session;
 }
 

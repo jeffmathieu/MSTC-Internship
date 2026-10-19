@@ -268,6 +268,19 @@ for (const sessionName of ['LIVE Green flag To go: 10:10 EuroNASCAR V8GP - Free 
 }
 assert.strictEqual(parseSessionInfo({ bodyText: 'x', sessionFields: { sessionName: 'Green Hell Race - Practice' } }).sessionName, 'Green Hell Race - Practice');
 
+// GetRaceResults has a dedicated heatName element; penalty messages in the page
+// text must never become the session name.
+const heatNamed = parseSessionInfo({
+  bodyText: 'Finish Belcar Endurance Championship - Race Show class All Car 34 - drive through penalty in Race',
+  location: 'https://livetiming.getraceresults.com/demo',
+  sessionFields: { heatName: 'Belcar Endurance Championship - Race', screenMessages: ['Car #34 - drive through penalty', ' '] }
+});
+assert.strictEqual(heatNamed.sessionName, 'Belcar Endurance Championship - Race');
+assert.strictEqual(heatNamed.sessionNameSource, 'heat-name');
+assert.deepStrictEqual(heatNamed.screenMessages, ['Car #34 - drive through penalty'], 'visible screen messages are passed on');
+assert.strictEqual(parseSessionInfo({ bodyText: 'x', sessionFields: { heatName: 'Not connected to the LiveTiming server' } }).sessionNameSource, undefined,
+  'connection messages in the title slot are ignored');
+
 const oneClassRows = applySingleClassFallback([
   { position: 1, carNumber: '555', className: '' },
   { position: 2, carNumber: '540', className: '' }

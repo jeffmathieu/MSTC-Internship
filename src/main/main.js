@@ -597,7 +597,19 @@ const pageExtractionScript = String.raw`(() => {
     })
     .sort((a, b) => a.rect.top - b.rect.top || a.rect.left - b.rect.left)[0];
   const sessionHeading = document.querySelector('h1');
+  // GetRaceResults: the event/session title has its own element, and steward
+  // or penalty messages are shown as separate lines below the header.
+  const visibleText = (element) => {
+    if (!element) return '';
+    const style = window.getComputedStyle(element);
+    if (style.display === 'none' || style.visibility === 'hidden') return '';
+    return clean(element.innerText || element.textContent || '');
+  };
+  const heatNameElement = document.querySelector('#heatState .heatName') || document.querySelector('.heatName');
+  const screenMessages = Array.from(document.querySelectorAll('#screenMessages > div')).map(visibleText).filter(Boolean);
   const sessionFields = {
+    heatName: visibleText(heatNameElement),
+    screenMessages,
     currentFlag: currentFlagElement ? currentFlagElement.text : '',
     status: labelledValue('Status:'),
     elapsed: labelledValue('Elapsed:'),
@@ -1701,7 +1713,7 @@ async function pollLivePage() {
         normalized.session?.sessionName,
         collectorState.session?.sessionName
       );
-      if (isPlausibleSessionName(normalized.session.sessionName)) {
+      if (normalized.session.sessionNameSource === 'heat-name' || isPlausibleSessionName(normalized.session.sessionName)) {
         saveSettings({ ...settings, sessionName: normalized.session.sessionName, sessionNameAuto: true });
         collectorState.sessionNameSetting = normalized.session.sessionName;
       }
