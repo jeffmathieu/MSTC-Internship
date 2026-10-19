@@ -278,6 +278,8 @@ const heatNamed = parseSessionInfo({
 assert.strictEqual(heatNamed.sessionName, 'Belcar Endurance Championship - Race');
 assert.strictEqual(heatNamed.sessionNameSource, 'heat-name');
 assert.deepStrictEqual(heatNamed.screenMessages, ['Car #34 - drive through penalty'], 'visible screen messages are passed on');
+assert.deepStrictEqual(parseSessionInfo({ bodyText: 'x', sessionFields: { classFilter: [' GT3 ', ''] } }).classFilter, ['GT3'], 'a class filter on the page is reported');
+assert.deepStrictEqual(heatNamed.classFilter, [], 'no filter means All');
 assert.strictEqual(parseSessionInfo({ bodyText: 'x', sessionFields: { heatName: 'Not connected to the LiveTiming server' } }).sessionNameSource, undefined,
   'connection messages in the title slot are ignored');
 

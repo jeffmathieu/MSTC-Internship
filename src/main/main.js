@@ -611,9 +611,16 @@ const pageExtractionScript = String.raw`(() => {
   };
   const heatNameElement = document.querySelector('#heatState .heatName') || document.querySelector('.heatName');
   const screenMessages = Array.from(document.querySelectorAll('#screenMessages > div')).map(visibleText).filter(Boolean);
+  // A class filter hides other classes, so "time to the car ahead" could then be
+  // read against the wrong car. Nothing selected means "All".
+  const classFilterElement = document.querySelector('#classNameFilter');
+  const classFilter = classFilterElement
+    ? Array.from(classFilterElement.selectedOptions || []).map((option) => clean(option.text)).filter(Boolean)
+    : [];
   const sessionFields = {
     heatName: visibleText(heatNameElement),
     screenMessages,
+    classFilter,
     currentFlag: currentFlagElement ? currentFlagElement.text : '',
     status: labelledValue('Status:'),
     elapsed: labelledValue('Elapsed:'),
@@ -844,7 +851,7 @@ function updateAndWriteGapMemory(settings, context, rows) {
     paceWindow: DEFAULT_GAP_PACE_WINDOW,
     pitSuppressionLaps: DEFAULT_PIT_SUPPRESSION_LAPS
   });
-  snapshotWriter.write(path.join(folder, 'gap_state.json'), JSON.stringify({ ...gapMemoryState, samples: [], newSamples: [] }, null, 2));
+  snapshotWriter.write(path.join(folder, 'gap_state.json'), JSON.stringify({ ...gapMemoryState, samples: [], newSamples: [], timeline: undefined }, null, 2));
   if (gapMemoryState.newSamples.length) {
     appendJsonLines(fs, path.join(folder, 'gap_history.jsonl'), gapMemoryState.newSamples);
   }
@@ -1712,6 +1719,10 @@ async function pollLivePage() {
     const observedAt = new Date().toISOString();
     try { updateRaceMessages(settings, normalized.session?.screenMessages || [], observedAt); }
     catch (error) { addError(error, 'race-messages'); }
+    const classFilter = normalized.session?.classFilter || [];
+    collectorState.timingPageWarning = classFilter.length
+      ? `The timing page is filtered on class ${classFilter.join(', ')}. Set "Show class" to All, otherwise gaps can be measured against the wrong car.`
+      : '';
     providerFreshness = nextProviderFreshness(providerFreshness, { ...normalized, observedAt,
       pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) });
     if (!providerFreshness.usable) {

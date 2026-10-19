@@ -1285,3 +1285,14 @@ body.mode-qualifying .pit-window { display: none; }
 .message-tag.live { background: #1e9f67; }
 .message-text { font-size: 15px; font-weight: 800; white-space: pre-wrap; }
 .messages-empty { color: var(--muted, #626a66); font-weight: 750; padding: 10px 0; }
+
+/* Class gaps page in the comparison block. */
+#comparison-tab-gaps { grid-auto-rows: 24px; row-gap: 2px; overflow-y: auto; overscroll-behavior: contain; }
+.gaps-row { display: grid; grid-template-columns: 34px 56px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .9fr); align-items: center; column-gap: 10px; font-variant-numeric: tabular-nums; }
+.gaps-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 800; }
+.gaps-row.gaps-head > span { color: var(--muted); font-size: 10.5px; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; }
+.gaps-row.is-our-car { background: var(--current-row-bg, rgba(49, 95, 199, .12)); }
+.gaps-row .gap-ahead { color: #d94c5f; }
+.gaps-row .gap-behind { color: #1e9f67; }
+.gaps-row .gap-muted { color: var(--muted); font-weight: 700; }
+.gaps-note { color: var(--muted); font-size: 11px; font-weight: 700; padding-top: 4px; }

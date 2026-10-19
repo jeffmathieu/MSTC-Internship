@@ -358,9 +358,11 @@ function buildBattleItem({ rows, classRows, followed, row, history, lapWindow, c
     lapGap,
     estimatedGapMs,
     gapIsEstimate,
+    // A lapped rival keeps its exact time when the timeline knows it.
     gapLabel: Number.isFinite(lapGap) && lapGap > 0
-      ? `${lapGap}L`
-      : Number.isFinite(relativeGap) ? formatGap(relativeGap) : 'gap unknown',
+      ? (Number.isFinite(relativeGap) && confirmedGap?.source === 'line-crossing-timeline' ? `${lapGap}L (${formatGap(relativeGap)})` : `${lapGap}L`)
+      : Number.isFinite(relativeGap) ? formatGap(relativeGap)
+        : confirmedGap?.source === 'calibrating' ? 'calibrating…' : 'gap unknown',
     lastLapDeltaMs,
     lastLapDeltaLabel: formatSignedSeconds(lastLapDeltaMs),
     ourAvg,

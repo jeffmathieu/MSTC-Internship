@@ -417,6 +417,7 @@ function parseSessionInfo(snapshot = {}) {
   }
   session.screenMessages = (Array.isArray(fields.screenMessages) ? fields.screenMessages : [])
     .map(cleanText).filter(Boolean).slice(0, 10);
+  session.classFilter = (Array.isArray(fields.classFilter) ? fields.classFilter : []).map(cleanText).filter(Boolean);
   return session;
 }
 

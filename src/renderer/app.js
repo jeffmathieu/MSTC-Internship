@@ -9,7 +9,7 @@ let currentState = null;
 let configuredFollowedCars = [];
 const DEFAULT_POLL_INTERVAL_MS = 5000;
 const MAX_FOLLOWED_CARS = 3;
-const COMPARISON_TABS = ['laps', 'averages', 'sectors'];
+const COMPARISON_TABS = ['laps', 'averages', 'sectors', 'gaps'];
 const COMPARISON_SCROLL_THRESHOLD = 13;
 let currentComparisonTab = 0;
 let lapEditMode = false;
@@ -1066,6 +1066,7 @@ function appendComparisonRow(container, label, cells, rowClass = '', labelNode =
 function comparisonTabTitle(tab) {
   if (tab === 'averages') return 'Averages';
   if (tab === 'sectors') return 'Sectors';
+  if (tab === 'gaps') return 'Class gaps';
   return 'Best / Last / Last 10';
 }
 
@@ -1225,6 +1226,71 @@ function renderComparisonMatrix(matrix) {
   renderComparisonSectorRows(classCars);
   updateComparisonTabVisibility();
   return true;
+}
+
+// Class gaps page: every car of our class with its gap to us and the interval
+// to the car ahead in class, from the line-crossing gap model.
+function formatGapClock(ms) {
+  if (!Number.isFinite(ms)) return '';
+  const abs = Math.abs(ms);
+  const minutes = Math.floor(abs / 60000);
+  const seconds = ((abs % 60000) / 1000).toFixed(3);
+  return minutes ? `${minutes}:${seconds.padStart(6, '0')}` : seconds;
+}
+
+function describeClassGap(item) {
+  if (!item) return { text: '—', className: 'gap-muted' };
+  if (item.source === 'calibrating') return { text: 'calibrating…', className: 'gap-muted' };
+  if (!Number.isFinite(item.gapToUsMs)) return { text: '—', className: 'gap-muted' };
+  const sign = item.gapToUsMs < 0 ? '-' : '+';
+  const approx = item.estimated ? '~' : '';
+  const laps = Number(item.lapGap) > 0 ? `${item.lapGap}L · ` : '';
+  return { text: `${laps}${approx}${sign}${formatGapClock(item.gapToUsMs)}`, className: item.gapToUsMs < 0 ? 'gap-ahead' : 'gap-behind' };
+}
+
+function renderClassGaps(state = currentState) {
+  const container = $('comparison-tab-gaps');
+  if (!container) return;
+  const car = activeCarNumber();
+  const view = state?.analyticsSummary?.gapModel?.viewsByCar?.[car];
+  const rows = state?.rows || [];
+  const ours = rows.find((row) => String(row.carNumber) === String(car));
+  container.innerHTML = '';
+  const addRow = (cells, className) => {
+    const row = document.createElement('div');
+    row.className = `gaps-row ${className || ''}`.trim();
+    cells.forEach(([text, cellClass]) => {
+      const span = document.createElement('span');
+      span.textContent = text;
+      if (cellClass) span.className = cellClass;
+      row.appendChild(span);
+    });
+    container.appendChild(row);
+  };
+  addRow([['PIC'], ['Car'], ['Gap to us'], ['Interval'], ['Last lap'], ['Status']], 'gaps-head');
+  if (!ours?.className || !view?.classCoordinates?.length) {
+    const note = document.createElement('div');
+    note.className = 'gaps-note';
+    note.textContent = 'Waiting for the timing data of our class.';
+    container.appendChild(note);
+    return;
+  }
+  const byCar = new Map(view.classCoordinates.map((item) => [String(item.carNumber), item]));
+  const classRows = rows.filter((row) => row.className === ours.className)
+    .sort((a, b) => (Number(a.classPosition) || Infinity) - (Number(b.classPosition) || Infinity));
+  let previous = null;
+  classRows.forEach((row) => {
+    const item = byCar.get(String(row.carNumber));
+    const isOurs = String(row.carNumber) === String(car);
+    const gap = isOurs ? { text: 'OUR CAR', className: '' } : describeClassGap(item);
+    const interval = previous && Number.isFinite(item?.gapToUsMs) && Number.isFinite(previous.gapToUsMs)
+      ? `+${formatGapClock(item.gapToUsMs - previous.gapToUsMs)}` : '—';
+    const status = /pit/i.test(String(row.eta || row.state || '')) ? 'In pit'
+      : /out\s*lap/i.test(String(row.eta || '')) ? 'Out lap' : '';
+    addRow([[String(row.classPosition ?? '')], [`#${row.carNumber}`], [gap.text, gap.className], [interval, 'gap-muted'],
+      [String(row.lastLap || '—')], [status, 'gap-muted']], isOurs ? 'is-our-car' : '');
+    previous = isOurs ? { gapToUsMs: 0 } : item;
+  });
 }
 
 // Fills the D1/D2, BIC, and XIC comparison boxes from precomputed analytics.
@@ -1582,6 +1648,12 @@ function render(state) {
   if ($('analysis-condition')) $('analysis-condition').value = normalizeAnalysisSelectValue($('analysis-condition').value);
   syncConditionControlTitles();
   setStatus(currentState.status, currentState.message);
+  // A filtered timing page makes the gaps unreliable: keep that warning visible.
+  if (currentState.timingPageWarning && $('collector-message')) {
+    $('collector-message').hidden = false;
+    $('collector-message').textContent = currentState.timingPageWarning;
+    $('collector-message').title = currentState.timingPageWarning;
+  }
   syncCollectionButton(currentState.status);
   renderPitNotes(currentState);
   renderRaceMessages(currentState);
@@ -1595,6 +1667,7 @@ function render(state) {
   syncSessionMode(activeAnalytics?.sessionMode || currentSettings?.sessionMode || 'race');
   renderSectorAnalytics(activeAnalytics, rows, predictionForActiveCar(currentState));
   renderDriverAndClassComparisons(activeAnalytics, rows);
+  renderClassGaps(currentState);
   renderAdjacentClassBattles(activeAnalytics);
   renderPitstopPlan(pitstopPlanForActiveCar(currentState));
   if (document.querySelector('.debug-panel')?.open) {
