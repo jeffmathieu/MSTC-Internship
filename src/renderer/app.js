@@ -199,8 +199,6 @@ function renderRaceMessages(state = currentState) {
   const unreadOurs = unread.filter((message) => messageIsOurs(message, car));
   button.classList.toggle('has-unread', unread.length > 0 && !unreadOurs.length);
   button.classList.toggle('car-alert', unreadOurs.length > 0);
-  const badge = $('messages-badge');
-  if (badge) { badge.hidden = !unread.length; badge.textContent = unread.length ? String(unread.length) : ''; }
   button.title = unreadOurs.length ? `New race control message about car #${car}`
     : unread.length ? `${unread.length} new race control message(s): check the timing page` : 'Race control messages';
   if (unreadOurs.length && !messagesOpen) { showMessages(true, unreadOurs.at(-1).id); return; }
@@ -1920,7 +1918,6 @@ async function init() {
   });
   $('open-messages')?.addEventListener('click', () => showMessages(true));
   $('messages-close')?.addEventListener('click', () => showMessages(false));
-  $('messages-open-timing')?.addEventListener('click', () => window.liveTiming.openLiveWindow());
   $('open-pit-notes')?.addEventListener('click', () => showPitNotes(true));
   $('pit-notes-close')?.addEventListener('click', () => showPitNotes(false));
   $('pit-notes-save')?.addEventListener('click', savePitNotes);

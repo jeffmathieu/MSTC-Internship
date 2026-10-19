@@ -1270,12 +1270,16 @@ body.mode-qualifying .pit-window { display: none; }
 /* Race control messages: yellow flash for unread messages, red for messages
    that mention the car of this dashboard. */
 .messages-button { position: relative; }
-.messages-button.has-unread { background: var(--yellow-status); color: #1b201e; border-color: #1b201e; animation: pit-notes-pulse 1.6s ease-in-out infinite; }
-.messages-button.car-alert { background: #d94c5f; color: #fff; border-color: #7a1424; animation: messages-alert 0.9s ease-in-out infinite; }
-@keyframes messages-alert { 50% { box-shadow: 0 0 0 5px rgba(217, 76, 95, .45); } }
-.messages-badge { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: #152238; color: #fff; font-size: 11px; font-weight: 900; line-height: 18px; text-align: center; }
+/* The whole button flashes in the timing site's blue (#3399FF); red when a
+   message mentions the car of this dashboard. */
+.messages-button.has-unread { animation: messages-flash-blue 1s steps(1, end) infinite; }
+.messages-button.car-alert { animation: messages-flash-red 0.8s steps(1, end) infinite; }
+@keyframes messages-flash-blue { 0% { background: #3399ff; border-color: #3399ff; color: #fff; } 50% { background: var(--control, #f7f8f6); border-color: var(--line); color: var(--ink); } }
+@keyframes messages-flash-red { 0% { background: #d94c5f; border-color: #d94c5f; color: #fff; } 50% { background: var(--control, #f7f8f6); border-color: var(--line); color: var(--ink); } }
 .messages-card { max-height: calc(100vh - 48px); overflow-y: auto; }
-.messages-card.alert { border-color: #d94c5f; box-shadow: 0 0 0 4px rgba(217, 76, 95, .35); }
+/* A message about our car: the popup border flashes red. */
+.messages-card.alert { animation: messages-card-alert 0.8s steps(1, end) infinite; }
+@keyframes messages-card-alert { 0% { border-color: #d94c5f; box-shadow: 0 0 0 6px rgba(217, 76, 95, .55); } 50% { border-color: var(--line); box-shadow: none; } }
 .messages-list { display: grid; gap: 8px; margin-top: 6px; }
 .message-item { padding: 9px 11px; border: 2px solid var(--soft-line, var(--line)); background: var(--box); }
 .message-item.ours { border-color: #d94c5f; background: rgba(217, 76, 95, .1); }
