@@ -4,6 +4,7 @@ const path = require('path');
 const { prepareHistory } = require('../shared/lapAnalytics');
 const { drivingStintsForCar: stintsForCar } = require('../shared/stintTracker');
 const { prepareDataFolder, loadSessionHistory, readJsonLines } = require('../shared/storageSession');
+const { restoreMessageLog } = require('../shared/raceMessages');
 const { lapIdentity } = require('../shared/storageSchema');
 const { writeClosedStintArtifacts, writeEventSummaryArtifacts, buildCanonicalReportPayload, renderReportLabPdf } = require('./stintReports');
 
@@ -23,7 +24,8 @@ const { writeClosedStintArtifacts, writeEventSummaryArtifacts, buildCanonicalRep
   const raceControlEvents = readJsonLines(fs, path.join(dataFolder, 'race_control_events.jsonl')).entries;
   const preparedReportPayload = buildCanonicalReportPayload({ ...input, history, gapSamples, raceControlEvents,
     stints: allStints.filter((stint) => (stint.closed || input.preliminary) && stint.lapCount > 0) });
-  const options = { ...input, history, gapSamples, printFallback, raceControlEvents, preparedReportPayload,
+  const raceMessages = restoreMessageLog(readJsonLines(fs, path.join(dataFolder, 'race_messages.jsonl')).entries);
+  const options = { ...input, history, gapSamples, printFallback, raceControlEvents, preparedReportPayload, raceMessages,
     renderPdf: input.pdfEngine === 'electron' ? () => ({ rendered: false, reason: 'built-in-electron-engine' }) : renderReportLabPdf };
   const results = [];
   for (const stint of allStints.filter((item) => (item.closed || input.preliminary) && item.lapCount > 0)) {

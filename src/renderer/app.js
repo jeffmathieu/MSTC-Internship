@@ -106,6 +106,107 @@ function syncCollectionButton(status) {
   button.title = collectionActive ? 'Stop collection and close the session' : 'Start live collection';
 }
 
+// ---- Race control messages ------------------------------------------------
+// Steward / penalty messages from the timing page. New messages make the header
+// button flash; a new message that mentions this dashboard's car opens the
+// popup straight away. "Seen" is remembered per computer.
+const SEEN_MESSAGES_KEY = 'mstc.seenRaceMessages';
+let seenMessageIds = new Set();
+let messagesOpen = false;
+let messagesHighlightId = null;
+let messagesInitialised = false;
+try { seenMessageIds = new Set(JSON.parse(window.localStorage?.getItem(SEEN_MESSAGES_KEY) || '[]')); } catch { seenMessageIds = new Set(); }
+
+function saveSeenMessages() {
+  try { window.localStorage?.setItem(SEEN_MESSAGES_KEY, JSON.stringify([...seenMessageIds].slice(-500))); } catch { /* storage unavailable */ }
+}
+
+function raceMessagesOf(state = currentState) {
+  return Array.isArray(state?.raceMessages) ? state.raceMessages : [];
+}
+
+const messageIsOurs = (message, car) => (message.cars || []).map(String).includes(String(car));
+
+function renderMessageList(messages, car) {
+  const list = $('messages-list');
+  list.innerHTML = '';
+  if (!messages.length) {
+    const empty = document.createElement('div');
+    empty.className = 'messages-empty';
+    empty.textContent = 'No race control messages yet.';
+    list.appendChild(empty);
+    return;
+  }
+  [...messages].reverse().forEach((message) => {
+    const item = document.createElement('div');
+    const ours = messageIsOurs(message, car);
+    item.className = `message-item${ours ? ' ours' : ''}${message.id === messagesHighlightId ? ' highlight' : ''}`;
+    const meta = document.createElement('div');
+    meta.className = 'message-meta';
+    const time = document.createElement('span');
+    time.textContent = message.firstSeenAt ? new Date(message.firstSeenAt).toLocaleTimeString() : '';
+    meta.appendChild(time);
+    if (ours) {
+      const tag = document.createElement('span');
+      tag.className = 'message-tag';
+      tag.textContent = `Car #${car}`;
+      meta.appendChild(tag);
+    }
+    if (Date.now() - Date.parse(message.lastSeenAt) < 20000) {
+      const live = document.createElement('span');
+      live.className = 'message-tag live';
+      live.textContent = 'On screen now';
+      meta.appendChild(live);
+    }
+    const text = document.createElement('div');
+    text.className = 'message-text';
+    text.textContent = message.text;
+    item.appendChild(meta);
+    item.appendChild(text);
+    list.appendChild(item);
+  });
+}
+
+function showMessages(show = true, highlightId = null) {
+  messagesOpen = show;
+  messagesHighlightId = show ? highlightId : null;
+  $('messages-modal').classList.toggle('hidden', !show);
+  if (!show) { renderRaceMessages(); return; }
+  const messages = raceMessagesOf();
+  const car = activeCarNumber();
+  const alert = Boolean(highlightId);
+  $('messages-title').textContent = alert ? `Message about car #${car}` : 'Race control messages';
+  $('messages-modal').querySelector('.messages-card')?.classList.toggle('alert', alert);
+  renderMessageList(messages, car);
+  messages.forEach((message) => seenMessageIds.add(message.id));
+  saveSeenMessages();
+  renderRaceMessages();
+}
+
+function renderRaceMessages(state = currentState) {
+  const button = $('open-messages');
+  if (!button) return;
+  const messages = raceMessagesOf(state);
+  const car = activeCarNumber();
+  // Messages that were already old when this window opened are not new.
+  if (!messagesInitialised && messages.length) {
+    const cutoff = Date.now() - 10 * 60 * 1000;
+    messages.forEach((message) => { if (Date.parse(message.firstSeenAt) < cutoff) seenMessageIds.add(message.id); });
+    messagesInitialised = true;
+    saveSeenMessages();
+  }
+  const unread = messages.filter((message) => !seenMessageIds.has(message.id));
+  const unreadOurs = unread.filter((message) => messageIsOurs(message, car));
+  button.classList.toggle('has-unread', unread.length > 0 && !unreadOurs.length);
+  button.classList.toggle('car-alert', unreadOurs.length > 0);
+  const badge = $('messages-badge');
+  if (badge) { badge.hidden = !unread.length; badge.textContent = unread.length ? String(unread.length) : ''; }
+  button.title = unreadOurs.length ? `New race control message about car #${car}`
+    : unread.length ? `${unread.length} new race control message(s): check the timing page` : 'Race control messages';
+  if (unreadOurs.length && !messagesOpen) { showMessages(true, unreadOurs.at(-1).id); return; }
+  if (messagesOpen) renderMessageList(messages, car);
+}
+
 // ---- Pit stop notes -------------------------------------------------------
 // The header button turns yellow when a pit stop was detected and has no saved
 // notes yet. Notes stay editable until the next stop is detected.
@@ -1483,6 +1584,7 @@ function render(state) {
   setStatus(currentState.status, currentState.message);
   syncCollectionButton(currentState.status);
   renderPitNotes(currentState);
+  renderRaceMessages(currentState);
   updateSession(currentState.session || {}, rows.length > 0, currentState.finishCountdown);
   $('row-count').textContent = String(rows.length);
   $('history-count').textContent = String(currentState.historyCount ?? history.length);
@@ -1734,6 +1836,9 @@ async function init() {
       setStatus('error', `Could not start collection: ${error.message}`);
     } finally { button.disabled = false; }
   });
+  $('open-messages')?.addEventListener('click', () => showMessages(true));
+  $('messages-close')?.addEventListener('click', () => showMessages(false));
+  $('messages-open-timing')?.addEventListener('click', () => window.liveTiming.openLiveWindow());
   $('open-pit-notes')?.addEventListener('click', () => showPitNotes(true));
   $('pit-notes-close')?.addEventListener('click', () => showPitNotes(false));
   $('pit-notes-save')?.addEventListener('click', savePitNotes);

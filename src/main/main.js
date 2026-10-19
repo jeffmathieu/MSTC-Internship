@@ -55,6 +55,7 @@ const { buildLapPrediction } = require('../shared/lapPrediction');
 const { buildAdjacentClassBattles } = require('../shared/classBattle');
 const { buildDriverOverview } = require('../shared/driverOverview');
 const { buildPitNotesView, validateSave: validatePitNotesSave } = require('../shared/pitNotes');
+const { updateMessageLog, restoreMessageLog } = require('../shared/raceMessages');
 const {
   DEFAULT_PACE_WINDOW: DEFAULT_GAP_PACE_WINDOW,
   DEFAULT_PIT_SUPPRESSION_LAPS,
@@ -110,6 +111,9 @@ const lapReconciliationByCar = new Map();
 const serviceStates = new Map();
 // Engineer notes per followed car and pit event id, persisted in data/pit_notes.json.
 let pitNotesStore = {};
+// Steward / race-control messages seen on the timing page (data/race_messages.jsonl).
+let raceMessageLog = [];
+const RACE_MESSAGES_IN_STATE = 60;
 const fuelStates = new Map();
 const sequenceByCar = new Map();
 const checkedCsvHeaders = new Set();
@@ -1219,7 +1223,8 @@ function buildExportWorkbook(settings) {
     fieldCars: collectorState.analyticsSummary?.cars || [],
     stintStateCars: collectorState.stintState?.cars || {},
     pitEventsByCar: Object.fromEntries(followed.map((car) => [car, serviceStates.get(car)?.events || []])),
-    pitNotesByCar: pitNotesStore
+    pitNotesByCar: pitNotesStore,
+    raceMessages: raceMessageLog
   });
 }
 
@@ -1339,6 +1344,7 @@ function loadExistingHistory(settings) {
   checkedCsvHeaders.clear();
   serviceStates.clear();
   pitNotesStore = {};
+  raceMessageLog = [];
   fuelStates.clear();
   const folder = ensureDataFolder(settings);
   try { raceControlEvents = readJsonLines(fs, path.join(folder, 'race_control_events.jsonl')).entries; }
@@ -1379,6 +1385,8 @@ function loadExistingHistory(settings) {
         serviceStates.set(event.carNumber, state);
       });
     }
+    try { raceMessageLog = restoreMessageLog(readJsonLines(fs, path.join(folder, 'race_messages.jsonl')).entries); }
+    catch (error) { raceMessageLog = []; addError(error, 'loadRaceMessages'); }
     try { pitNotesStore = loadStoredJson(fs, path.join(folder, 'pit_notes.json'))?.cars || {}; }
     catch (error) { pitNotesStore = {}; addError(error, 'loadPitNotes'); }
     feedState = loadStoredJson(fs, path.join(folder, 'timing_feed_state.json')) || {};
@@ -1512,6 +1520,15 @@ function pitNotesViewByCar(settings) {
   return Object.fromEntries(normalizeFollowedCars(settings).map((car) => [
     car, buildPitNotesView(serviceStates.get(car)?.events || [], pitNotesStore[car] || {})
   ]));
+}
+
+// Logs new steward / penalty messages. Runs on every poll, also while the feed
+// is not progressing (red flag), because that is when such messages appear.
+function updateRaceMessages(settings, messages, observedAt) {
+  const result = updateMessageLog(raceMessageLog, messages, observedAt, normalizeFollowedCars(settings));
+  raceMessageLog = result.log;
+  if (result.added.length) appendJsonLines(fs, path.join(ensureDataFolder(settings), 'race_messages.jsonl'), result.added);
+  collectorState.raceMessages = raceMessageLog.slice(-RACE_MESSAGES_IN_STATE);
 }
 
 function updateServiceEvents(settings, rows, context) {
@@ -1693,6 +1710,8 @@ async function pollLivePage() {
     const snapshot = await liveWindow.webContents.executeJavaScript(pageExtractionScript, true);
     const normalized = normalizeSnapshot(snapshot);
     const observedAt = new Date().toISOString();
+    try { updateRaceMessages(settings, normalized.session?.screenMessages || [], observedAt); }
+    catch (error) { addError(error, 'race-messages'); }
     providerFreshness = nextProviderFreshness(providerFreshness, { ...normalized, observedAt,
       pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) });
     if (!providerFreshness.usable) {
@@ -1897,6 +1916,7 @@ async function startCollector(url) {
   loadExistingPitStates(settings);
   loadExistingGapMemory(settings);
   collectorState.pitNotesByCar = pitNotesViewByCar(settings);
+  collectorState.raceMessages = raceMessageLog.slice(-RACE_MESSAGES_IN_STATE);
   broadcastState();
   try {
     const win = createLiveWindow();
@@ -1987,6 +2007,7 @@ handleTrusted('settings:set', (_event, settings) => {
     loadExistingPitStates(merged);
     loadExistingGapMemory(merged);
     collectorState.pitNotesByCar = pitNotesViewByCar(merged);
+    collectorState.raceMessages = raceMessageLog.slice(-RACE_MESSAGES_IN_STATE);
     const sessionTiming = updateSessionTiming(null, {}, lapHistory);
     collectorState = {
       ...collectorState,

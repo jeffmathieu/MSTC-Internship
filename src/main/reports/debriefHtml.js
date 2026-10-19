@@ -14,7 +14,7 @@ const clip = (value, length) => {
 
 const { notesForStop } = require('../../shared/pitNotes');
 
-function buildDebriefModel({ payload, history = [], stints = [], pitNotes = {} }) {
+function buildDebriefModel({ payload, history = [], stints = [], pitNotes = {}, raceMessages = [] }) {
   const summary = payload.raceSummary || {};
   const carNumber = String(payload.race?.carNumber || '');
   const totalTimeByDriver = {};
@@ -32,6 +32,7 @@ function buildDebriefModel({ payload, history = [], stints = [], pitNotes = {} }
   const first = laps[0] || {}, last = laps.at(-1) || {};
   const tyreSets = [...new Set(pitStops.map((stop) => stop.notes?.tyreSet).filter(Boolean))];
   const noted = pitStops.filter((stop) => stop.notes);
+  const ourMessages = raceMessages.filter((message) => (message.cars || []).map(String).includes(carNumber));
 
   const takeaways = [
     fastest && `Fastest lap ${time(fastest.ms)} by ${fastest.driverName}${fastestLap ? ` (lap ${fastestLap.displayLapNumber ?? fastestLap.lapNumber ?? '-'})` : ''}`,
@@ -41,6 +42,7 @@ function buildDebriefModel({ payload, history = [], stints = [], pitNotes = {} }
     pitStops.length && `Pit stops: ${pitStops.length}${finite(analysis.averageDurationMs) ? `, average ${duration(analysis.averageDurationMs)}` : ''}${analysis.slowestStop ? `, slowest #${analysis.slowestStop.stopNumber ?? '-'} ${duration(analysis.slowestStop.durationMs)}` : ''}`,
     noted.length && `Tyres changed at ${noted.filter((stop) => stop.notes.tyresChanged).length}/${pitStops.length} stops${tyreSets.length ? `; sets: ${tyreSets.join(', ')}` : ''}`,
     (first.position && last.position) && `Overall position: P${first.position} on lap 1 → P${last.position} at the end`,
+    ourMessages.length && `Steward messages for #${carNumber}: ${ourMessages.length} (latest: ${clip(ourMessages.at(-1).text, 70)})`,
     `Race control: FCY ${control.fcy || 0} (${time(control.durationsMs?.fcy)}), SC ${control.safetyCar || 0}, red ${control.redFlag || 0}`
   ].filter(Boolean);
 

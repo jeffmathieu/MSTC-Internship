@@ -814,7 +814,8 @@ async function writeEventSummaryArtifacts({
   raceControlEvents = [],
   preparedReportPayload = null,
   renderPdf = renderReportLabPdf,
-  pitNotes = {}
+  pitNotes = {},
+  raceMessages = []
 }) {
   const reportPolicy = reportPolicyForSessionMode(sessionMode);
   if (!reportPolicy.writeEventSummaries) return [];
@@ -890,7 +891,7 @@ async function writeEventSummaryArtifacts({
     const debriefPath = path.join(sessionFolder, `${summaryPrefix}_DEBRIEF_car-${safeFilePart(carNumber, 'unknown')}.pdf`);
     // A debrief problem must never take down the overview and driver summaries.
     try {
-      await printFallback(buildDebriefHtml(buildDebriefModel({ payload: overviewPayload, history, stints: closed, pitNotes })), debriefPath);
+      await printFallback(buildDebriefHtml(buildDebriefModel({ payload: overviewPayload, history, stints: closed, pitNotes, raceMessages })), debriefPath);
       results.push({ jsonPath: null, pdfPath: debriefPath, kind: 'debrief' });
     } catch (error) {
       results.push({ jsonPath: null, pdfPath: null, kind: 'debrief', error: error?.message || String(error) });

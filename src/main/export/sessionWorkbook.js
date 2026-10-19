@@ -153,7 +153,7 @@ function addCarCharts(workbook, car, model) {
 }
 
 function buildSessionWorkbook({ sessionName = '', generatedAt = new Date().toISOString(), mode = 'race', trackCondition = '', followedCars = [],
-  history = [], fieldCars = [], stintStateCars = {}, pitEventsByCar = {}, pitNotesByCar = {}, timingUrl = '' }) {
+  history = [], fieldCars = [], stintStateCars = {}, pitEventsByCar = {}, pitNotesByCar = {}, timingUrl = '', raceMessages = [] }) {
   const workbook = new Workbook();
   const models = followedCars.map((car) => {
     const laps = carLaps(history, car);
@@ -237,6 +237,13 @@ function buildSessionWorkbook({ sessionName = '', generatedAt = new Date().toISO
         { style: 'lapTime', width: 11 }, { style: 'lapTime', width: 11 }, { style: 'lapTime', width: 11 }],
       fieldCars.map((car) => [num(car.carNumber) ?? car.carNumber, car.className || '', car.teamName || '', car.lapCount, car.paceLapCount, ms(car.bestLapMs), ms(car.averageLapMs),
         ms(car.bestSector1Ms), ms(car.bestSector2Ms), ms(car.bestSector3Ms)]));
+  }
+
+  // Steward / race-control messages seen on the timing page.
+  if (raceMessages.length) {
+    addDataSheet(workbook, 'Race messages', ['Time', 'Message', 'Followed cars mentioned'],
+      [{ style: 'dateTime', width: 20 }, { style: 'wrap', width: 90 }, { width: 22 }],
+      raceMessages.map((message) => [excel.dateTime(message.firstSeenAt), message.text, (message.cars || []).map((car) => `#${car}`).join(', ')]));
   }
 
   // Charts last, so the data sheets come first in the workbook.

@@ -43,6 +43,19 @@
       </div>
     </div>
 
+    <div id="messages-modal" class="setup-modal hidden" role="dialog" aria-modal="true" aria-labelledby="messages-title">
+      <div class="setup-card messages-card">
+        <p class="eyebrow">Race control</p>
+        <h1 id="messages-title">Race control messages</h1>
+        <p id="messages-hint" class="setup-hint">Steward, penalty and race-control messages shown on the timing page. Messages that mention the car of this dashboard are marked.</p>
+        <div id="messages-list" class="messages-list"></div>
+        <div class="button-row end">
+          <button id="messages-open-timing" class="secondary">Open timing page</button>
+          <button id="messages-close" class="primary">OK</button>
+        </div>
+      </div>
+    </div>
+
     <div id="pit-notes-modal" class="setup-modal hidden" role="dialog" aria-modal="true" aria-labelledby="pit-notes-title">
       <div class="setup-card pit-notes-card">
         <p class="eyebrow">Pit stop notes</p>
@@ -198,6 +211,10 @@
               <path d="M3 3v18h18"></path>
               <path d="m7 15 4-4 3 3 5-6"></path>
             </svg>
+          </button>
+          <button id="open-messages" class="secondary icon-button messages-button" title="Race control messages" aria-label="Race control messages">
+            <svg class="graph-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M5 21V4"></path><path d="M5 4h11l-2 4 2 4H5"></path></svg>
+            <span id="messages-badge" class="messages-badge" hidden></span>
           </button>
           <button id="open-pit-notes" class="secondary icon-button pit-notes-button" title="Pit stop notes" aria-label="Pit stop notes">
             <svg class="graph-icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="1.5"></rect><path d="M9 8h6M9 12h6M9 16h4"></path></svg>

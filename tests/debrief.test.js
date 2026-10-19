@@ -33,6 +33,10 @@ assert.ok(model.takeaways.some((line) => line.startsWith('Fastest lap')));
 assert.ok(model.takeaways.some((line) => line.includes('Tyres changed at 1/2 stops') && line.includes('Set 4')));
 assert.ok(model.takeaways.some((line) => line.startsWith('Race control: FCY 1')));
 
+const withMessages = buildDebriefModel({ payload, history, stints, pitNotes, raceMessages: [
+  { id: 'a', text: 'Car #33 - drive through penalty for unsafe release', cars: ['33'] }, { id: 'b', text: 'Pit lane closed', cars: [] }] });
+assert.ok(withMessages.takeaways.some((line) => line.startsWith('Steward messages for #33: 1') && line.includes('unsafe release')), 'steward messages about our car are in the takeaways');
+
 const html = buildDebriefHtml(model);
 assert.strictEqual((html.match(/class="report-page"/g) || []).length, 1, 'the debrief is exactly one page');
 for (const text of ['RACE DEBRIEF', 'STINT TIMELINE', 'Driver 1', 'Set 4', 'Perfect stop', 'KEY TAKEAWAYS']) {

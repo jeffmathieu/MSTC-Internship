@@ -46,12 +46,13 @@ const buffer = buildSessionWorkbook({
   sessionName: 'Test <Race> & "Co"', mode: 'race', followedCars: ['33'], history, stintStateCars: stintState.cars,
   pitEventsByCar: { 33: events },
   pitNotesByCar: { 33: { '33|a': { fuelAdded: true, tyresChanged: false, tyreSet: '=HYPERLINK("x")', driverNotes: 'Pushes <hard>', pitNotes: 'ok' } } },
-  fieldCars: [{ carNumber: '2', className: 'LMP3', teamName: 'Best Class Car', lapCount: 20, paceLapCount: 18, bestLapMs: 99000 }]
+  fieldCars: [{ carNumber: '2', className: 'LMP3', teamName: 'Best Class Car', lapCount: 20, paceLapCount: 18, bestLapMs: 99000 }],
+  raceMessages: [{ id: 'm', text: 'Car #33 - stop & go', firstSeenAt: '2026-06-23T12:30:00.000Z', cars: ['33'] }]
 });
 const parts = readZip(buffer);
 
 const workbookXml = parts['xl/workbook.xml'];
-['Summary', 'Green laps', 'All laps', 'Drivers', 'Stints', 'Pit stops', 'Field', 'Chart data #33', 'Charts #33']
+['Summary', 'Green laps', 'All laps', 'Drivers', 'Stints', 'Pit stops', 'Field', 'Race messages', 'Chart data #33', 'Charts #33']
   .forEach((name) => assert.ok(workbookXml.includes(`name="${name}"`), `sheet ${name} exists`));
 assert.ok(parts['[Content_Types].xml'].includes('/xl/charts/chart1.xml'));
 assert.ok(Object.keys(parts).filter((name) => /^xl\/charts\/chart\d+\.xml$/.test(name)).length >= 5, 'native charts are written');

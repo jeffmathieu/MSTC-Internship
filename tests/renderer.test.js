@@ -804,6 +804,25 @@ module.exports = (async () => {
   assert.strictEqual(lastPitNotesPayload.notes.tyreSet, 'Set 7');
   assert.ok(document.getElementById('pit-notes-modal').classList.contains('hidden'), 'saving closes the notes popup');
 
+  // Race control messages: a general message makes the button flash, a message
+  // about this dashboard's car opens the popup by itself.
+  const messagesButton = document.getElementById('open-messages');
+  await document.getElementById('messages-close').trigger('click'); // start from a closed popup
+  const now = new Date().toISOString();
+  const general = { id: 'm1', text: 'Pit lane closed', firstSeenAt: now, lastSeenAt: now, cars: [] };
+  collectorUpdate({ ...updatedState, raceMessages: [general] });
+  await flushAsync();
+  assert.ok(messagesButton.classList.contains('has-unread'), 'a new message makes the messages button flash');
+  assert.ok(document.getElementById('messages-modal').classList.contains('hidden'), 'a general message does not open the popup');
+  const ours = { id: 'm2', text: 'Car #13 - drive through penalty', firstSeenAt: now, lastSeenAt: now, cars: ['13'] };
+  collectorUpdate({ ...updatedState, raceMessages: [general, ours] });
+  await flushAsync();
+  assert.ok(!document.getElementById('messages-modal').classList.contains('hidden'), 'a message about our car opens the popup');
+  assert.strictEqual(document.getElementById('messages-title').textContent, 'Message about car #13');
+  assert.ok(document.getElementById('messages-list').innerHTML !== '' || document.getElementById('messages-list').children.length > 0);
+  await document.getElementById('messages-close').trigger('click');
+  assert.ok(!messagesButton.classList.contains('has-unread') && !messagesButton.classList.contains('car-alert'), 'opened messages count as read');
+
   console.log('Renderer UI tests passed.');
 })().catch((error) => {
   console.error(error);
