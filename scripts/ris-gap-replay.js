@@ -87,4 +87,4 @@ if (require.main === module) {
   console.log(JSON.stringify(evaluate(file, followed), null, 2));
 }
 
-module.exports = { evaluate };
+module.exports = { evaluate, loadPolls };
