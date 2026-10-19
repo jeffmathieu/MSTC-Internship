@@ -92,6 +92,36 @@ const coordinate = view.classCoordinates.find((item) => item.carNumber === '9');
 assert.strictEqual(coordinate.gapToUsMs, truth('4', '9'));
 assert.ok(coordinate.lapGap >= 1);
 
+// RIS layout: LAPS, GAP (to the first car on the same lap) and INT (to the car
+// directly ahead). LAST and LAPS may update a poll apart; that is one crossing.
+{
+  const at = (s) => new Date(Date.parse('2026-10-19T14:00:00.000Z') + s * 1000).toISOString();
+  let ris = timeline.createTimeline();
+  const poll = (s, rows) => { ris = timeline.observePoll(ris, rows, at(s)); };
+  const row = (car, position, laps, last, gap, int) => ({ carNumber: car, position, lapNumber: laps, lastLap: last, gap, interval: int, diff: int });
+  // Car A leads; B is 7.5 s behind; C is a lap down but 20 s behind B on track.
+  poll(0, [row('A', 1, 10, '1:40.000', '--', '--'), row('B', 2, 10, '1:40.500', '7.500', '7.500'), row('C', 3, 9, '1:41.000', '1L', '1L')]);
+  // A crosses at ~t=3: its lap counter arrives first, LAST a poll later.
+  poll(5, [row('A', 1, 11, '1:40.000', '--', '--'), row('B', 2, 10, '1:40.500', '7.500', '7.500'), row('C', 3, 9, '1:41.000', '1L', '1L')]);
+  poll(10, [row('A', 1, 11, '1:39.800', '--', '--'), row('B', 2, 10, '1:40.500', '7.500', '7.500'), row('C', 3, 9, '1:41.000', '1L', '1L')]);
+  // B crosses ~7.7 s after A: LAST first, the lap counter a poll later.
+  poll(15, [row('A', 1, 11, '1:39.800', '--', '--'), row('B', 2, 10, '1:40.200', '7.700', '7.700'), row('C', 3, 9, '1:41.000', '1L', '1L')]);
+  poll(20, [row('A', 1, 11, '1:39.800', '--', '--'), row('B', 2, 11, '1:40.200', '7.700', '7.700'), row('C', 3, 9, '1:41.000', '1L', '1L')]);
+  assert.strictEqual(ris.cars.A.crossings.length, 1, 'counter and LAST a poll apart are one crossing');
+  assert.strictEqual(ris.cars.B.crossings.length, 1);
+  assert.strictEqual(ris.cars.A.crossings[0].lap, 11);
+  assert.strictEqual(ris.cars.B.crossings[0].lap, 11);
+  const resolvedRis = timeline.resolve(ris);
+  const ab = timeline.gapBetween(resolvedRis, 'A', 'B');
+  assert.strictEqual(ab.gapMs, 7700, 'INT links the two crossings exactly');
+  assert.strictEqual(ab.exact, true);
+  // GAP to the first car on the same lap is never read as "time to the car ahead".
+  const gapOnly = timeline.observePoll(timeline.observePoll(timeline.createTimeline(),
+    [{ carNumber: 'X', position: 1, lapNumber: 5, lastLap: '1:40.000', gap: '--' }, { carNumber: 'Y', position: 2, lapNumber: 5, lastLap: '1:40.000', gap: '3.000' }], at(0)),
+  [{ carNumber: 'X', position: 1, lapNumber: 6, lastLap: '1:40.100', gap: '--' }, { carNumber: 'Y', position: 2, lapNumber: 6, lastLap: '1:40.200', gap: '3.100' }], at(5));
+  assert.strictEqual(gapOnly.cars.Y.crossings[0].gapMs, null, 'a GAP column without INT/DIFF is no link');
+}
+
 // Parsing the gap cell
 assert.deepStrictEqual(timeline.readGapCell('-- 113 laps --'), { kind: 'laps', laps: 113 });
 assert.deepStrictEqual(timeline.readGapCell('1:22.126'), { kind: 'time', ms: 82126 });

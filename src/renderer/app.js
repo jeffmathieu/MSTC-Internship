@@ -1292,7 +1292,9 @@ function renderClassGaps(state = currentState) {
     const gap = isOurs ? { text: 'OUR CAR', className: '' } : describeClassGap(item);
     const interval = previous && Number.isFinite(item?.gapToUsMs) && Number.isFinite(previous.gapToUsMs)
       ? `+${formatGapClock(item.gapToUsMs - previous.gapToUsMs)}` : '—';
-    const status = /pit/i.test(String(row.eta || row.state || '')) ? 'In pit'
+    // GetRaceResults shows "In Pit" in E.T.A.; RIS uses STATE "IN" (or "PIT").
+    const inPit = /^(in|p|pit|in pit|f|fuel)$/i.test(String(row.state || '').trim()) || /in\s*pit/i.test(String(row.eta || ''));
+    const status = inPit ? 'In pit'
       : /out\s*lap/i.test(String(row.eta || '')) ? 'Out lap' : '';
     addRow([[String(row.classPosition ?? '')], [`#${row.carNumber}`], [gap.text, gap.className], [interval, 'gap-muted'],
       [String(row.lastLap || '—')], [status, 'gap-muted']], isOurs ? 'is-our-car' : '');

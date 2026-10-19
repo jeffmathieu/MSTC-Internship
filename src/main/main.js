@@ -610,7 +610,15 @@ const pageExtractionScript = String.raw`(() => {
     return clean(element.innerText || element.textContent || '');
   };
   const heatNameElement = document.querySelector('#heatState .heatName') || document.querySelector('.heatName');
-  const screenMessages = Array.from(document.querySelectorAll('#screenMessages > div')).map(visibleText).filter(Boolean);
+  const grrMessages = Array.from(document.querySelectorAll('#screenMessages > div')).map(visibleText).filter(Boolean);
+  // RIS shows the latest race-control message in a banner next to a counter
+  // such as "1 événement" / "3 events"; the "RC_MESSAGE:" prefix is dropped.
+  const risMessages = Array.from(document.querySelectorAll('span,div'))
+    .filter((element) => element.children.length === 0 && /^\d+\s+(?:événements?|evenements?|events?|evenementen|berichten|messages?)$/i.test(clean(element.textContent)))
+    .filter((counter) => visibleText(counter) && counter.parentElement)
+    .map((counter) => clean(visibleText(counter.parentElement).replace(clean(counter.textContent), '')).replace(/^RC_MESSAGE:\s*/i, ''))
+    .filter(Boolean);
+  const screenMessages = [...new Set([...grrMessages, ...risMessages])];
   // A class filter hides other classes, so "time to the car ahead" could then be
   // read against the wrong car. Nothing selected means "All".
   const classFilterElement = document.querySelector('#classNameFilter');

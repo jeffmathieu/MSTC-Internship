@@ -31,7 +31,7 @@ function replay(file, hideShare = 0) {
     const rows = table.map((row, index) => {
       const ahead = index > 0 ? table[index - 1] : null;
       const sameLap = ahead && Number(ahead.lapNumber) === Number(row.lapNumber);
-      return { carNumber: row.carNumber, position: row.position, lastLap: row.lastLap,
+      return { carNumber: row.carNumber, position: row.position, lastLap: row.lastLap, gapSemantics: 'alternating-adjacent',
         gapRaw: sameLap && row.interval && !hidden(row.carNumber, row.lapNumber) ? row.interval : `-- ${row.lapNumber} laps --` };
     });
     // Ground truth: each car that crossed on this poll, its real interval and

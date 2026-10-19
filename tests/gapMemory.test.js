@@ -119,8 +119,9 @@ assert.strictEqual(cumulativeState.sourceMode, 'cumulative-gap');
 assert.strictEqual(cumulativeState.viewsByCar['33'].behind.gapMs, 10000);
 assert.strictEqual(cumulativeState.viewsByCar['33'].behind.source, 'confirmed-cumulative-gap');
 
-// A lapped rival uses a lap-based estimate, even when no numeric interval can
-// be summed safely.
+// A lapped rival is never guessed from lap counts (they can be captured at
+// different moments for the two cars): it stays unknown until the line-crossing
+// timeline has seen both cars cross the line.
 const lappedState = updateGapMemory({}, {
   rows: [
     { position: 1, carNumber: 33, className: 'CC', classPosition: 1, lapNumber: 20, lastLap: '2:00.000' },
@@ -129,9 +130,13 @@ const lappedState = updateGapMemory({}, {
   followedCars: ['33'],
   collectedAt: '2026-07-05T11:10:00.000Z'
 });
-assert.strictEqual(lappedState.viewsByCar['33'].behind.lapGap, 2);
-assert.strictEqual(lappedState.viewsByCar['33'].behind.gapMs, 248000);
-assert.strictEqual(lappedState.viewsByCar['33'].behind.estimated, true);
+assert.strictEqual(lappedState.viewsByCar['33'].behind.gapMs, null);
+assert.strictEqual(lappedState.viewsByCar['33'].behind.source, 'calibrating');
+assert.strictEqual(updateGapMemory({}, { rows: [
+  { position: 1, carNumber: 33, className: 'CC', classPosition: 1, lapNumber: 20, lastLap: '2:00.000' },
+  { position: 2, carNumber: 65, className: 'CC', classPosition: 2, lapNumber: 18, lastLap: '2:04.000', interval: '2L' }
+], followedCars: ['33'], collectedAt: '2026-07-05T11:10:00.000Z', disableTimeline: true }).viewsByCar['33'].behind.lapGap, 2,
+  'without the timeline the old lap estimate still applies');
 
 // A position change invalidates an old predecessor chain until the affected
 // cars cross the line again; stale intervals must never be silently reused.
@@ -142,8 +147,17 @@ const reorderedState = updateGapMemory(state, {
   followedCars: ['13'],
   collectedAt: '2026-07-05T11:20:00.000Z'
 });
-assert.strictEqual(reorderedState.viewsByCar['13'].behind.gapMs, null);
-assert.strictEqual(reorderedState.viewsByCar['13'].behind.source, 'unavailable');
+// The interval chain is broken by the new order, but the gap measured at the
+// line (line-crossing timeline) stays valid: car 2 is still 10 s behind us.
+assert.strictEqual(reorderedState.viewsByCar['13'].behind.gapMs, 10000);
+assert.strictEqual(reorderedState.viewsByCar['13'].behind.source, 'line-crossing-timeline');
+// When the rival passes us on track, the last line crossing still has it
+// behind us: that gap points the wrong way and is not shown until both cross.
+const passedRows = [lap17Rows[2], lap17Rows[0], lap17Rows[1]].map((row, index) => ({ ...row, position: index + 1,
+  classPosition: row.carNumber === 2 ? 1 : row.carNumber === 13 ? 2 : row.classPosition }));
+const passedState = updateGapMemory(state, { rows: passedRows, followedCars: ['13'], collectedAt: '2026-07-05T11:21:00.000Z' });
+assert.strictEqual(passedState.viewsByCar['13'].ahead.rivalCarNumber, '2');
+assert.strictEqual(passedState.viewsByCar['13'].ahead.gapMs, null, 'a gap with the old order is not shown after an overtake');
 
 // Missing/partial tables remain harmless and preserve explicit configuration.
 const emptyState = updateGapMemory(undefined, {

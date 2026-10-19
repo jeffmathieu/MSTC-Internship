@@ -20,6 +20,8 @@
   const LINK_TOLERANCE_MS = 400;
   const SLACK_MS = 3000;
   const BREAK_TOLERANCE_MS = 6000;
+  // LAST and the lap count may update a poll apart (RIS): one crossing.
+  const MERGE_MS = 30000;
 
   const key = (value) => String(value ?? '').trim();
 
@@ -41,12 +43,58 @@
     return Number.isFinite(ms) ? { kind: 'time', ms } : { kind: 'none' };
   }
 
+  // What one timing row says about its car:
+  //  linkMs: time to the car directly ahead - DIFF/INT, or on a rotating GAP
+  //          page the GAP cell when it shows a time. A GAP to the leader (or,
+  //          on RIS, to the first car on the same lap) is never used as a link.
+  //  laps:   completed laps - the LAPS column, or on a rotating GAP page the
+  //          "-- N laps --" cell.
+  function readRow(row) {
+    const rotating = row.gapSemantics === 'alternating-adjacent';
+    const linkText = String(rotating ? (row.gapRaw ?? row.gap ?? '') : (row.diff || row.interval || '')).trim();
+    const linkCell = readGapCell(linkText);
+    const lapValue = row.lapNumber === '' || row.lapNumber == null ? NaN : Number(row.lapNumber);
+    const providerLaps = !rotating && row.lapNumberSource !== 'observed-sequence' && Number.isFinite(lapValue) ? lapValue : null;
+    const laps = providerLaps ?? (rotating && linkCell.kind === 'laps' ? linkCell.laps : null);
+    return { linkMs: linkCell.kind === 'time' ? linkCell.ms : null, laps, changeText: `${linkText}|${laps ?? ''}` };
+  }
+
   function createTimeline() {
     return { pollAt: null, segmentSeq: 0, cars: {} };
   }
 
+  // Places a crossing in its car's run once its lap time is known: continues the
+  // run when the lap time fits between the poll windows, otherwise starts a new run.
+  function placeCrossing(state, crossing, lapMs, carKey, next) {
+    const previous = state.crossings[state.crossings.indexOf(crossing) - 1];
+    let continuous = previous && Number.isFinite(lapMs) && Number.isFinite(previous.cum) && previous.segment === state.segment
+      // The previous crossing was in [previous.prev, previous.at] and this one in
+      // [crossing.prev, crossing.at], so this lap must fit between those bounds.
+      && lapMs <= crossing.at - previous.prev + SLACK_MS
+      && lapMs >= crossing.prev - previous.at - SLACK_MS;
+    const cum = continuous ? previous.cum + lapMs : 0;
+    // The run's base must stay consistent with every crossing in it. A LAST that
+    // does not add up (pit-lane timing, a glitch) starts a new run instead of
+    // shifting the whole run.
+    if (continuous) {
+      const lo = Math.max(state.window.lo, crossing.prev - cum);
+      const hi = Math.min(state.window.hi, crossing.at - cum);
+      if (lo > hi + BREAK_TOLERANCE_MS) continuous = false;
+      else state.window = lo <= hi ? { lo, hi } : { lo: (lo + hi) / 2, hi: (lo + hi) / 2 };
+    }
+    if (!continuous) {
+      next.segmentSeq += 1;
+      state.segment = `${carKey}#${next.segmentSeq}`;
+      state.window = { lo: crossing.prev, hi: crossing.at };
+    }
+    crossing.segment = state.segment;
+    crossing.lapMs = Number.isFinite(lapMs) ? lapMs : null;
+    crossing.cum = continuous ? cum : 0;
+    crossing.pending = false;
+  }
+
   // rows: one poll of the timing table (any order); each row needs carNumber,
-  // position, lastLap (text), gap cell text (gapRaw or gap).
+  // position, lastLap (text) and the gap/interval/laps columns it has.
   function observePoll(timeline = createTimeline(), rows = [], pollAtIso) {
     const pollAt = Date.parse(pollAtIso);
     if (!Number.isFinite(pollAt)) return timeline;
@@ -56,63 +104,51 @@
       .sort((a, b) => (Number(a.position) || Infinity) - (Number(b.position) || Infinity));
     ordered.forEach((row, index) => {
       const car = key(row.carNumber);
-      const gapText = String(row.gapRaw ?? row.gap ?? '').trim();
       const lastText = String(row.lastLap ?? '').trim();
-      const cell = readGapCell(gapText);
+      const info = readRow(row);
       const before = next.cars[car];
-      const state = before ? { ...before, crossings: before.crossings.slice() } : { crossings: [], lastText, gapText, segment: null, window: null };
-      const changed = before && Number.isFinite(previousPoll) && (lastText !== before.lastText || gapText !== before.gapText);
-      // Normally LAST changes on every crossing. Two laps with exactly the same
-      // time are still caught when the car's own lap count goes up.
-      const countUp = cell.kind === 'laps' && Number.isFinite(before?.lastCount) && cell.laps === before.lastCount + 1;
-      if (changed && (lastText !== before.lastText || countUp)) {
-        const lapMs = parseClockMs(lastText);
-        const latest = state.crossings.at(-1);
-        // A new run starts when the previous crossing is missing or when the
-        // elapsed time cannot be explained by this lap (missed crossing, restart).
-        // The previous crossing was in [latest.prev, latest.at] and this one in
-        // [previousPoll, pollAt], so this lap must fit between those bounds.
-        let continuous = latest && Number.isFinite(lapMs) && latest.segment === state.segment
-          && lapMs <= pollAt - latest.prev + SLACK_MS
-          && lapMs >= previousPoll - latest.at - SLACK_MS;
-        const cum = continuous ? latest.cum + lapMs : 0;
-        // The run's base must stay consistent with every crossing in it. A LAST
-        // that does not add up (pit-lane timing, a glitch) starts a new run
-        // instead of shifting the whole run.
-        if (continuous) {
-          const lo = Math.max(state.window.lo, previousPoll - cum);
-          const hi = Math.min(state.window.hi, pollAt - cum);
-          if (lo > hi + BREAK_TOLERANCE_MS) continuous = false;
-          else state.window = lo <= hi ? { lo, hi } : { lo: (lo + hi) / 2, hi: (lo + hi) / 2 };
-        }
-        if (!continuous) {
-          next.segmentSeq += 1;
-          state.segment = `${car}#${next.segmentSeq}`;
-          state.window = { lo: previousPoll, hi: pollAt };
-        }
-        state.crossings.push({
-          segment: state.segment,
-          prev: previousPoll,
-          at: pollAt,
-          lapMs: Number.isFinite(lapMs) ? lapMs : null,
-          cum: continuous ? cum : 0,
-          lap: null,
-          aheadCar: null,
-          gapMs: null
-        });
-        if (state.crossings.length > KEEP_CROSSINGS) state.crossings.shift();
-        // Completed laps go up with every recorded crossing.
-        if (Number.isFinite(state.lastCount)) state.lastCount += 1;
-      }
+      const state = before
+        ? { ...before, crossings: before.crossings.map((item) => ({ ...item })) }
+        : { crossings: [], lastText, linkText: info.changeText, segment: null, window: null, lastCount: info.laps };
+      const ready = before && Number.isFinite(previousPoll);
+      // A crossing shows up as a new LAST and/or a higher lap count. Some pages
+      // (RIS) update the two a poll apart: within MERGE_MS they are one crossing.
+      const lastChanged = ready && lastText !== before.lastText;
+      const countUp = ready && Number.isFinite(info.laps) && Number.isFinite(before.lastCount) && info.laps > before.lastCount;
       const latest = state.crossings.at(-1);
-      if (latest && latest.at === pollAt) {
-        // The cell is rewritten when the car crosses the line.
-        if (cell.kind === 'time' && index > 0) { latest.aheadCar = key(ordered[index - 1].carNumber); latest.gapMs = cell.ms; }
+      const mergeable = latest && pollAt - latest.at <= MERGE_MS
+        && ((lastChanged && !latest.byLast && latest.byCount) || (countUp && !latest.byCount && latest.byLast));
+      if (lastChanged || countUp) {
+        if (mergeable) {
+          if (lastChanged) { latest.byLast = true; placeCrossing(state, latest, parseClockMs(lastText), car, next); }
+          if (countUp) { latest.byCount = true; latest.lap = info.laps; }
+        } else {
+          // A crossing still waiting for its LAST keeps the LAST it has.
+          if (latest?.pending) placeCrossing(state, latest, parseClockMs(before.lastText), car, next);
+          const crossing = {
+            segment: state.segment, prev: previousPoll, at: pollAt, lapMs: null, cum: null,
+            lap: countUp ? info.laps : Number.isFinite(state.lastCount) ? state.lastCount + 1 : null,
+            aheadCar: null, gapMs: null, byLast: lastChanged, byCount: countUp, pending: !lastChanged
+          };
+          state.crossings.push(crossing);
+          if (lastChanged) placeCrossing(state, crossing, parseClockMs(lastText), car, next);
+          if (state.crossings.length > KEEP_CROSSINGS) state.crossings.shift();
+        }
+      } else if (latest?.pending && pollAt - latest.at > MERGE_MS) {
+        // The lap count went up but LAST stayed the same: an identical lap time.
+        placeCrossing(state, latest, parseClockMs(lastText), car, next);
       }
-      if (cell.kind === 'laps' && latest) latest.lap = cell.laps;
+      const current = state.crossings.at(-1);
+      // The gap/interval cell is rewritten when the car crosses the line.
+      if (current && (lastChanged || countUp) && Number.isFinite(info.linkMs) && index > 0) {
+        current.aheadCar = key(ordered[index - 1].carNumber);
+        current.gapMs = info.linkMs;
+      }
+      if (current && Number.isFinite(info.laps) && (!Number.isFinite(current.lap) || info.laps >= current.lap)) current.lap = info.laps;
+      if (Number.isFinite(info.laps)) state.lastCount = info.laps;
+      else if (current && Number.isFinite(current.lap)) state.lastCount = current.lap;
       state.lastText = lastText;
-      state.gapText = gapText;
-      if (cell.kind === 'laps') state.lastCount = cell.laps;
+      state.linkText = info.changeText;
       next.cars[car] = state;
     });
     return next;
@@ -146,7 +182,9 @@
 
   // Resolves every kept crossing to an estimated absolute time and lap number.
   function resolve(timeline) {
-    const cars = timeline?.cars || {};
+    // Crossings still waiting for their LAST are not placed yet.
+    const cars = Object.fromEntries(Object.entries(timeline?.cars || {}).map(([car, state]) =>
+      [car, { ...state, crossings: state.crossings.filter((crossing) => !crossing.pending && Number.isFinite(crossing.cum)) }]));
     const links = makeLinks();
     const windows = new Map();
     Object.values(cars).forEach((state) => state.crossings.forEach((crossing) => {

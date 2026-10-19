@@ -142,10 +142,15 @@ function pairKey(followed, rival) {
 // Rotating GAP feeds (time to the car ahead or "-- N laps --", no DIFF): the
 // line-crossing timeline gives the gap between any two cars, including more
 // than a lap, instead of guessing from lap counts that are only shown now and then.
-function timelineGap(resolvedTimeline, followed, rival) {
+function timelineGap(resolvedTimeline, followed, rival, relation) {
   if (!resolvedTimeline) return null;
   const gap = crossingTimeline.gapBetween(resolvedTimeline, followed.carNumber, rival.carNumber);
   if (!gap) return null;
+  // After an overtake on track the last line crossing still has the old order:
+  // until both cars cross again that gap would point the wrong way.
+  if ((relation === 'behind' && gap.gapMs < 0) || (relation === 'ahead' && gap.gapMs > 0)) return null;
+  // Not yet linked by a shown time and still very uncertain: not worth showing.
+  if (!gap.exact && gap.uncertaintyMs > MAX_ESTIMATE_UNCERTAINTY_MS) return null;
   return {
     signedGapMs: gap.gapMs,
     gapMs: Math.abs(gap.gapMs),
@@ -157,16 +162,19 @@ function timelineGap(resolvedTimeline, followed, rival) {
   };
 }
 
+const MAX_ESTIMATE_UNCERTAINTY_MS = 5000;
 const CALIBRATING = { gapMs: null, lapGap: null, estimated: true, uncertaintyMs: null, source: 'calibrating', confirmedAt: null };
 
-// The gap to one rival. On a rotating GAP page the timeline decides; until it
-// knows, a time currently shown between adjacent cars is still exact, but lap
-// counts (only visible now and then) must never stand in for a gap.
-function gapFor(rows, confirmedCars, followed, rival, averageLapMs, options) {
-  const fromTimeline = timelineGap(options.resolvedTimeline, followed, rival);
+// The gap to one rival. The timeline decides; until it knows, a time currently
+// shown between adjacent cars is still exact, but lap counts must never stand
+// in for a gap.
+function gapFor(rows, confirmedCars, followed, rival, averageLapMs, options, relation) {
+  const fromTimeline = timelineGap(options.resolvedTimeline, followed, rival, relation);
   if (fromTimeline) return fromTimeline;
   const confirmed = confirmedGapBetween(rows, confirmedCars, followed, rival, averageLapMs);
   if (!options.resolvedTimeline) return confirmed;
+  // Lap counts captured at different moments for the two cars can claim a lap
+  // difference that is not there: while the timeline is running it decides.
   return confirmed && confirmed.source !== 'confirmed-lap-gap' ? confirmed : CALIBRATING;
 }
 
@@ -178,7 +186,7 @@ function buildView(rows, confirmedCars, followedCarNumber, pitByPair, options) {
   const averageLapMs = representativeLapMs(classRows);
   const describe = (rival, relation) => {
     if (!rival) return null;
-    const gap = gapFor(rows, confirmedCars, followed, rival, averageLapMs, options);
+    const gap = gapFor(rows, confirmedCars, followed, rival, averageLapMs, options, relation);
     const pit = pitByPair[pairKey(followedCarNumber, rival.carNumber)] || {};
     const ourLap = lapNumber(followed) ?? confirmedCars[carKey(followedCarNumber)]?.lapNumber;
     const pitLaps = Number.isFinite(ourLap) && Number.isFinite(pit.sinceFollowedLap) ? Math.max(0, ourLap - pit.sinceFollowedLap) : 0;
@@ -201,7 +209,7 @@ function buildView(rows, confirmedCars, followedCarNumber, pitByPair, options) {
   const classCoordinates = classRows.map((row) => {
     if (carKey(row.carNumber) === carKey(followedCarNumber)) return { carNumber: carKey(row.carNumber), gapToUsMs: 0, estimated: false };
     const relation = Number(row.classPosition) < Number(followed.classPosition) ? 'ahead' : 'behind';
-    const gap = gapFor(rows, confirmedCars, followed, row, averageLapMs, options);
+    const gap = gapFor(rows, confirmedCars, followed, row, averageLapMs, options, relation);
     return {
       carNumber: carKey(row.carNumber),
       relation,
@@ -259,13 +267,15 @@ function updateGapMemory(previous = {}, input = {}) {
 
   // Only rotating GAP feeds need the timeline; other feeds keep their exact
   // DIFF/INT chain. The timeline is in-memory only (rebuilt after a restart).
-  // The timeline records from the first poll, so it is ready as soon as the
-  // rotating GAP column is recognised.
+  // Every feed uses the line-crossing timeline: it also gives exact gaps across
+  // laps (RIS INT shows "1L" there, which breaks an interval chain). Until it
+  // knows a gap, the older sources are used - except lap counts on a rotating
+  // GAP page, which are only shown now and then.
   const rotating = rows.some((row) => row.gapSemantics === 'alternating-adjacent');
-  const timeline = crossingTimeline
+  const timeline = crossingTimeline && !input.disableTimeline
     ? crossingTimeline.observePoll(previous.timeline || crossingTimeline.createTimeline(), rows, collectedAt) : null;
-  const resolvedTimeline = rotating && timeline ? crossingTimeline.resolve(timeline) : null;
-  const viewOptions = { ...options, resolvedTimeline };
+  const resolvedTimeline = timeline ? crossingTimeline.resolve(timeline) : null;
+  const viewOptions = { ...options, resolvedTimeline, rotating };
   const viewsByCar = Object.fromEntries(followedCars.map((car) => [car, buildView(rows, confirmedCars, car, pitByPair, viewOptions)]));
   const newSamples = [];
   followedCars.forEach((followedCar) => {
@@ -298,7 +308,8 @@ function updateGapMemory(previous = {}, input = {}) {
   return {
     storageSchemaVersion: 1,
     updatedAt: collectedAt,
-    sourceMode: resolvedTimeline ? 'line-crossing-timeline' : cumulative ? 'cumulative-gap' : 'adjacent-interval-chain',
+    sourceMode: Object.values(viewsByCar).some((view) => (view.classCoordinates || []).some((item) => item.source === 'line-crossing-timeline'))
+      ? 'line-crossing-timeline' : cumulative ? 'cumulative-gap' : 'adjacent-interval-chain',
     timeline,
     paceWindow: options.paceWindow,
     pitSuppressionLaps: options.pitSuppressionLaps,
