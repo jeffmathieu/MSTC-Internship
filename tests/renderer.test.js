@@ -202,6 +202,7 @@ const initialState = {
   }
 };
 
+let lastPitNotesPayload = null;
 const updatedState = {
   ...initialState,
   lapHistory: [
@@ -384,6 +385,7 @@ const liveTiming = {
   openGraphsWindow: async (carNumber) => { graphsOpenCount += 1; lastGraphsCar = carNumber; return true; },
   updateLapStatus: async (payload) => { lastLapStatusPayload = payload; return { ok: true, state: updatedState }; },
   onThemeUpdate: (callback) => { themeUpdate = callback; return () => {}; },
+  savePitNotes: async (payload) => { lastPitNotesPayload = payload; return { ok: true, state: null }; },
   exportCurrent: async () => ({ csvPath: 'rows.csv', jsonPath: 'rows.json', historyPath: 'history.json' }),
   onCollectorUpdate: (callback) => { collectorUpdate = callback; return () => {}; }
 };
@@ -795,6 +797,12 @@ module.exports = (async () => {
   assert.ok(!notesButton.classList.contains('needs-notes') && notesButton.classList.contains('has-notes'), 'saved notes clear the colour');
   await notesButton.trigger('click');
   assert.strictEqual(document.getElementById('pit-notes-driver-name').textContent, '(A)', 'the stint notes name the driver of the stint that ended');
+  assert.ok(!document.getElementById('pit-notes-modal').classList.contains('hidden'), 'the notes popup is open');
+  document.getElementById('pit-notes-tyreset').value = 'Set 7';
+  await document.getElementById('pit-notes-save').trigger('click');
+  await flushAsync();
+  assert.strictEqual(lastPitNotesPayload.notes.tyreSet, 'Set 7');
+  assert.ok(document.getElementById('pit-notes-modal').classList.contains('hidden'), 'saving closes the notes popup');
 
   console.log('Renderer UI tests passed.');
 })().catch((error) => {

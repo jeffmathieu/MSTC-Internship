@@ -212,7 +212,9 @@ async function savePitNotes() {
       }
     });
     if (result.state) currentState = result.state;
-    status.textContent = result.ok ? `Saved at ${new Date().toLocaleTimeString()}. You can keep editing until the next pit stop is detected.` : result.error;
+    // Saved notes close the popup; reopening it shows them for further edits.
+    if (result.ok) { showPitNotes(false); renderPitNotes(); return; }
+    status.textContent = result.error;
     renderPitNotes();
   } catch (error) {
     status.textContent = `Could not save: ${error.message}`;
