@@ -1,0 +1,3 @@
+- [ ] strategy overview page, in app and pdf (with the blocks per stint (even if driver don't change) to show nbr laps, avg time, driver; and see how many pitstops done for example) -> can be on elapsed time or laps (elapsed time would be better)
+- [ ] best lap times in class: PIC, #, Team, Car, Best (sort on this), s1- best, s2- best, s3- best.
+- [ ] live weather on app (buienradar, probably to heavy)
