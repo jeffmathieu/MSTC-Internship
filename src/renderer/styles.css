@@ -1296,6 +1296,7 @@ body.mode-qualifying .pit-window { display: none; }
 .gaps-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 800; }
 .gaps-row.gaps-head > span { color: var(--muted); font-size: 10.5px; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; }
 .gaps-row.is-our-car { background: var(--current-row-bg, rgba(49, 95, 199, .12)); }
+.gaps-row.is-out > span { color: var(--muted, #626a66); }
 .gaps-row .gap-ahead { color: #d94c5f; }
 .gaps-row .gap-behind { color: #1e9f67; }
 .gaps-row .gap-muted { color: var(--muted); font-weight: 700; }
@@ -1303,7 +1304,6 @@ body.mode-qualifying .pit-window { display: none; }
 
 .car-status-tag { font-size: 11px; font-weight: 900; letter-spacing: .03em; color: var(--muted, #626a66); }
 .car-status-tag.pit { color: #3399ff; }
-.car-status-tag.stopped { color: #d94c5f; }
 
 /* "Ending the session" overlay while the final reports are written. */
 .finalizing-overlay { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--modal-overlay, rgba(10, 14, 20, .55)); }

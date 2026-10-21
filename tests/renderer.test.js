@@ -811,14 +811,18 @@ module.exports = (async () => {
     { position: 2, carNumber: 13, className: 'LMP3', classPosition: 2, lastLap: '2:00.500', eta: '01:20' },
     { position: 3, carNumber: 56, className: 'LMP3', classPosition: 3, lastLap: '2:01.000', eta: 'In Pit' },
     { position: 4, carNumber: 77, className: 'LMP3', classPosition: 4, lastLap: '2:03.000', eta: '01:00' },
-    { position: 5, carNumber: 70, className: 'LMP3', classPosition: 5, lastLap: '2:04.000', eta: '?' }
+    { position: 5, carNumber: 70, className: 'LMP3', classPosition: 5, lastLap: '2:04.000', eta: '?' },
+    { position: 6, carNumber: 23, className: 'LMP3', classPosition: 6, lastLap: '2:05.000', state: 'RET' },
+    { position: 7, carNumber: 31, className: 'LMP3', classPosition: 7, lastLap: '2:02.000', eta: '01:30' }
   ];
   const gapView = { available: true, classCoordinates: [
     { carNumber: '2', gapToUsMs: -4250, lapGap: 0, estimated: false, source: 'line-crossing-timeline' },
     { carNumber: '13', gapToUsMs: 0, estimated: false },
     { carNumber: '56', gapToUsMs: 10000, lapGap: 0, estimated: false, source: 'line-crossing-timeline' },
     { carNumber: '77', gapToUsMs: 132500, lapGap: 1, estimated: false, source: 'line-crossing-timeline' },
-    { carNumber: '70', gapToUsMs: 251000, lapGap: 2, estimated: true, atLeast: true, source: 'line-crossing-timeline' }] };
+    { carNumber: '70', gapToUsMs: 251000, lapGap: 2, estimated: true, atLeast: true, source: 'line-crossing-timeline' },
+    { carNumber: '23', gapToUsMs: null, estimated: true, source: 'calibrating' },
+    { carNumber: '31', gapToUsMs: 140000, lapGap: 1, estimated: false, source: 'line-crossing-timeline' }] };
   collectorUpdate({ ...updatedState, rows: gapRows, timingPageWarning: 'The timing page is filtered on class LMP3.',
     analyticsSummary: { ...updatedState.analyticsSummary, gapModel: { viewsByCar: { 13: gapView } } } });
   await flushAsync();
@@ -828,7 +832,10 @@ module.exports = (async () => {
   assert.deepStrictEqual(gapTexts[3].slice(2, 4), ['+10.000', '+10.000'], 'the car behind, with its interval to us');
   assert.strictEqual(gapTexts[3][5], 'In pit');
   assert.deepStrictEqual(gapTexts[4].slice(2, 4), ['1L · +2:12.500', '+2:02.500'], 'a lapped car keeps its exact time');
-  assert.deepStrictEqual(gapTexts[5].slice(2, 4), ['2L', '—'], 'a stopped car shows the laps it is down, no ticking time');
+  assert.deepStrictEqual([gapTexts[5][2], gapTexts[5][3], gapTexts[5][5]], ['Out', '—', 'Not moving'],
+    'a car more than a lap overdue at the line (not in the pits) is out');
+  assert.deepStrictEqual([gapTexts[6][2], gapTexts[6][5]], ['Out', 'Retired'], 'retired on the timing page: out, not calibrating');
+  assert.strictEqual(gapTexts[7][3], '+7.500', 'the interval skips the out cars');
   assert.strictEqual(document.getElementById('collector-message').textContent, 'The timing page is filtered on class LMP3.',
     'a class filter on the timing page is shown as a warning');
 

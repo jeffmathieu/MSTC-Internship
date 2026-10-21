@@ -1061,13 +1061,13 @@ function comparisonCarLabel(car, fallback = '—') {
     badge.textContent = 'BIC';
     label.appendChild(badge);
   }
-  // Cars stay listed while in the pits; a car not seen for a few of our laps
-  // (and not in the pits) is marked as possibly stopped.
-  if (car?.status === 'pit' || car?.status === 'stopped') {
+  // Cars stay listed while in the pits. Cars that stopped are shown as "Out"
+  // on the Class gaps page only.
+  if (car?.status === 'pit') {
     const tag = document.createElement('small');
-    tag.className = `car-status-tag ${car.status}`;
-    tag.textContent = car.status === 'pit' ? 'PIT' : 'OUT?';
-    tag.title = car.status === 'pit' ? 'In the pits' : `Not seen at the line for ${car.lapsSinceSeen} of our laps`;
+    tag.className = 'car-status-tag pit';
+    tag.textContent = 'PIT';
+    tag.title = 'In the pits';
     label.appendChild(tag);
   }
   return label;
@@ -1304,6 +1304,8 @@ function renderClassGaps(state = currentState) {
     return;
   }
   const byCar = new Map(view.classCoordinates.map((item) => [String(item.carNumber), item]));
+  const analytics = analyticsForActiveCar(state?.analyticsSummary || null);
+  const comparisonCars = new Map((analytics?.comparisonView?.matrix?.classCars || []).map((item) => [String(item.carNumber), item]));
   const classRows = rows.filter((row) => row.className === ours.className)
     .sort((a, b) => (Number(a.classPosition) || Infinity) - (Number(b.classPosition) || Infinity));
   let previous = null;
@@ -1315,11 +1317,19 @@ function renderClassGaps(state = currentState) {
       ? `+${formatGapClock(item.gapToUsMs - previous.gapToUsMs)}` : '—';
     // GetRaceResults shows "In Pit" in E.T.A.; RIS uses STATE "IN" (or "PIT").
     const inPit = /^(in|p|pit|in pit|f|fuel)$/i.test(String(row.state || '').trim()) || /in\s*pit/i.test(String(row.eta || ''));
+    // Out: retired on the timing page, not seen at the line for a few of our
+    // laps, or more than a lap overdue at the line while not in the pits.
+    const retired = /\b(ret|retired|dnf|dns|dq|dsq|disq|excluded)\b/i.test(`${row.state || ''} ${row.eta || ''}`);
+    const stopped = comparisonCars.get(String(row.carNumber))?.status === 'stopped';
+    const out = !isOurs && !inPit && (retired || stopped || (item?.atLeast && Number(item.lapGap) > 0));
     const status = inPit ? 'In pit'
-      : /out\s*lap/i.test(String(row.eta || '')) ? 'Out lap' : '';
-    addRow([[String(row.classPosition ?? '')], [`#${row.carNumber}`], [gap.text, gap.className], [interval, 'gap-muted'],
-      [String(row.lastLap || '—')], [status, 'gap-muted']], isOurs ? 'is-our-car' : '');
-    previous = isOurs ? { gapToUsMs: 0 } : item;
+      : out ? (retired ? 'Retired' : 'Not moving')
+        : /out\s*lap/i.test(String(row.eta || '')) ? 'Out lap' : '';
+    const shownGap = out ? { text: 'Out', className: 'gap-muted' } : gap;
+    addRow([[String(row.classPosition ?? '')], [`#${row.carNumber}`], [shownGap.text, shownGap.className], [out ? '—' : interval, 'gap-muted'],
+      [String(row.lastLap || '—')], [status, 'gap-muted']], [isOurs ? 'is-our-car' : '', out ? 'is-out' : ''].filter(Boolean).join(' '));
+    // An out car is no reference for the interval of the next car.
+    if (!out) previous = isOurs ? { gapToUsMs: 0 } : item;
   });
 }
 
