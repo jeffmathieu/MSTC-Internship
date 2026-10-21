@@ -170,8 +170,12 @@ const CALIBRATING = { gapMs: null, lapGap: null, estimated: true, uncertaintyMs:
 // in for a gap.
 function gapFor(rows, confirmedCars, followed, rival, averageLapMs, options, relation) {
   const fromTimeline = timelineGap(options.resolvedTimeline, followed, rival, relation);
-  if (fromTimeline) return fromTimeline;
+  if (fromTimeline && !fromTimeline.estimated) return fromTimeline;
   const confirmed = confirmedGapBetween(rows, confirmedCars, followed, rival, averageLapMs);
+  // Two exact values read at the line on the same lap beat an estimate from
+  // poll windows.
+  if (confirmed && !confirmed.estimated && Number.isFinite(confirmed.gapMs)) return confirmed;
+  if (fromTimeline) return fromTimeline;
   if (!options.resolvedTimeline) return confirmed;
   // Lap counts captured at different moments for the two cars can claim a lap
   // difference that is not there: while the timeline is running it decides.

@@ -1,12 +1,14 @@
-// Line-crossing timeline for timing pages whose only gap column rotates
-// between "time to the car directly ahead" and "-- N laps --" (no DIFF/INT).
+// Line-crossing timeline for timing pages without a reliable interval column:
+// a GAP that rotates between a time and "-- N laps --", a GAP to the leader
+// (no DIFF/INT), or RIS (INT shows "1L" across laps).
 //
 // Idea: LAST is exact, so within an uninterrupted run of observed crossings a
 // car's crossing times are fixed relative to each other:
 //   t(k) = base + (sum of LAST up to k).
 // Every observed crossing happened between two polls, which bounds the base to
 // a small window. Every time the gap cell shows a real time, it gives the exact
-// difference between two cars' crossings, which links their bases exactly.
+// difference between two cars' crossings (the car directly ahead, or the
+// leader on a GAP-to-leader page), which links their bases exactly.
 // With those links, the gap between any two cars is the difference of their
 // crossings on the same lap - exact when linked, otherwise within the poll
 // window - and "laps down" follows from the same timelines instead of from the
@@ -22,6 +24,9 @@
   const BREAK_TOLERANCE_MS = 6000;
   // LAST and the lap count may update a poll apart (RIS): one crossing.
   const MERGE_MS = 30000;
+  // Deciding what a lone GAP column means: GAP to the leader never goes down
+  // along the order of cars on the same lap; a time to the car ahead often does.
+  const MIN_GAP_VOTES = 12;
 
   const key = (value) => String(value ?? '').trim();
 
@@ -44,19 +49,54 @@
   }
 
   // What one timing row says about its car:
-  //  linkMs: time to the car directly ahead - DIFF/INT, or on a rotating GAP
-  //          page the GAP cell when it shows a time. A GAP to the leader (or,
-  //          on RIS, to the first car on the same lap) is never used as a link.
+  //  linkMs: the time shown to the reference car - DIFF/INT (car directly
+  //          ahead), or, on a page whose only gap column is GAP, that cell:
+  //          to the car directly ahead or to the leader (gapMode). On RIS,
+  //          GAP (to the first car on the same lap) next to INT is never used.
+  //  linkTo: 'ahead' or 'leader'.
   //  laps:   completed laps - the LAPS column, or on a rotating GAP page the
   //          "-- N laps --" cell.
-  function readRow(row) {
+  function readRow(row, gapMode, pageHasInterval = true) {
     const rotating = row.gapSemantics === 'alternating-adjacent';
-    const linkText = String(rotating ? (row.gapRaw ?? row.gap ?? '') : (row.diff || row.interval || '')).trim();
+    const intervalText = String(row.diff || row.interval || '').trim();
+    const gapOnly = rotating || !pageHasInterval;
+    const linkText = gapOnly ? String(row.gapRaw ?? row.gap ?? '').trim() : intervalText;
     const linkCell = readGapCell(linkText);
     const lapValue = row.lapNumber === '' || row.lapNumber == null ? NaN : Number(row.lapNumber);
     const providerLaps = !rotating && row.lapNumberSource !== 'observed-sequence' && Number.isFinite(lapValue) ? lapValue : null;
     const laps = providerLaps ?? (rotating && linkCell.kind === 'laps' ? linkCell.laps : null);
-    return { linkMs: linkCell.kind === 'time' ? linkCell.ms : null, laps, changeText: `${linkText}|${laps ?? ''}` };
+    const linkTo = gapOnly ? (gapMode || (rotating ? 'ahead' : 'leader')) : 'ahead';
+    return { linkMs: linkCell.kind === 'time' ? linkCell.ms : null, linkTo, laps, changeText: `${linkText}|${laps ?? ''}` };
+  }
+
+  // GRR pages without DIFF leave it empty on every row; RIS always fills INT
+  // (at least "--"), and its GAP is to the first car on the same lap.
+  function pageShowsInterval(ordered) {
+    return ordered.some((row) => String(row.diff || row.interval || '').trim() !== '');
+  }
+
+  // Votes on what a lone GAP column means, from cars next to each other that
+  // both show a time.
+  function voteGapMode(votes, ordered) {
+    const next = { up: votes?.up || 0, down: votes?.down || 0 };
+    let previous = null;
+    ordered.forEach((row) => {
+      const cell = readGapCell(row.gapRaw ?? row.gap);
+      if (cell.kind !== 'time') { previous = null; return; }
+      if (previous !== null) {
+        if (cell.ms >= previous) next.up += 1;
+        else next.down += 1;
+      }
+      previous = cell.ms;
+    });
+    return next;
+  }
+
+  function gapModeFrom(votes) {
+    const total = (votes?.up || 0) + (votes?.down || 0);
+    if (total < MIN_GAP_VOTES) return null;
+    const share = votes.up / total;
+    return share >= 0.9 ? 'leader' : share <= 0.75 ? 'ahead' : null;
   }
 
   function createTimeline() {
@@ -99,13 +139,16 @@
     const pollAt = Date.parse(pollAtIso);
     if (!Number.isFinite(pollAt)) return timeline;
     const previousPoll = timeline.pollAt;
-    const next = { ...timeline, pollAt, cars: { ...timeline.cars } };
     const ordered = [...rows].filter((row) => key(row.carNumber))
       .sort((a, b) => (Number(a.position) || Infinity) - (Number(b.position) || Infinity));
+    const pageHasInterval = pageShowsInterval(ordered);
+    const gapVotes = pageHasInterval ? (timeline.gapVotes || { up: 0, down: 0 }) : voteGapMode(timeline.gapVotes, ordered);
+    const gapMode = gapModeFrom(gapVotes);
+    const next = { ...timeline, pollAt, cars: { ...timeline.cars }, gapVotes, gapMode };
     ordered.forEach((row, index) => {
       const car = key(row.carNumber);
       const lastText = String(row.lastLap ?? '').trim();
-      const info = readRow(row);
+      const info = readRow(row, gapMode, pageHasInterval);
       const before = next.cars[car];
       const state = before
         ? { ...before, crossings: before.crossings.map((item) => ({ ...item })) }
@@ -139,9 +182,12 @@
         placeCrossing(state, latest, parseClockMs(lastText), car, next);
       }
       const current = state.crossings.at(-1);
-      // The gap/interval cell is rewritten when the car crosses the line.
-      if (current && (lastChanged || countUp) && Number.isFinite(info.linkMs) && index > 0) {
-        current.aheadCar = key(ordered[index - 1].carNumber);
+      // The gap/interval cell is rewritten when the car crosses the line (or a
+      // poll later): it ties this crossing to the reference car's crossing.
+      const linkFresh = current && (lastChanged || countUp
+        || (!Number.isFinite(current.gapMs) && info.changeText !== before?.linkText && pollAt - current.at <= MERGE_MS));
+      if (linkFresh && Number.isFinite(info.linkMs) && index > 0) {
+        current.aheadCar = key((info.linkTo === 'leader' ? ordered[0] : ordered[index - 1]).carNumber);
         current.gapMs = info.linkMs;
       }
       if (current && Number.isFinite(info.laps) && (!Number.isFinite(current.lap) || info.laps >= current.lap)) current.lap = info.laps;

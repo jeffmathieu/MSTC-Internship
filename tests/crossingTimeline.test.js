@@ -115,11 +115,57 @@ assert.ok(coordinate.lapGap >= 1);
   const ab = timeline.gapBetween(resolvedRis, 'A', 'B');
   assert.strictEqual(ab.gapMs, 7700, 'INT links the two crossings exactly');
   assert.strictEqual(ab.exact, true);
-  // GAP to the first car on the same lap is never read as "time to the car ahead".
-  const gapOnly = timeline.observePoll(timeline.observePoll(timeline.createTimeline(),
-    [{ carNumber: 'X', position: 1, lapNumber: 5, lastLap: '1:40.000', gap: '--' }, { carNumber: 'Y', position: 2, lapNumber: 5, lastLap: '1:40.000', gap: '3.000' }], at(0)),
-  [{ carNumber: 'X', position: 1, lapNumber: 6, lastLap: '1:40.100', gap: '--' }, { carNumber: 'Y', position: 2, lapNumber: 6, lastLap: '1:40.200', gap: '3.100' }], at(5));
-  assert.strictEqual(gapOnly.cars.Y.crossings[0].gapMs, null, 'a GAP column without INT/DIFF is no link');
+  // RIS: GAP (to the first car on the same lap) next to INT is never a link.
+  const withInt = timeline.observePoll(timeline.observePoll(timeline.createTimeline(),
+    [{ carNumber: 'X', position: 1, lapNumber: 5, lastLap: '1:40.000', gap: '--', interval: '--' },
+      { carNumber: 'Z', position: 2, lapNumber: 4, lastLap: '1:41.000', gap: '1L', interval: '1L' },
+      { carNumber: 'Y', position: 3, lapNumber: 4, lastLap: '1:40.000', gap: '3.000', interval: '3.000' }], at(0)),
+  [{ carNumber: 'X', position: 1, lapNumber: 6, lastLap: '1:40.100', gap: '--', interval: '--' },
+    { carNumber: 'Z', position: 2, lapNumber: 4, lastLap: '1:41.000', gap: '1L', interval: '1L' },
+    { carNumber: 'Y', position: 3, lapNumber: 5, lastLap: '1:40.200', gap: '3.100', interval: '3.100' }], at(5));
+  assert.strictEqual(withInt.cars.Y.crossings[0].aheadCar, 'Z', 'INT links to the car directly ahead, never GAP to the leader');
+}
+
+// A page with LAPS and GAP to the leader, no DIFF/INT (GRR "TCR Europe"):
+// GAP is the time to the leader's crossing on the same lap.
+{
+  const at = (s) => new Date(Date.parse('2026-10-21T12:00:00.000Z') + s * 1000).toISOString();
+  // Truth: crossings of lap n at leader + offset; every lap 100 s.
+  const offsets = { L: 0, A: 3642, B: 4971, C: 5263, US: 8764, D: 13446, E: 20788 };
+  const order = Object.keys(offsets);
+  const crossAt = (car, lap) => 7000 + lap * 100000 + offsets[car];
+  let tcr = timeline.createTimeline();
+  let memory = {};
+  const shown = [];
+  for (let t = 5000; t <= 12 * 100000; t += 5000) {
+    const rows = order.map((car, index) => {
+      const laps = [...Array(14).keys()].filter((lap) => lap > 0 && crossAt(car, lap) <= t).length;
+      const leaderLaps = [...Array(14).keys()].filter((lap) => lap > 0 && crossAt('L', lap) <= t).length;
+      const gap = index === 0 ? `-- ${laps} laps --` : laps === leaderLaps ? (offsets[car] / 1000).toFixed(3) : `-- ${laps} laps --`;
+      return { carNumber: car, className: 'TCR', position: index + 1, classPosition: index + 1, lapNumber: laps,
+        lastLap: laps ? '1:40.000' : '', gap, diff: '', interval: '' };
+    });
+    tcr = timeline.observePoll(tcr, rows, at(t / 1000));
+    memory = updateGapMemory(memory, { rows, followedCars: ['US'], collectedAt: at(t / 1000) });
+    const view = memory.viewsByCar.US;
+    shown.push(view.classCoordinates.map((item) => `${item.carNumber}:${item.gapToUsMs}`).join(' '));
+  }
+  assert.strictEqual(tcr.gapMode, 'leader', 'GAP values never go down along the order: gap to the leader');
+  const resolvedTcr = timeline.resolve(tcr);
+  for (const car of ['A', 'B', 'C', 'D', 'E']) {
+    const gap = timeline.gapBetween(resolvedTcr, 'US', car);
+    assert.strictEqual(gap.gapMs, offsets[car] - offsets.US, `exact gap to ${car}`);
+    assert.strictEqual(gap.exact, true);
+  }
+  const final = memory.viewsByCar.US;
+  assert.strictEqual(final.ahead.rivalCarNumber, 'C');
+  assert.strictEqual(final.ahead.gapMs, offsets.US - offsets.C, 'car ahead: 3.501 s, not an estimate');
+  assert.strictEqual(final.ahead.estimated, false);
+  assert.strictEqual(final.behind.gapMs, offsets.D - offsets.US);
+  assert.strictEqual(final.behind.estimated, false);
+  // Once linked, a gap only changes when one of the two cars crosses the line.
+  const late = shown.slice(-60);
+  assert.ok(late.every((line) => line === late[0]), 'constant gaps never move between crossings');
 }
 
 // Parsing the gap cell
