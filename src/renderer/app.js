@@ -9,7 +9,7 @@ let currentState = null;
 let configuredFollowedCars = [];
 const DEFAULT_POLL_INTERVAL_MS = 5000;
 const MAX_FOLLOWED_CARS = 3;
-const COMPARISON_TABS = ['laps', 'averages', 'sectors'];
+const COMPARISON_TABS = ['laps', 'averages', 'sectors', 'gaps'];
 const COMPARISON_SCROLL_THRESHOLD = 13;
 let currentComparisonTab = 0;
 let lapEditMode = false;
@@ -89,6 +89,251 @@ function setStatus(status, message) {
     notice.hidden = !['loading', 'waiting', 'error', 'parser_error', 'stale', 'disconnected'].includes(normalized);
     notice.textContent = tooltip;
     notice.title = tooltip;
+  }
+}
+
+// One button starts and stops collection: it reads "Stop" while a session is
+// being collected and "Start" otherwise (idle, finished or a failed start).
+const COLLECTING_STATUSES = ['loading', 'connected', 'waiting', 'collecting', 'stale', 'disconnected', 'parser_error'];
+let collectionActive = false;
+function syncCollectionButton(status) {
+  const button = $('start');
+  if (!button) return;
+  collectionActive = COLLECTING_STATUSES.includes(String(status || 'idle').toLowerCase());
+  button.textContent = collectionActive ? 'Stop' : 'Start';
+  button.classList.toggle('primary', !collectionActive);
+  button.classList.toggle('secondary', collectionActive);
+  button.title = collectionActive ? 'Stop collection and close the session' : 'Start live collection';
+}
+
+// ---- Ending-session overlay -------------------------------------------------
+let finalizingTimer = null;
+function renderFinalizing(state = currentState) {
+  const overlay = $('finalizing-overlay');
+  if (!overlay) return;
+  const info = state?.finalizing;
+  overlay.classList.toggle('hidden', !info?.active);
+  if (!info?.active) { if (finalizingTimer) { clearInterval(finalizingTimer); finalizingTimer = null; } return; }
+  $('finalizing-detail').textContent = info.detail || 'Generating the final reports…';
+  const tick = () => {
+    const seconds = Math.max(0, Math.round((Date.now() - Date.parse(info.startedAt)) / 1000));
+    if ($('finalizing-elapsed')) $('finalizing-elapsed').textContent = Number.isFinite(seconds) ? `Busy for ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : '';
+  };
+  tick();
+  if (!finalizingTimer && typeof setInterval === 'function') finalizingTimer = setInterval(() => tick(), 1000);
+}
+
+// ---- Race control messages ------------------------------------------------
+// Steward / penalty messages from the timing page. New messages make the header
+// button flash; a new message that mentions this dashboard's car opens the
+// popup straight away. "Seen" is remembered per computer.
+const SEEN_MESSAGES_KEY = 'mstc.seenRaceMessages';
+let seenMessageIds = new Set();
+let messagesOpen = false;
+let messagesHighlightId = null;
+let messagesInitialised = false;
+try { seenMessageIds = new Set(JSON.parse(window.localStorage?.getItem(SEEN_MESSAGES_KEY) || '[]')); } catch { seenMessageIds = new Set(); }
+
+function saveSeenMessages() {
+  try { window.localStorage?.setItem(SEEN_MESSAGES_KEY, JSON.stringify([...seenMessageIds].slice(-500))); } catch { /* storage unavailable */ }
+}
+
+function raceMessagesOf(state = currentState) {
+  return Array.isArray(state?.raceMessages) ? state.raceMessages : [];
+}
+
+const messageIsOurs = (message, car) => (message.cars || []).map(String).includes(String(car));
+
+function renderMessageList(messages, car) {
+  const list = $('messages-list');
+  list.innerHTML = '';
+  if (!messages.length) {
+    const empty = document.createElement('div');
+    empty.className = 'messages-empty';
+    empty.textContent = 'No race control messages yet.';
+    list.appendChild(empty);
+    return;
+  }
+  [...messages].reverse().forEach((message) => {
+    const item = document.createElement('div');
+    const ours = messageIsOurs(message, car);
+    item.className = `message-item${ours ? ' ours' : ''}${message.id === messagesHighlightId ? ' highlight' : ''}`;
+    const meta = document.createElement('div');
+    meta.className = 'message-meta';
+    const time = document.createElement('span');
+    time.textContent = message.firstSeenAt ? new Date(message.firstSeenAt).toLocaleTimeString() : '';
+    meta.appendChild(time);
+    if (ours) {
+      const tag = document.createElement('span');
+      tag.className = 'message-tag';
+      tag.textContent = `Car #${car}`;
+      meta.appendChild(tag);
+    }
+    if (Date.now() - Date.parse(message.lastSeenAt) < 20000) {
+      const live = document.createElement('span');
+      live.className = 'message-tag live';
+      live.textContent = 'On screen now';
+      meta.appendChild(live);
+    }
+    const text = document.createElement('div');
+    text.className = 'message-text';
+    text.textContent = message.text;
+    item.appendChild(meta);
+    item.appendChild(text);
+    list.appendChild(item);
+  });
+}
+
+function showMessages(show = true, highlightId = null) {
+  messagesOpen = show;
+  messagesHighlightId = show ? highlightId : null;
+  $('messages-modal').classList.toggle('hidden', !show);
+  if (!show) { renderRaceMessages(); return; }
+  const messages = raceMessagesOf();
+  const car = activeCarNumber();
+  const alert = Boolean(highlightId);
+  $('messages-title').textContent = alert ? `Message about car #${car}` : 'Race control messages';
+  $('messages-modal').querySelector('.messages-card')?.classList.toggle('alert', alert);
+  renderMessageList(messages, car);
+  messages.forEach((message) => seenMessageIds.add(message.id));
+  saveSeenMessages();
+  renderRaceMessages();
+}
+
+function renderRaceMessages(state = currentState) {
+  const button = $('open-messages');
+  if (!button) return;
+  const messages = raceMessagesOf(state);
+  const car = activeCarNumber();
+  // Messages that were already old when this window opened are not new.
+  if (!messagesInitialised && messages.length) {
+    const cutoff = Date.now() - 10 * 60 * 1000;
+    messages.forEach((message) => { if (Date.parse(message.firstSeenAt) < cutoff) seenMessageIds.add(message.id); });
+    messagesInitialised = true;
+    saveSeenMessages();
+  }
+  const unread = messages.filter((message) => !seenMessageIds.has(message.id));
+  const unreadOurs = unread.filter((message) => messageIsOurs(message, car));
+  button.classList.toggle('has-unread', unread.length > 0 && !unreadOurs.length);
+  button.classList.toggle('car-alert', unreadOurs.length > 0);
+  button.title = unreadOurs.length ? `New race control message about car #${car}`
+    : unread.length ? `${unread.length} new race control message(s): check the timing page` : 'Race control messages';
+  if (unreadOurs.length && !messagesOpen) { showMessages(true, unreadOurs.at(-1).id); return; }
+  if (messagesOpen) renderMessageList(messages, car);
+}
+
+// ---- Pit stop notes -------------------------------------------------------
+// The header button turns yellow when a pit stop was detected and has no saved
+// notes yet. Notes stay editable until the next stop is detected.
+let pitNotesFormEventId = null;
+let pitNotesOpen = false;
+
+function pitNotesView(state = currentState) {
+  return state?.pitNotesByCar?.[activeCarNumber()] || null;
+}
+
+function pitNotesVisible() {
+  return pitNotesOpen;
+}
+
+function describePitStop(stop) {
+  if (!stop) return 'No pit stop detected yet.';
+  const when = stop.detectedAt ? new Date(stop.detectedAt).toLocaleTimeString() : 'time unknown';
+  const drivers = stop.driverBefore || stop.driverAfter ? ` · ${stop.driverBefore || '?'} → ${stop.driverAfter || (stop.closed ? '?' : 'still in the pits')}` : '';
+  const length = Number.isFinite(stop.durationMs) ? ` · ${Math.floor(stop.durationMs / 60000)}:${String(Math.floor((stop.durationMs % 60000) / 1000)).padStart(2, '0')} in pit` : '';
+  return `Stop ${stop.stopNumber ?? '#'} · detected ${when}${drivers}${length}${stop.closed ? '' : ' · in progress'}`;
+}
+
+function fillPitNotesForm(latest) {
+  const notes = latest?.notes || {};
+  $('pit-notes-fuel').checked = Boolean(notes.fuelAdded);
+  $('pit-notes-tyres').checked = Boolean(notes.tyresChanged);
+  $('pit-notes-tyreset').value = notes.tyreSet || '';
+  $('pit-notes-driver').value = notes.driverNotes || '';
+  $('pit-notes-pit').value = notes.pitNotes || '';
+  pitNotesFormEventId = latest?.eventId || null;
+}
+
+function renderPitNotesHistory(view) {
+  const list = $('pit-notes-history-list');
+  list.innerHTML = '';
+  const history = (view?.history || []).filter((stop) => stop.notes);
+  $('pit-notes-history').classList.toggle('hidden', !history.length);
+  history.forEach((stop) => {
+    const box = document.createElement('div');
+    box.className = 'pit-notes-old';
+    const heading = document.createElement('strong');
+    heading.textContent = describePitStop(stop);
+    const body = document.createElement('span');
+    const n = stop.notes;
+    body.textContent = [
+      `Fuel added: ${n.fuelAdded ? 'yes' : 'no'} · Tyres changed: ${n.tyresChanged ? 'yes' : 'no'}${n.tyreSet ? ` · Tyre set: ${n.tyreSet}` : ''}`,
+      n.driverNotes && `Driver notes: ${n.driverNotes}`,
+      n.pitNotes && `Pit stop notes: ${n.pitNotes}`
+    ].filter(Boolean).join('\n');
+    box.append(heading, body);
+    list.append(box);
+  });
+}
+
+function renderPitNotes(state = currentState) {
+  const button = $('open-pit-notes');
+  if (!button) return;
+  const view = pitNotesView(state);
+  const latest = view?.latest || null;
+  button.classList.toggle('needs-notes', Boolean(latest?.needsAttention));
+  button.classList.toggle('has-notes', Boolean(latest && !latest.needsAttention));
+  button.title = !latest ? 'Pit stop notes (no pit stop detected yet)'
+    : latest.needsAttention ? `Pit stop ${latest.stopNumber ?? ''} detected: fill in the notes`
+      : `Pit stop notes (stop ${latest.stopNumber ?? ''} saved)`;
+  if (!pitNotesVisible()) return;
+  $('pit-notes-title').textContent = `Pit stop notes · Car #${activeCarNumber()}`;
+  $('pit-notes-stop').textContent = describePitStop(latest);
+  // The notes describe the stint that just ended: name its driver.
+  $('pit-notes-driver-name').textContent = latest?.driverBefore ? `(${latest.driverBefore})` : '';
+  $('pit-notes-form').disabled = !latest;
+  $('pit-notes-save').disabled = !latest;
+  if ((latest?.eventId || null) !== pitNotesFormEventId) {
+    // A new stop was detected while the popup was open: start a fresh form.
+    const hadForm = pitNotesFormEventId !== null;
+    fillPitNotesForm(latest);
+    $('pit-notes-status').textContent = hadForm && latest ? 'A new pit stop was detected. These notes belong to the new stop.' : '';
+  }
+  renderPitNotesHistory(view);
+}
+
+function showPitNotes(show = true) {
+  pitNotesOpen = show;
+  $('pit-notes-modal').classList.toggle('hidden', !show);
+  if (!show) return;
+  pitNotesFormEventId = undefined;
+  $('pit-notes-status').textContent = '';
+  renderPitNotes();
+}
+
+async function savePitNotes() {
+  const latest = pitNotesView()?.latest;
+  if (!latest) return;
+  const status = $('pit-notes-status');
+  try {
+    const result = await window.liveTiming.savePitNotes({
+      carNumber: activeCarNumber(),
+      eventId: latest.eventId,
+      notes: {
+        fuelAdded: $('pit-notes-fuel').checked,
+        tyresChanged: $('pit-notes-tyres').checked,
+        tyreSet: $('pit-notes-tyreset').value,
+        driverNotes: $('pit-notes-driver').value,
+        pitNotes: $('pit-notes-pit').value
+      }
+    });
+    if (result.state) currentState = result.state;
+    // Saved notes close the popup; reopening it shows them for further edits.
+    if (result.ok) { showPitNotes(false); renderPitNotes(); return; }
+    status.textContent = result.error;
+    renderPitNotes();
+  } catch (error) {
+    status.textContent = `Could not save: ${error.message}`;
   }
 }
 
@@ -496,7 +741,7 @@ function renderLapStrip(state, precomputedHighlights = null, scrolling = false) 
   const laps = [...source].reverse();
   const currentStint = state?.stintState?.cars?.[carNumber]?.currentStint || null;
   setText('info-stint', currentStint
-    ? `Driver stint ${currentStint.driverStintNumber} · ${formatStintClock(currentStint.stintTimeMs)} driving / total ${formatStintClock(currentStint.totalDriverTimeMs)}${currentStint.drivingTimePaused ? ' · PIT paused' : ''}`
+    ? `Driver stint ${currentStint.driverStintNumber} · ${formatStintClock(currentStint.stintTimeMs)} driving / total ${formatStintClock(currentStint.totalDriverTimeMs)}${currentStint.notStarted ? ' · not started' : currentStint.drivingTimePaused ? ' · PIT paused' : ''}`
     : 'Waiting for stint data');
   setText('info-car-stint', currentStint ? `Car stint ${currentStint.stintNumber}` : '—');
   if (!list._scrollWired) {
@@ -816,6 +1061,15 @@ function comparisonCarLabel(car, fallback = '—') {
     badge.textContent = 'BIC';
     label.appendChild(badge);
   }
+  // Cars stay listed while in the pits. Cars that stopped are shown as "Out"
+  // on the Class gaps page only.
+  if (car?.status === 'pit') {
+    const tag = document.createElement('small');
+    tag.className = 'car-status-tag pit';
+    tag.textContent = 'PIT';
+    tag.title = 'In the pits';
+    label.appendChild(tag);
+  }
   return label;
 }
 
@@ -836,6 +1090,7 @@ function appendComparisonRow(container, label, cells, rowClass = '', labelNode =
 function comparisonTabTitle(tab) {
   if (tab === 'averages') return 'Averages';
   if (tab === 'sectors') return 'Sectors';
+  if (tab === 'gaps') return 'Class gaps';
   return 'Best / Last / Last 10';
 }
 
@@ -995,6 +1250,87 @@ function renderComparisonMatrix(matrix) {
   renderComparisonSectorRows(classCars);
   updateComparisonTabVisibility();
   return true;
+}
+
+// Class gaps page: every car of our class with its gap to us and the interval
+// to the car ahead in class, from the line-crossing gap model.
+function formatGapClock(ms) {
+  if (!Number.isFinite(ms)) return '';
+  const abs = Math.abs(ms);
+  const minutes = Math.floor(abs / 60000);
+  const seconds = ((abs % 60000) / 1000).toFixed(3);
+  return minutes ? `${minutes}:${seconds.padStart(6, '0')}` : seconds;
+}
+
+function describeClassGap(item) {
+  if (!item) return { text: '—', className: 'gap-muted' };
+  if (item.source === 'calibrating') return { text: 'calibrating…', className: 'gap-muted' };
+  if (!Number.isFinite(item.gapToUsMs)) return { text: '—', className: 'gap-muted' };
+  const sign = item.gapToUsMs < 0 ? '-' : '+';
+  // ">" = the car has not crossed the line since: the gap is at least this.
+  const approx = item.atLeast ? '>' : item.estimated ? '~' : '';
+  const laps = Number(item.lapGap) > 0 ? `${item.lapGap}L · ` : '';
+  // Laps down and not crossing the line: the lap count says it, a time would
+  // only tick up with every poll.
+  if (item.atLeast && laps) return { text: `${item.lapGap}L`, className: item.gapToUsMs < 0 ? 'gap-ahead' : 'gap-behind' };
+  return { text: `${laps}${approx}${sign}${formatGapClock(item.gapToUsMs)}`, className: item.gapToUsMs < 0 ? 'gap-ahead' : 'gap-behind' };
+}
+
+function renderClassGaps(state = currentState) {
+  const container = $('comparison-tab-gaps');
+  if (!container) return;
+  const car = activeCarNumber();
+  const view = state?.analyticsSummary?.gapModel?.viewsByCar?.[car];
+  const rows = state?.rows || [];
+  const ours = rows.find((row) => String(row.carNumber) === String(car));
+  container.innerHTML = '';
+  const addRow = (cells, className) => {
+    const row = document.createElement('div');
+    row.className = `gaps-row ${className || ''}`.trim();
+    cells.forEach(([text, cellClass]) => {
+      const span = document.createElement('span');
+      span.textContent = text;
+      if (cellClass) span.className = cellClass;
+      row.appendChild(span);
+    });
+    container.appendChild(row);
+  };
+  addRow([['PIC'], ['Car'], ['Gap to us'], ['Interval'], ['Last lap'], ['Status']], 'gaps-head');
+  if (!ours?.className || !view?.classCoordinates?.length) {
+    const note = document.createElement('div');
+    note.className = 'gaps-note';
+    note.textContent = 'Waiting for the timing data of our class.';
+    container.appendChild(note);
+    return;
+  }
+  const byCar = new Map(view.classCoordinates.map((item) => [String(item.carNumber), item]));
+  const analytics = analyticsForActiveCar(state?.analyticsSummary || null);
+  const comparisonCars = new Map((analytics?.comparisonView?.matrix?.classCars || []).map((item) => [String(item.carNumber), item]));
+  const classRows = rows.filter((row) => row.className === ours.className)
+    .sort((a, b) => (Number(a.classPosition) || Infinity) - (Number(b.classPosition) || Infinity));
+  let previous = null;
+  classRows.forEach((row) => {
+    const item = byCar.get(String(row.carNumber));
+    const isOurs = String(row.carNumber) === String(car);
+    const gap = isOurs ? { text: 'OUR CAR', className: '' } : describeClassGap(item);
+    const interval = previous && !item?.atLeast && !previous.atLeast && Number.isFinite(item?.gapToUsMs) && Number.isFinite(previous.gapToUsMs)
+      ? `+${formatGapClock(item.gapToUsMs - previous.gapToUsMs)}` : '—';
+    // GetRaceResults shows "In Pit" in E.T.A.; RIS uses STATE "IN" (or "PIT").
+    const inPit = /^(in|p|pit|in pit|f|fuel)$/i.test(String(row.state || '').trim()) || /in\s*pit/i.test(String(row.eta || ''));
+    // Out: retired on the timing page, not seen at the line for a few of our
+    // laps, or more than a lap overdue at the line while not in the pits.
+    const retired = /\b(ret|retired|dnf|dns|dq|dsq|disq|excluded)\b/i.test(`${row.state || ''} ${row.eta || ''}`);
+    const stopped = comparisonCars.get(String(row.carNumber))?.status === 'stopped';
+    const out = !isOurs && !inPit && (retired || stopped || (item?.atLeast && Number(item.lapGap) > 0));
+    const status = inPit ? 'In pit'
+      : out ? (retired ? 'Retired' : 'Not moving')
+        : /out\s*lap/i.test(String(row.eta || '')) ? 'Out lap' : '';
+    const shownGap = out ? { text: 'Out', className: 'gap-muted' } : gap;
+    addRow([[String(row.classPosition ?? '')], [`#${row.carNumber}`], [shownGap.text, shownGap.className], [out ? '—' : interval, 'gap-muted'],
+      [String(row.lastLap || '—')], [status, 'gap-muted']], [isOurs ? 'is-our-car' : '', out ? 'is-out' : ''].filter(Boolean).join(' '));
+    // An out car is no reference for the interval of the next car.
+    if (!out) previous = isOurs ? { gapToUsMs: 0 } : item;
+  });
 }
 
 // Fills the D1/D2, BIC, and XIC comparison boxes from precomputed analytics.
@@ -1324,8 +1660,20 @@ function renderDetails(state) {
 
 // Central render function called on every collector:update event. Keep new UI
 // panels wired here so they update whenever live data changes.
+// The main process locks in the detected session name; mirror it into the
+// settings and the setup box so the next save does not wipe it again.
+function syncSessionNameFromState(state) {
+  const name = state?.sessionNameSetting;
+  if (typeof name !== 'string' || !currentSettings || name === (currentSettings.sessionName || '')) return;
+  currentSettings = { ...currentSettings, sessionName: name };
+  if ($('session-name')) $('session-name').value = name;
+  const box = $('setup-session-name');
+  if (box && document.activeElement !== box) box.value = name;
+}
+
 function render(state) {
   currentState = state || {};
+  syncSessionNameFromState(currentState);
   const rows = currentState.rows || [], history = currentState.lapHistory || [];
   const summaryCondition = currentState.analyticsSummary?.trackCondition;
   const summaryFilter = currentState.analyticsSummary?.analysisConditionFilter;
@@ -1340,6 +1688,16 @@ function render(state) {
   if ($('analysis-condition')) $('analysis-condition').value = normalizeAnalysisSelectValue($('analysis-condition').value);
   syncConditionControlTitles();
   setStatus(currentState.status, currentState.message);
+  // A filtered timing page makes the gaps unreliable: keep that warning visible.
+  if (currentState.timingPageWarning && $('collector-message')) {
+    $('collector-message').hidden = false;
+    $('collector-message').textContent = currentState.timingPageWarning;
+    $('collector-message').title = currentState.timingPageWarning;
+  }
+  syncCollectionButton(currentState.status);
+  renderPitNotes(currentState);
+  renderRaceMessages(currentState);
+  renderFinalizing(currentState);
   updateSession(currentState.session || {}, rows.length > 0, currentState.finishCountdown);
   $('row-count').textContent = String(rows.length);
   $('history-count').textContent = String(currentState.historyCount ?? history.length);
@@ -1350,6 +1708,7 @@ function render(state) {
   syncSessionMode(activeAnalytics?.sessionMode || currentSettings?.sessionMode || 'race');
   renderSectorAnalytics(activeAnalytics, rows, predictionForActiveCar(currentState));
   renderDriverAndClassComparisons(activeAnalytics, rows);
+  renderClassGaps(currentState);
   renderAdjacentClassBattles(activeAnalytics);
   renderPitstopPlan(pitstopPlanForActiveCar(currentState));
   if (document.querySelector('.debug-panel')?.open) {
@@ -1398,6 +1757,7 @@ async function saveSettingsFromInputs(setupComplete = false) {
     referenceTimesByMode,
     pitCircuitId: $('pit-circuit')?.value || currentSettings?.pitCircuitId || 'zolder',
     storageFolder: $('storage-folder').value.trim(),
+    sessionName: $('session-name').value.trim(),
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     pitRules: pitRulesFromInputs()
   };
@@ -1448,6 +1808,7 @@ function syncSetupFromMain() {
   configuredFollowedCars = normalizedCarList(currentSettings?.followedCars, currentSettings?.followedCar || '33');
   $('setup-car').value = configuredFollowedCars[0] || '33';
   $('setup-folder').value = $('storage-folder').value;
+  $('setup-session-name').value = $('session-name').value;
   syncSessionMode(currentSettings?.sessionMode || 'race');
   renderExtraCarInputs();
 }
@@ -1512,6 +1873,7 @@ function syncMainFromSetup() {
   configuredFollowedCars = normalizedCarList(configuredFollowedCars, $('setup-car').value || '33');
   if (!fixedDashboardCar) $('followed-car').value = configuredFollowedCars[0] || '33';
   $('storage-folder').value = $('setup-folder').value;
+  $('session-name').value = $('setup-session-name').value;
 }
 
 // Opens or closes the first-run/setup modal.
@@ -1542,6 +1904,7 @@ async function init() {
   $('followed-car').value = fixedDashboardCar || currentSettings.followedCar || '33';
   if (fixedDashboardCar) document.title = `Race Engineer Dashboard - Car #${fixedDashboardCar}`;
   $('storage-folder').value = currentSettings.storageFolder || '';
+  $('session-name').value = currentSettings.sessionName || '';
   if ($('comparison-car')) $('comparison-car').value = currentSettings.comparisonCar || '';
   if ($('comparison-xic-car')) $('comparison-xic-car').value = currentSettings.comparisonCar || '';
   syncReferenceInputs(currentSettings);
@@ -1573,6 +1936,12 @@ async function init() {
   // invokes the matching ipcMain handler in main.js.
   $('start')?.addEventListener('click', async () => {
     const button = $('start');
+    if (collectionActive) {
+      button.disabled = true;
+      try { await window.liveTiming.stopCollector(); } catch (error) { setStatus('error', `Could not stop collection: ${error.message}`); }
+      finally { button.disabled = false; }
+      return;
+    }
     button.disabled = true;
     try {
       await saveSettingsFromInputs(true);
@@ -1581,7 +1950,12 @@ async function init() {
       setStatus('error', `Could not start collection: ${error.message}`);
     } finally { button.disabled = false; }
   });
-  $('stop')?.addEventListener('click', () => window.liveTiming.stopCollector());
+  $('open-messages')?.addEventListener('click', () => showMessages(true));
+  $('messages-close')?.addEventListener('click', () => showMessages(false));
+  $('open-pit-notes')?.addEventListener('click', () => showPitNotes(true));
+  $('pit-notes-close')?.addEventListener('click', () => showPitNotes(false));
+  $('pit-notes-save')?.addEventListener('click', savePitNotes);
+  $('open-drivers')?.addEventListener('click', () => window.liveTiming.openDriversWindow(activeCarNumber()));
   $('show-live')?.addEventListener('click', () => window.liveTiming.openLiveWindow());
   $('open-graphs')?.addEventListener('click', () => window.liveTiming.openGraphsWindow(activeCarNumber()));
   $('lap-edit-toggle')?.addEventListener('click', () => {
@@ -1634,9 +2008,22 @@ async function init() {
   $('open-setup')?.addEventListener('click', () => showSetup(true));
   $('comparison-prev-tab')?.addEventListener('click', () => setComparisonTab(currentComparisonTab - 1));
   $('comparison-next-tab')?.addEventListener('click', () => setComparisonTab(currentComparisonTab + 1));
-  $('export')?.addEventListener('click', async () => {
-    const result = await window.liveTiming.exportCurrent();
-    alert(`Exported:\n${[result.csvPath, result.jsonPath, result.pdfPath, result.historyPath].filter(Boolean).join('\n')}`);
+  $('export')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const result = await window.liveTiming.exportCurrent();
+      const pdfs = result.pdfPaths || [];
+      const pdfNote = pdfs.length ? '\n\nThese PDFs are replaced by the final reports when the session ends.'
+        : result.pdfError ? `\n\nPDF report failed: ${result.pdfError}`
+          : '\n\nNo PDF yet: it needs at least one completed lap.';
+      const xlsxNote = result.xlsxError ? `\n\nExcel export failed: ${result.xlsxError}` : '';
+      alert(`Exported:\n${[result.xlsxPath, result.csvPath, result.jsonPath, result.historyPath, ...pdfs].filter(Boolean).join('\n')}${pdfNote}${xlsxNote}`);
+    } catch (error) {
+      alert(`Export failed: ${error?.message || error}`);
+    } finally {
+      button.disabled = false;
+    }
   });
 
   // Persist settings immediately when hidden inputs change. If new settings are

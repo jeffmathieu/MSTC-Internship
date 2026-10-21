@@ -23,7 +23,7 @@ module.exports = (async () => {
   const lap = (number, seconds, time = '2:00.000', extra = {}) => ({ carNumber: '33', sourceProvider: 'test',
     timingUrl: 'https://timing.invalid', driverName: 'A', className: 'A', collectedAt: at(seconds),
     lapNumber: String(number), lastLap: time, sessionFlag: 'Green flag', pitInfo: '0', ...extra });
-  const archive = (storageFolder) => loadSessionHistory({ fs, jsonlPath: path.join(storageFolder, 'lap_history.jsonl'), identityForLap: lapIdentity }).entries;
+  const archive = (storageFolder) => loadSessionHistory({ fs, jsonlPath: path.join(storageFolder, 'data', 'lap_history.jsonl'), identityForLap: lapIdentity }).entries;
   const snapshot = (number, statusText = '') => ({ location: 'https://timing.invalid', title: 'Race',
     bodyText: statusText, sessionFields: { elapsed: `00:${String(number).padStart(2, '0')}:00`, currentFlag: 'Green flag' },
     tables: [{ tableIndex: 0, headers: ['POS', '#', 'CLASS', 'DRIVER', 'LAPS', 'LAST', 'BEST'], rowCount: 1,
@@ -54,7 +54,7 @@ module.exports = (async () => {
     c.updateLapHistory(s, [lap(11, 365, '1:59.000')]);
     c.updateLapHistory(s, [lap(12, 370, '1:59.000')]);
     assert.strictEqual(c.getState().lapHistory.length, 3, 'a transient counter regression cannot duplicate a lap');
-    assert.strictEqual(fs.readFileSync(path.join(f, 'lap_history.csv'), 'utf8').trim().split('\n').length, 4,
+    assert.strictEqual(fs.readFileSync(path.join(f, 'data', 'lap_history.csv'), 'utf8').trim().split('\n').length, 4,
       'CSV appends remain on separate rows after a correction rewrite');
 
     const lastFirst = setup('last-first');
@@ -73,16 +73,16 @@ module.exports = (async () => {
 
     const damaged = setup('damaged');
     damaged.collector.updateLapHistory(damaged.settings, [lap(1, 120)]);
-    fs.appendFileSync(path.join(damaged.storageFolder, 'lap_history.jsonl'), '{"carNumber":');
+    fs.appendFileSync(path.join(damaged.storageFolder, 'data', 'lap_history.jsonl'), '{"carNumber":');
     damaged.collector.setState({ lapHistory: damaged.collector.loadExistingHistory(damaged.settings) });
     assert.strictEqual(damaged.collector.getState().lapHistory.length, 1);
-    assert.ok(fs.existsSync(path.join(damaged.storageFolder, 'lap_history.jsonl.corrupt.json')));
+    assert.ok(fs.existsSync(path.join(damaged.storageFolder, 'data', 'lap_history.jsonl.corrupt.json')));
     damaged.collector.updateLapHistory(damaged.settings, [lap(2, 240, '1:59.000')]);
     assert.strictEqual(archive(damaged.storageFolder).length, 2);
 
     for (const blockedFile of ['latest_live_rows.csv', 'parser_debug.json', 'session_metadata.json']) {
       const brokenExport = setup(`blocked-${blockedFile}`);
-      fs.mkdirSync(path.join(brokenExport.storageFolder, blockedFile));
+      fs.mkdirSync(path.join(brokenExport.storageFolder, 'data', blockedFile), { recursive: true });
       brokenExport.collector.setSnapshot(snapshot(1));
       await brokenExport.collector.pollLivePage();
       brokenExport.collector.setSnapshot(snapshot(2));
@@ -94,12 +94,12 @@ module.exports = (async () => {
     }
 
     const failedJournal = setup('failed-journal');
-    fs.mkdirSync(path.join(failedJournal.storageFolder, 'lap_history.jsonl'));
+    fs.mkdirSync(path.join(failedJournal.storageFolder, 'data', 'lap_history.jsonl'), { recursive: true });
     failedJournal.collector.setSnapshot(snapshot(1));
     await failedJournal.collector.pollLivePage();
     assert.strictEqual(failedJournal.collector.getState().status, 'error', 'canonical persistence failures cannot report healthy collection');
     assert.strictEqual(failedJournal.collector.getState().lastSuccessAt, null);
-    fs.rmdirSync(path.join(failedJournal.storageFolder, 'lap_history.jsonl'));
+    fs.rmdirSync(path.join(failedJournal.storageFolder, 'data', 'lap_history.jsonl'));
     await failedJournal.collector.pollLivePage();
     assert.strictEqual(archive(failedJournal.storageFolder).length, 1, 'retry after a journal failure records the passage once');
 
@@ -117,20 +117,20 @@ module.exports = (async () => {
 
     // Inject failure after the replacement file was flushed, before rename.
     await c.flush();
-    const original = fs.readFileSync(path.join(f, 'lap_history.jsonl'), 'utf8');
+    const original = fs.readFileSync(path.join(f, 'data', 'lap_history.jsonl'), 'utf8');
     const rename = fs.renameSync;
     try {
-      fs.renameSync = (from, to) => { if (to === path.join(f, 'lap_history.jsonl')) throw new Error('Injected archive failure'); return rename(from, to); };
+      fs.renameSync = (from, to) => { if (to === path.join(f, 'data', 'lap_history.jsonl')) throw new Error('Injected archive failure'); return rename(from, to); };
       assert.throws(() => c.updateStoredLapManualStatus({ lapId: id, carNumber: '33', status: 'invalid' }), /Injected archive failure/);
     } finally { fs.renameSync = rename; }
-    assert.strictEqual(fs.readFileSync(path.join(f, 'lap_history.jsonl'), 'utf8'), original);
+    assert.strictEqual(fs.readFileSync(path.join(f, 'data', 'lap_history.jsonl'), 'utf8'), original);
     assert.strictEqual(c.getState().lapHistory[1].manualLapStatus, 'track-limits', 'failed manual edits do not publish uncommitted state');
 
     const correctionFailure = setup('failed-correction');
     correctionFailure.collector.updateLapHistory(correctionFailure.settings, [lap(10, 120)]);
     correctionFailure.collector.updateLapHistory(correctionFailure.settings, [lap(11, 240)]);
     try {
-      fs.renameSync = (from, to) => { if (to === path.join(correctionFailure.storageFolder, 'lap_history.jsonl')) throw new Error('Injected correction failure'); return rename(from, to); };
+      fs.renameSync = (from, to) => { if (to === path.join(correctionFailure.storageFolder, 'data', 'lap_history.jsonl')) throw new Error('Injected correction failure'); return rename(from, to); };
       assert.throws(() => correctionFailure.collector.updateLapHistory(correctionFailure.settings, [lap(11, 245, '1:59.000')]), /Injected correction failure/);
     } finally { fs.renameSync = rename; }
     assert.strictEqual(correctionFailure.collector.getState().lapHistory[1].lastLap, '2:00.000');
@@ -139,8 +139,8 @@ module.exports = (async () => {
 
     const manualCsvFailure = setup('manual-csv-failure');
     manualCsvFailure.collector.updateLapHistory(manualCsvFailure.settings, [lap(1, 120)]);
-    fs.unlinkSync(path.join(manualCsvFailure.storageFolder, 'lap_history.csv'));
-    fs.mkdirSync(path.join(manualCsvFailure.storageFolder, 'lap_history.csv'));
+    fs.unlinkSync(path.join(manualCsvFailure.storageFolder, 'data', 'lap_history.csv'));
+    fs.mkdirSync(path.join(manualCsvFailure.storageFolder, 'data', 'lap_history.csv'));
     const manualId = manualCsvFailure.collector.getState().lapHistory[0].lapId;
     assert.strictEqual(manualCsvFailure.collector.updateStoredLapManualStatus({ lapId: manualId, carNumber: '33', status: 'invalid' }).ok, true);
     assert.strictEqual(archive(manualCsvFailure.storageFolder)[0].manualLapStatus, 'invalid', 'CSV failure does not roll back a committed correction');
@@ -148,13 +148,13 @@ module.exports = (async () => {
     const historical = setup('historical');
     historical.collector.updateLapHistory(historical.settings, [lap(1, 120)]);
     historical.collector.updateLapHistory(historical.settings, [lap(2, 240)]);
-    fs.writeFileSync(path.join(historical.storageFolder, 'session_metadata.json'), JSON.stringify({ sessionName: 'Race',
+    fs.writeFileSync(path.join(historical.storageFolder, 'data', 'session_metadata.json'), JSON.stringify({ sessionName: 'Race',
       followedCar: '33', followedCars: ['33'], sessionMode: 'race', lastUpdatedAt: at(245), startedAt: at(0),
       timingUrl: 'https://timing.invalid/historical' }));
     await historical.collector.finalizeCurrentSession();
     assert.strictEqual(historical.collector.getState().stintState.cars['33'].currentStint.stintTimeMs, 245000,
       'finalizing a reopened archive does not include the weeks until report generation');
-    const metadataPath = path.join(historical.storageFolder, 'session_metadata.json');
+    const metadataPath = path.join(historical.storageFolder, 'data', 'session_metadata.json');
     assert.strictEqual(JSON.parse(fs.readFileSync(metadataPath)).finishedAt, at(245));
     assert.strictEqual(JSON.parse(fs.readFileSync(metadataPath)).startedAt, at(0), 'regeneration preserves session start metadata');
     assert.strictEqual(JSON.parse(fs.readFileSync(metadataPath)).timingUrl, 'https://timing.invalid/historical');

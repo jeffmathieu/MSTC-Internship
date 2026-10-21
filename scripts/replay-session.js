@@ -13,7 +13,9 @@ const { adaptTimingFeed } = require('../src/shared/timingFeed');
 const { drivingStintsForCar: stintsForCar } = require('../src/shared/stintTracker');
 const { buildCanonicalReportPayload, renderReportLabPdf, buildCanonicalFallbackHtml, printHtmlToPdf } = require('../src/main/stintReports');
 
-const source = path.resolve(process.argv[2] || 'race kopie');
+const sessionFolder = path.resolve(process.argv[2] || 'race kopie');
+// New sessions keep their JSON/CSV files in data/; older archives keep them in the root.
+const source = fs.existsSync(path.join(sessionFolder, 'data', 'lap_history.jsonl')) ? path.join(sessionFolder, 'data') : sessionFolder;
 const smoke = process.argv.includes('--smoke');
 const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'mstc-offline-replay-'));
 app.setPath('userData', path.join(folder, 'electron'));

@@ -880,31 +880,6 @@ def render_page(c, payload, stint, page_number):
     c.drawRightString(PAGE_W - 28, 18, f'Generated from stored {source_label} | page {page_number}')
 
 
-def render_caveats(c, payload):
-    draw_report_header(c, payload, 'DATA QUALITY AND TIMING NOTES')
-    c.setFont('Helvetica', 10)
-    c.setFillColor(INK)
-    y = PAGE_H - 95
-    for note in payload.get('caveats', []):
-        line = ''
-        for word in str(note).split():
-            proposed = (line + ' ' + word).strip()
-            if c.stringWidth(proposed, 'Helvetica', 10) > PAGE_W - 80:
-                c.drawString(40, y, line)
-                y -= 16
-                line = word
-            else:
-                line = proposed
-            if y < 60:
-                c.showPage()
-                draw_report_header(c, payload, 'DATA QUALITY AND TIMING NOTES (CONTINUED)')
-                c.setFont('Helvetica', 10)
-                c.setFillColor(INK)
-                y = PAGE_H - 95
-        c.drawString(40, y, line)
-        y -= 30
-
-
 def render_pdf(filename, payload, stints, include_summary=False):
     pdf = canvas.Canvas(filename, pagesize=(PAGE_W, PAGE_H))
     pdf.setTitle(f"{payload['race']['sessionName']} stint analysis")
@@ -922,9 +897,6 @@ def render_pdf(filename, payload, stints, include_summary=False):
                 pdf.showPage()
     for index, stint in enumerate(stints, 1):
         render_page(pdf, payload, stint, index)
-        pdf.showPage()
-    if payload.get('caveats') and not (include_summary and payload.get('reportMode', 'race') == 'race'):
-        render_caveats(pdf, payload)
         pdf.showPage()
     # Analysis graphs are an appendix: the detailed stint and pitstop reports
     # come first, while the paginated 24-hour class charts always finish the PDF.

@@ -137,7 +137,8 @@ function normalizeLap(entry) {
   return {
     ...entry,
     carNumber: String(entry.carNumber ?? ''),
-    className: String(entry.className ?? ''),
+    // Laps without class info form their own class (same label as the parser).
+    className: String(entry.className ?? '').trim() || (entry.carNumber ? 'No class' : ''),
     teamName: String(entry.teamName ?? entry.team ?? ''),
     driverName: String(entry.driverName ?? entry.driver ?? ''),
     lastPit: entry.lastPit || entry.raw?.['PIT TIME'] || '',
@@ -261,6 +262,12 @@ function rowShowsInPit(lap) {
   return /(?:^|\b)(?:in\s*pit|in-pit|pit|in|p|f|fuel)(?:\b|$)/i.test(pitStatusText(lap));
 }
 
+// Providers show "NotStr" for a car that has not left the grid/garage yet.
+function rowNotStarted(row) {
+  return /^nots*str(?:arted)?$/i.test(String(row?.eta || '').trim())
+    || /^nots*str(?:arted)?$/i.test(String(row?.state || '').trim());
+}
+
 function rowShowsOutlap(lap) {
   return /(?:^|\b)(?:out\s*lap|outlap)(?:\b|$)/i.test(pitStatusText(lap));
 }
@@ -319,6 +326,9 @@ function annotatePitPhases(laps) {
       isPitLap = true;
       state.nextIsOutlap = false;
     }
+    // A lap already stored as the outlap (read from the timing snapshot taken
+    // during the lap) uses up the pending outlap: the lap after it is a normal lap.
+    if (lapPhase === 'outlap') state.nextIsOutlap = false;
     if (!driverChangedAtPit && explicitlyInPit) {
       lapPhase = 'inlap';
       isPitLap = true;
@@ -797,6 +807,7 @@ return {
   pitAffectedLap,
   isOpeningRaceLap,
   rowShowsInPit,
+  rowNotStarted,
   rowShowsOutlap,
   annotatePitPhases,
   baseLapExclusionReasons,

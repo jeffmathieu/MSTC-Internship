@@ -8,7 +8,10 @@ function setupAutoUpdates({
   autoUpdater,
   getParentWindow = () => null,
   logger = console,
-  onBeforeQuitAndInstall = () => {}
+  onBeforeQuitAndInstall = () => {},
+  platform = process.platform,
+  openExternal = null,
+  releasesUrl = 'https://github.com/jeffmathieu/MSTC-Internship/releases/latest'
 }) {
   if (!app?.isPackaged) {
     logger.info('[auto-update] Disabled during local development.');
@@ -49,7 +52,34 @@ function setupAutoUpdates({
     }
   });
   autoUpdater.on('update-not-available', (info) => logger.info(`[auto-update] App is current (${info?.version || app.getVersion()}).`));
-  autoUpdater.on('error', (error) => logger.error('[auto-update] Update error:', error));
+  let manualUpdatePromptShown = false;
+  autoUpdater.on('error', async (error) => {
+    logger.error('[auto-update] Update error:', error);
+    // macOS refuses to install an update that is not signed with a Developer ID
+    // (builds made before the certificates were added). Point to the download page.
+    if (platform !== 'darwin' || manualUpdatePromptShown || !openExternal) return;
+    if (!/code ?sign|signature|not signed/i.test(String(error?.message || error))) return;
+    manualUpdatePromptShown = true;
+    try {
+      const options = {
+        type: 'info',
+        buttons: ['Open download page', 'Later'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+        title: 'Update could not be installed',
+        message: 'The update was downloaded but macOS did not allow it to be installed automatically.',
+        detail: 'Download the new version from the release page and drag it into Applications to replace this one.'
+      };
+      const parent = getParentWindow();
+      const result = parent
+        ? await dialog.showMessageBox(parent, options)
+        : await dialog.showMessageBox(options);
+      if (result.response === 0) await openExternal(releasesUrl);
+    } catch (promptError) {
+      logger.error('[auto-update] Manual update prompt failed:', promptError);
+    }
+  });
   autoUpdater.on('download-progress', (progress) => {
     const percent = Number(progress?.percent);
     const speed = Number(progress?.bytesPerSecond);

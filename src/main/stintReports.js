@@ -10,6 +10,8 @@ const { numberOrNull, driverChange } = require('../shared/pitEvents');
 const { summarizeRaceControl } = require('../shared/raceControl');
 const crypto = require('crypto');
 const { buildCanonicalReportHtml } = require('./reports/canonicalReportHtml');
+const { buildDebriefModel, buildDebriefHtml } = require('./reports/debriefHtml');
+const { notesForStop } = require('../shared/pitNotes');
 
 const REPORT_LAYOUT_VERSION = 'canonical-landscape-v12-race-summary-no-notes';
 
@@ -287,7 +289,23 @@ function endPitStopForStint(stint = {}, pitStops = []) {
   return pitStops.find((stop) => Number(stop.lapNumber) === endLap + 1) || null;
 }
 
-function canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes, pitStops = []) {
+// Every pit stop that happened while this stint was running (a stint only ends
+// when the driver changes, so a driver can stop several times inside one stint).
+function stopsDuringStint(stint = {}, stops = []) {
+  const start = Date.parse(stint.startedAt || '');
+  const end = stint.closedAt ? Date.parse(stint.closedAt) + 60000 : Infinity;
+  const firstLap = Number(stint.startLap), lastLap = Number(stint.endLap);
+  return stops.filter((stop) => {
+    const at = Date.parse(stop.entryAt || '');
+    if (Number.isFinite(at) && Number.isFinite(start)) return at >= start - 1000 && at <= end;
+    const lap = Number(stop.lapNumber);
+    return Number.isFinite(lap) && Number.isFinite(firstLap) && lap >= firstLap && lap <= (Number.isFinite(lastLap) ? lastLap + 1 : Infinity);
+  }).map((stop) => ({ id: stop.id, stopNumber: stop.stopNumber ?? null, lapNumber: stop.lapNumber ?? null, entryAt: stop.entryAt || null,
+    exitAt: stop.exitAt || null, durationMs: stop.durationMs ?? stop.totalDurationMs ?? null, closed: Boolean(stop.closed),
+    driverBefore: stop.driverBefore || '', driverAfter: stop.driverAfter || '', notes: stop.notes || null }));
+}
+
+function canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes, pitStops = [], allStops = pitStops) {
   const legacy = buildStintReportPayload(stint, session, gapSamples);
   const stats = legacy.stint.stats || {};
   const firstLap = legacy.stint.laps[0];
@@ -305,6 +323,7 @@ function canonicalStint(stint, session, gapSamples, driverStats, history, refere
         ? driver.bestLapMs - stats.bestLapMs
         : null
     }));
+  const stopsInStint = stopsDuringStint(stint, allStops);
   const classComparisons = classComparisonsForStint(history, stint.laps || [], stint.carNumber, legacy.session.className);
   const insights = buildStintInsights(stint.laps || [], referenceTimes);
   insights.classRanking = classRankingForStint(stint.laps || [], classComparisons);
@@ -328,6 +347,8 @@ function canonicalStint(stint, session, gapSamples, driverStats, history, refere
     classComparisons,
     insights,
     endPitStop: endPitStopForStint(stint, pitStops),
+    ...(stopsInStint.length ? { pitStopsDuring: stopsInStint } : {}),
+    ...(stint.closed === false ? { preliminary: true } : {}),
     laps: legacy.stint.laps,
     gapHistory: legacy.gapHistory
   };
@@ -347,7 +368,8 @@ function buildCanonicalReportPayload({
   pitEvents = [],
   sessionMode = 'race',
   raceControlEvents = [],
-  preparedReportPayload = null
+  preparedReportPayload = null,
+  pitNotes = {}
 }) {
   if (preparedReportPayload) {
     const legacy = stints[0] ? buildStintReportPayload(stints[0], session, gapSamples) : null;
@@ -375,12 +397,20 @@ function buildCanonicalReportPayload({
   const recordedStops = pitEvents.filter((stop) => String(stop.carNumber) === followedCar && stop.closed);
   const legacyStops = pitStopsFromHistory(history, followedCar);
   const representedCounts = new Set(recordedStops.map((stop) => stop.stopNumber).filter((count) => count != null));
-  const pitStops = reportPolicy.includePitstops
-    ? enrichPitStops([...legacyStops.filter((stop) => !representedCounts.has(stop.stopNumber)
-      && !recordedStops.some((event) => event.lapNumber === stop.lapNumber)), ...recordedStops]
-      .sort((a, b) => a.stopNumber != null && b.stopNumber != null
-        ? a.stopNumber - b.stopNumber : (a.lapNumber ?? Infinity) - (b.lapNumber ?? Infinity)), expectedPitDurationMs)
-    : [];
+  const withNotes = (stops) => stops.map((stop) => {
+    const notes = notesForStop(stop, pitNotes);
+    return notes ? { ...stop, notes } : stop;
+  });
+  const stopsFrom = (events) => withNotes(enrichPitStops([...legacyStops.filter((stop) => !representedCounts.has(stop.stopNumber)
+    && !events.some((event) => event.lapNumber === stop.lapNumber)), ...events]
+    .sort((a, b) => a.stopNumber != null && b.stopNumber != null
+      ? a.stopNumber - b.stopNumber : (a.lapNumber ?? Infinity) - (b.lapNumber ?? Infinity)), expectedPitDurationMs));
+  const pitStops = reportPolicy.includePitstops ? stopsFrom(recordedStops) : [];
+  // Practice and qualifying reports have no pit analysis, but the stops (and the
+  // engineer's notes for them) still belong in the debrief and the stint pages.
+  // A stop that is still in progress is kept when it already has notes.
+  const sessionStops = reportPolicy.includePitstops ? pitStops
+    : stopsFrom(pitEvents.filter((stop) => String(stop.carNumber) === followedCar && (stop.closed || notesForStop(stop, pitNotes))));
   const pitAnalysis = pitstopAnalysis(pitStops);
   const legacy = stints[0] ? buildStintReportPayload(stints[0], session, gapSamples) : null;
   return {
@@ -412,6 +442,7 @@ function buildCanonicalReportPayload({
       drivers: driverStats,
       pitStops,
       pitAnalysis,
+      ...(reportPolicy.includePitstops ? {} : { sessionPitStops: sessionStops, sessionPitAnalysis: pitstopAnalysis(sessionStops) }),
       totalPitTimeMs: pitStops.length && pitStops.every((stop) => Number.isFinite(stop.durationMs))
         ? pitStops.reduce((total, stop) => total + stop.durationMs, 0)
         : null,
@@ -433,7 +464,9 @@ function buildCanonicalReportPayload({
       raceLaps.some((lap) => lap.lapNumberSource === 'observed-sequence') ? 'Observed lap numbers count recorded passages, not official race laps; missed feed updates cannot be reconstructed.' : '',
       pitStops.some((stop) => stop.durationSource === 'observed') ? 'Observed stop timers use feed transitions at polling resolution, not official timing loops.' : ''
     ].filter(Boolean),
-    stints: stints.map((stint) => canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes, pitStops)),
+    stints: stints.map((stint) => canonicalStint(stint, session, gapSamples, driverStats, history, referenceTimes,
+      // Practice/qualifying stints only show a stop when it carries the engineer's notes.
+      reportPolicy.includePitstops ? pitStops : sessionStops.filter((stop) => stop.notes), sessionStops)),
     // Keep the first automatic-report schema available to existing readers.
     session: legacy?.session || null,
     stint: legacy?.stint || null,
@@ -675,9 +708,13 @@ async function writeClosedStintArtifacts({
   sessionMode = 'race',
   raceControlEvents = [],
   preparedReportPayload = null,
-  renderPdf = renderReportLabPdf
+  renderPdf = renderReportLabPdf,
+  pitNotes = {},
+  preliminary = false
 }) {
-  if (!stint?.closed) return { written: false, reason: 'stint-open' };
+  // A preliminary report covers a stint that is still running; it is replaced by
+  // the final report (same file) once the driver leaves.
+  if (!stint?.closed && !preliminary) return { written: false, reason: 'stint-open' };
   if (!Number(stint.lapCount ?? stint.laps?.length)) {
     return { written: false, reason: 'stint-empty' };
   }
@@ -700,7 +737,7 @@ async function writeClosedStintArtifacts({
     pitRules,
     pitEvents,
     sessionMode,
-    raceControlEvents, preparedReportPayload,
+    raceControlEvents, preparedReportPayload, pitNotes,
     carNumber: stint.carNumber
   });
   const { generatedAt, ...revisionInputs } = payload;
@@ -776,14 +813,18 @@ async function writeEventSummaryArtifacts({
   sessionMode = 'race',
   raceControlEvents = [],
   preparedReportPayload = null,
-  renderPdf = renderReportLabPdf
+  renderPdf = renderReportLabPdf,
+  pitNotes = {},
+  raceMessages = []
 }) {
   const reportPolicy = reportPolicyForSessionMode(sessionMode);
   if (!reportPolicy.writeEventSummaries) return [];
   const closed = stints.filter((stint) => stint.closed);
   if (!closed.length) return [];
   const carFolder = path.join(sessionFolder, 'stints', `car-${safeFilePart(carNumber, 'unknown')}`);
-  fs.mkdirSync(carFolder, { recursive: true });
+  // Summary PDFs stay next to the stint folders; their JSON payloads go in data/.
+  const carDataFolder = path.join(carFolder, 'data');
+  fs.mkdirSync(carDataFolder, { recursive: true });
   const summaryPrefix = reportPolicy.sessionMode === 'race'
     ? 'RACE'
     : reportPolicy.sessionMode === 'qualifying'
@@ -807,6 +848,7 @@ async function writeEventSummaryArtifacts({
   }));
 
   const results = [];
+  let overviewPayload = null;
   for (const group of groups) {
     const payloads = group.stints.map((stint) => buildStintReportPayload(stint, session, gapSamples));
     const payload = buildCanonicalReportPayload({
@@ -818,13 +860,20 @@ async function writeEventSummaryArtifacts({
       pitRules,
       pitEvents,
       sessionMode: reportPolicy.sessionMode,
-      raceControlEvents, preparedReportPayload,
+      raceControlEvents, preparedReportPayload, pitNotes,
       carNumber
     });
     payload.title = group.title;
     payload.legacyPayloads = payloads;
-    const jsonPath = path.join(carFolder, `${group.baseName}.json`);
-    const pdfPath = path.join(carFolder, `${group.baseName}.pdf`);
+    if (group.includeSummary) overviewPayload = payload;
+    const jsonPath = path.join(carDataFolder, `${group.baseName}.json`);
+    // The full overview is the main deliverable: it sits in the session folder
+    // itself (one file per car); driver summaries stay next to the stints.
+    const pdfPath = group.includeSummary
+      ? path.join(sessionFolder, `${group.baseName}_car-${safeFilePart(carNumber, 'unknown')}.pdf`)
+      : path.join(carFolder, `${group.baseName}.pdf`);
+    // Earlier versions saved the overview inside the car folder.
+    if (group.includeSummary) fs.rmSync(path.join(carFolder, `${group.baseName}.pdf`), { force: true });
     fs.writeFileSync(jsonPath, JSON.stringify(payload, null, 2));
     // Finalization deliberately refreshes summaries, including when reopening
     // an old session folder whose full overview did not exist yet.
@@ -835,6 +884,18 @@ async function writeEventSummaryArtifacts({
       await printFallback(buildCanonicalFallbackHtml(payload, Boolean(group.includeSummary)), pdfPath);
     }
     results.push({ jsonPath, pdfPath });
+  }
+  // One-page debrief next to the overview. It always uses the built-in
+  // printer, so it looks the same whichever engine rendered the overview.
+  if (overviewPayload) {
+    const debriefPath = path.join(sessionFolder, `${summaryPrefix}_DEBRIEF_car-${safeFilePart(carNumber, 'unknown')}.pdf`);
+    // A debrief problem must never take down the overview and driver summaries.
+    try {
+      await printFallback(buildDebriefHtml(buildDebriefModel({ payload: overviewPayload, history, stints: closed, pitNotes, raceMessages })), debriefPath);
+      results.push({ jsonPath: null, pdfPath: debriefPath, kind: 'debrief' });
+    } catch (error) {
+      results.push({ jsonPath: null, pdfPath: null, kind: 'debrief', error: error?.message || String(error) });
+    }
   }
   return results;
 }

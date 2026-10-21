@@ -323,6 +323,13 @@
       let start = Date.parse(estimatedStartTime(stint.laps[0]) || '')
         || (previous && driverKey(previous.driverName) === driverKey(stint.driverName) ? Date.parse(previous.startedAt) : NaN)
         || (i === 0 ? Date.parse(options.sessionStartedAt || '') : NaN) || now;
+      // A car still showing NotStr has not left the grid: its driving time starts
+      // when that status disappears, not at the session start.
+      const isLast = i === stints.length - 1 && !stint.laps.length;
+      const waitingOnGrid = isLast && lapAnalytics.rowNotStarted(options.liveRow);
+      const justLeftGrid = isLast && !waitingOnGrid && Boolean(previous?.notStarted)
+        && driverKey(previous.driverName) === driverKey(stint.driverName);
+      if (waitingOnGrid || justLeftGrid) start = now;
       let end = i + 1 < stints.length ? Date.parse(estimatedStartTime(stints[i + 1].laps[0]) || '') || now : now;
       // Match transitions by time too: returning drivers can change repeatedly.
       const incoming = events.filter((e) => driverKey(e.driverAfter) === driverKey(stint.driverName)
@@ -341,7 +348,7 @@
         const active = events.find((e) => !e.closed);
         if (active) start = Date.parse(active.entryAt);
       }
-      return { start, end: Math.max(start, end) };
+      return { start, end: Math.max(start, end), waitingOnGrid };
     });
     const net = stints.map((stint, i) => {
       const { start, end } = bounds[i];
@@ -356,7 +363,8 @@
         elapsedTimeMs: gross, excludedPitTimeMs: excluded,
         stintTimeMs: options.timerRunning === false ? 0 : Math.max(0, gross - excluded),
         drivingTimeEstimated: clipped.some((p) => p.approximate) || !events.length,
-        drivingTimePaused: i === stints.length - 1 && (active || lapAnalytics.rowShowsInPit(options.liveRow)),
+        drivingTimePaused: i === stints.length - 1 && (active || lapAnalytics.rowShowsInPit(options.liveRow) || bounds[i].waitingOnGrid),
+        notStarted: bounds[i].waitingOnGrid,
         pitObservedAt: i === stints.length - 1 ? pitObservedAt : null,
         timerSource: options.timerRunning === false ? 'session-not-started' : 'net-driving-time' };
     });

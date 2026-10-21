@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
@@ -53,24 +53,29 @@ const {
 const { pitstopCircuitById, normalizePitstopCircuitId } = require('../shared/pitstopCircuits');
 const { buildLapPrediction } = require('../shared/lapPrediction');
 const { buildAdjacentClassBattles } = require('../shared/classBattle');
+const { buildDriverOverview } = require('../shared/driverOverview');
+const { buildPitNotesView, validateSave: validatePitNotesSave } = require('../shared/pitNotes');
+const { updateMessageLog, restoreMessageLog } = require('../shared/raceMessages');
 const {
   DEFAULT_PACE_WINDOW: DEFAULT_GAP_PACE_WINDOW,
   DEFAULT_PIT_SUPPRESSION_LAPS,
   updateGapMemory
 } = require('../shared/gapMemory');
 const { normalizeMode, buildComparisonView, qualifyingAdjacentView } = require('../shared/sessionMode');
-const { preferStableSessionName } = require('../shared/sessionName');
+const { preferStableSessionName, isPlausibleSessionName } = require('../shared/sessionName');
 const { drivingStintsForCar: stintsForCar, buildDrivingStintState: buildStintState } = require('../shared/stintTracker');
 const { updateSessionTiming } = require('../shared/sessionTiming');
 const { followedClassesCompletion, automaticCompletionReason: completionReason, updateFinishCountdown } = require('../shared/sessionCompletion');
 const { buildTimingHighlights } = require('../shared/timingHighlights');
-const { resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalReportSettings,
+const { prepareDataFolder, DATA_FOLDER, EXPORTS_FOLDER, resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalReportSettings,
   readJsonLines, appendJsonLines, atomicWriteFile, resolveSessionEndAt } = require('../shared/storageSession');
 const { setupAutoUpdates } = require('./autoUpdater');
 const { setupAppLifecycle } = require('./appLifecycle');
 const { haltCollectorForCompletion } = require('./collectorCompletion');
 const { printHtmlToPdf } = require('./stintReports');
 const { createReportQueue } = require('./reportQueue');
+const { BACKUP_INTERVAL_MS, createSessionBackup } = require('./sessionBackup');
+const { buildSessionWorkbook } = require('./export/sessionWorkbook');
 const { secureContents, localPageAllowed, remoteNavigationAllowed, trustedSender } = require('./windowSecurity');
 const { nextRaceControlEvent } = require('../shared/raceControl');
 // Fuel estimation is parked for a later release; observed service timers stay active.
@@ -88,7 +93,10 @@ let mainWindow;
 let liveWindow;
 const additionalDashboardWindows = new Map();
 const graphWindowsByCar = new Map();
+const driverWindowsByCar = new Map();
 let pollTimer;
+let backupTimer = null;
+let backupInFlight = null;
 let pollInFlight = false;
 let activePoll = Promise.resolve();
 let finishPoll = null;
@@ -101,6 +109,11 @@ let providerFreshness = {};
 let raceControlEvents = [];
 const lapReconciliationByCar = new Map();
 const serviceStates = new Map();
+// Engineer notes per followed car and pit event id, persisted in data/pit_notes.json.
+let pitNotesStore = {};
+// Steward / race-control messages seen on the timing page (data/race_messages.jsonl).
+let raceMessageLog = [];
+const RACE_MESSAGES_IN_STATE = 60;
 const fuelStates = new Map();
 const sequenceByCar = new Map();
 const checkedCsvHeaders = new Set();
@@ -118,7 +131,8 @@ const appLifecycle = setupAppLifecycle({
     shouldCloseLiveWindow = true;
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = null;
-    return (async () => { await activePoll; await snapshotWriter.flush(); await reportQueue.flush(); })();
+    stopBackupTimer();
+    return (async () => { await activePoll; await snapshotWriter.flush(); await reportQueue.flush(); await backupInFlight; })();
   },
   onError: (error) => addError(error, 'shutdown')
 });
@@ -168,7 +182,8 @@ let collectorState = {
   sessionTiming: null,
   finishCountdown: null,
   storageSessionFolder: '',
-  pollIntervalMs: 5000
+  pollIntervalMs: 5000,
+  sessionNameSetting: ''
 };
 
 // Electron chooses a safe OS-specific folder for app settings. Race data is
@@ -216,6 +231,10 @@ function normalizeSettings(settings) {
     followedCars,
     sessionMode,
     theme,
+    // Empty means "detect it": the first plausible scraped name is stored here
+    // (sessionNameAuto) and then stays fixed until the user edits it in setup.
+    sessionName: String(settings?.sessionName ?? '').trim().slice(0, 120),
+    sessionNameAuto: Boolean(settings?.sessionNameAuto) && Boolean(String(settings?.sessionName ?? '').trim()),
     trackCondition,
     analysisConditionFilter,
     conditionPhaseCounter,
@@ -282,7 +301,7 @@ function appendTrackConditionEvent(previous, next) {
     collectorState.storageSessionFolder || next.storageFolder,
     defaultStorageFolder()
   );
-  fs.mkdirSync(folder, { recursive: true });
+  const dataFolder = prepareDataFolder(fs, path, folder);
   const event = {
     changedAt: new Date().toISOString(),
     source: 'manual',
@@ -295,8 +314,8 @@ function appendTrackConditionEvent(previous, next) {
       .filter((row) => normalizeFollowedCars(next).includes(String(row.carNumber)))
       .map((row) => [String(row.carNumber), row.lapNumber ?? row.laps ?? null]))
   };
-  fs.appendFileSync(path.join(folder, 'track_condition_events.jsonl'), `${JSON.stringify(event)}\n`);
-  snapshotWriter.write(path.join(folder, 'track_condition_state.json'), JSON.stringify(event, null, 2));
+  fs.appendFileSync(path.join(dataFolder, 'track_condition_events.jsonl'), `${JSON.stringify(event)}\n`);
+  snapshotWriter.write(path.join(dataFolder, 'track_condition_state.json'), JSON.stringify(event, null, 2));
   return event;
 }
 
@@ -396,6 +415,38 @@ function openGraphsWindow(carNumber = loadSettings().followedCar) {
   return true;
 }
 
+// Driver overview window: one live table of every driver of a followed car
+// (driving time, stints, pace deltas). Like the graphs window it only reads
+// the per-car view of collectorState; closing it does not affect collection.
+function openDriversWindow(carNumber = loadSettings().followedCar) {
+  const key = String(carNumber || loadSettings().followedCar || '').trim();
+  const existing = driverWindowsByCar.get(key);
+  if (existing && !existing.isDestroyed()) {
+    existing.show();
+    existing.focus();
+    return true;
+  }
+  const driversWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 900,
+    minHeight: 600,
+    backgroundColor: '#f1f3f0',
+    title: `Driver overview - Car #${key}`,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  secureContents(driversWindow.webContents, (url) => localPageAllowed(url, path.resolve(__dirname, '../renderer')));
+  driverWindowsByCar.set(key, driversWindow);
+  driversWindow.on('closed', () => driverWindowsByCar.delete(key));
+  driversWindow.loadFile(path.join(__dirname, '../renderer/drivers.html'), { query: { car: key } });
+  return true;
+}
+
 // Creates the hidden browser window used to load the live timing website.
 // show:false keeps it invisible during normal collection; the debug button can
 // reveal it through collector:openLiveWindow. Closing the debug window only
@@ -421,6 +472,31 @@ function createLiveWindow() {
   return liveWindow;
 }
 
+// Copies the irreplaceable session files every 30 minutes (and at the end of a
+// session). Only a handful of small files are copied, asynchronously, so this
+// costs next to nothing next to the 5-second poll.
+function runBackup(reason) {
+  if (backupInFlight) return backupInFlight;
+  const sessionFolder = collectorState.storageSessionFolder;
+  if (!sessionFolder) return Promise.resolve(null);
+  backupInFlight = snapshotWriter.flush()
+    .then(() => createSessionBackup({ sessionFolder }))
+    .then((result) => { if (result) collectorState.lastBackupAt = result.createdAt; return result; })
+    .catch((error) => { addError(error, `backup-${reason}`); return null; })
+    .finally(() => { backupInFlight = null; });
+  return backupInFlight;
+}
+
+function stopBackupTimer() {
+  if (backupTimer) clearInterval(backupTimer);
+  backupTimer = null;
+}
+
+function startBackupTimer() {
+  stopBackupTimer();
+  backupTimer = setInterval(() => runBackup('interval'), BACKUP_INTERVAL_MS);
+}
+
 // Pushes the latest collector state to the renderer. Add new state fields to
 // collectorState first; the whole object is sent as-is.
 function broadcastState() {
@@ -429,6 +505,9 @@ function broadcastState() {
     if (!win.isDestroyed()) win.webContents.send('collector:update', stateForRenderer(win.webContents));
   });
   graphWindowsByCar.forEach((win) => {
+    if (!win.isDestroyed()) win.webContents.send('collector:update', stateForRenderer(win.webContents));
+  });
+  driverWindowsByCar.forEach((win) => {
     if (!win.isDestroyed()) win.webContents.send('collector:update', stateForRenderer(win.webContents));
   });
 }
@@ -522,7 +601,34 @@ const pageExtractionScript = String.raw`(() => {
     })
     .sort((a, b) => a.rect.top - b.rect.top || a.rect.left - b.rect.left)[0];
   const sessionHeading = document.querySelector('h1');
+  // GetRaceResults: the event/session title has its own element, and steward
+  // or penalty messages are shown as separate lines below the header.
+  const visibleText = (element) => {
+    if (!element) return '';
+    const style = window.getComputedStyle(element);
+    if (style.display === 'none' || style.visibility === 'hidden') return '';
+    return clean(element.innerText || element.textContent || '');
+  };
+  const heatNameElement = document.querySelector('#heatState .heatName') || document.querySelector('.heatName');
+  const grrMessages = Array.from(document.querySelectorAll('#screenMessages > div')).map(visibleText).filter(Boolean);
+  // RIS shows the latest race-control message in a banner next to a counter
+  // such as "1 événement" / "3 events"; the "RC_MESSAGE:" prefix is dropped.
+  const risMessages = Array.from(document.querySelectorAll('span,div'))
+    .filter((element) => element.children.length === 0 && /^\d+\s+(?:événements?|evenements?|events?|evenementen|berichten|messages?)$/i.test(clean(element.textContent)))
+    .filter((counter) => visibleText(counter) && counter.parentElement)
+    .map((counter) => clean(visibleText(counter.parentElement).replace(clean(counter.textContent), '')).replace(/^RC_MESSAGE:\s*/i, ''))
+    .filter(Boolean);
+  const screenMessages = [...new Set([...grrMessages, ...risMessages])];
+  // A class filter hides other classes, so "time to the car ahead" could then be
+  // read against the wrong car. Nothing selected means "All".
+  const classFilterElement = document.querySelector('#classNameFilter');
+  const classFilter = classFilterElement
+    ? Array.from(classFilterElement.selectedOptions || []).map((option) => clean(option.text)).filter(Boolean)
+    : [];
   const sessionFields = {
+    heatName: visibleText(heatNameElement),
+    screenMessages,
+    classFilter,
     currentFlag: currentFlagElement ? currentFlagElement.text : '',
     status: labelledValue('Status:'),
     elapsed: labelledValue('Elapsed:'),
@@ -597,6 +703,11 @@ function ensureStorage(settings) {
   return folder;
 }
 
+// Machine-readable session files (JSON/JSONL/CSV) live in <session>/data.
+function ensureDataFolder(settings) {
+  return prepareDataFolder(fs, path, ensureStorage(settings));
+}
+
 function storageContext(settings, normalized, collectedAt = new Date().toISOString()) {
   const timingUrl = normalized.session?.url || collectorState.url || loadSettings().timingUrl || '';
   return {
@@ -656,7 +767,7 @@ function updatePitState(settings, rows, context, carNumber = settings.followedCa
 // receives this same object through collectorState, while pitstop_plan.json lets
 // external/debug tools inspect the current strategy state.
 function buildAndWritePitstopPlan(settings, context, rows, carNumber) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   const followedCarNumber = String(carNumber || '');
   const pitState = updatePitState(settings, rows, context, followedCarNumber);
   const fcyGapState = nextFcyGapState({
@@ -731,7 +842,7 @@ function annotateLiveSectorFlags(storageRows, context) {
 }
 
 function writeLatestRows(settings, normalizedRows) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   snapshotWriter.write(path.join(folder, 'latest_live_rows.json'), JSON.stringify(normalizedRows, null, 2));
   snapshotWriter.write(path.join(folder, 'latest_live_rows.csv'), toCsvRows(normalizedRows));
 }
@@ -740,7 +851,7 @@ function writeLatestRows(settings, normalizedRows) {
 // overwritten for crash recovery; the append-only history supports later gap
 // graphs and auditing without storing every volatile five-second poll.
 function updateAndWriteGapMemory(settings, context, rows) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   gapMemoryState = updateGapMemory(gapMemoryState || {}, {
     rows,
     followedCars: normalizeFollowedCars(settings),
@@ -748,7 +859,7 @@ function updateAndWriteGapMemory(settings, context, rows) {
     paceWindow: DEFAULT_GAP_PACE_WINDOW,
     pitSuppressionLaps: DEFAULT_PIT_SUPPRESSION_LAPS
   });
-  snapshotWriter.write(path.join(folder, 'gap_state.json'), JSON.stringify({ ...gapMemoryState, samples: [], newSamples: [] }, null, 2));
+  snapshotWriter.write(path.join(folder, 'gap_state.json'), JSON.stringify({ ...gapMemoryState, samples: [], newSamples: [], timeline: undefined }, null, 2));
   if (gapMemoryState.newSamples.length) {
     appendJsonLines(fs, path.join(folder, 'gap_history.jsonl'), gapMemoryState.newSamples);
   }
@@ -757,7 +868,7 @@ function updateAndWriteGapMemory(settings, context, rows) {
 }
 
 function loadExistingGapMemory(settings) {
-  const folder = resolveSessionFolder(collectorState.storageSessionFolder || settings.storageFolder, defaultStorageFolder());
+  const folder = ensureDataFolder(settings);
   try {
     const stored = loadStoredJson(fs, path.join(folder, 'gap_state.json'));
     gapMemoryState = stored && typeof stored === 'object' ? stored : null;
@@ -774,7 +885,7 @@ function loadExistingGapMemory(settings) {
 // readable after schema changes.
 function appendLapHistory(settings, lapRecords) {
   if (!lapRecords.length) return;
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   const jsonlPath = path.join(folder, 'lap_history.jsonl');
   const csvPath = path.join(folder, 'lap_history.csv');
   // Commit the canonical journal first. A failed CSV export must never cause
@@ -798,14 +909,14 @@ function appendLapHistory(settings, lapRecords) {
 // how rows were normalized. Inspect this first when a timing provider changes
 // its HTML/column names.
 function writeParserDebug(settings, debugInfo) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   snapshotWriter.write(path.join(folder, 'parser_debug.json'), JSON.stringify(debugInfo, null, 2));
 }
 
 // Writes session-level metadata beside the latest rows/history so every session
 // folder is self-describing.
 function writeSessionMetadata(settings, context, options = {}) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   const metadataPath = path.join(folder, 'session_metadata.json');
   let previousMetadata = {};
   try {
@@ -922,6 +1033,21 @@ function buildAnalyticsSummary(settings, context, rows = []) {
     buildTimingHighlights(history, carNumber, { conditionFilter: resolvedConditionFilter, rows })
   ]));
   const primaryCar = String(settings.followedCar || followedCars[0] || '');
+  // Driver overview shares the stint state, so a followed car's drivers appear
+  // in one place: driving time, stints and pace differences per driver.
+  const driverOverviewByCar = Object.fromEntries(followedCars.map((carNumber) => [
+    carNumber,
+    buildDriverOverview({
+      laps: analysisHistory,
+      stintCar: collectorState.stintState?.cars?.[carNumber] || null,
+      carNumber,
+      conditionFilter: resolvedConditionFilter,
+      liveDriver: (() => {
+        const liveRow = rows.find((row) => String(row.carNumber) === String(carNumber));
+        return liveRow?.driver || liveRow?.driverName || '';
+      })()
+    })
+  ]));
 
   return {
     storageSchemaVersion: 2,
@@ -972,6 +1098,7 @@ function buildAnalyticsSummary(settings, context, rows = []) {
     comparisonViewsByCar,
     modeAdjacentViewsByCar,
     dashboardAnalysisByCar,
+    driverOverviewByCar,
     adjacentClassBattles: modeAdjacentViewsByCar[primaryCar] || null,
     comparisonView: comparisonViewsByCar[primaryCar] || null,
     dashboardAnalysis: dashboardAnalysisByCar[primaryCar] || null
@@ -980,7 +1107,7 @@ function buildAnalyticsSummary(settings, context, rows = []) {
 
 // Writes analytics_summary.json and mirrors it into collectorState for the UI.
 function writeAnalyticsSummary(settings, context, rows = []) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   const summary = buildAnalyticsSummary(settings, context, rows);
   snapshotWriter.write(path.join(folder, 'analytics_summary.json'), JSON.stringify(summary));
   collectorState.analyticsSummary = summary;
@@ -991,9 +1118,14 @@ function writeAnalyticsSummary(settings, context, rows = []) {
 // a serial worker queue. Only session finalization waits for those jobs.
 async function writeStintStateAndReports(settings, context, rows = [], options = {}) {
   const folder = ensureStorage(settings);
+  const dataFolder = ensureDataFolder(settings);
   const followedCars = normalizeFollowedCars(settings);
   const generatedAt = context?.collectedAt || new Date().toISOString();
-  const sessionFinished = Boolean(options.sessionFinished);
+  // A preview (manual export) renders the same final reports as the end of a
+  // session, closing the open stint only inside the report, and leaves live
+  // collector state untouched. Ending the session later overwrites these files.
+  const preview = Boolean(options.preview);
+  const sessionFinished = Boolean(options.sessionFinished) || preview;
   const reportSessionMode = normalizeMode(settings.sessionMode);
   const stintOptions = {
     pitEventsByCar: Object.fromEntries([...serviceStates].map(([car, state]) => [car, state.events || []])),
@@ -1006,8 +1138,10 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
     sessionStartedAt: collectorState.sessionTiming?.startedAt || null
   };
   const stintState = buildStintState(collectorState.lapHistory || [], followedCars, generatedAt, stintOptions);
-  snapshotWriter.write(path.join(folder, 'stint_state.json'), JSON.stringify(stintState));
-  collectorState.stintState = stintState;
+  if (!preview) {
+    snapshotWriter.write(path.join(dataFolder, 'stint_state.json'), JSON.stringify(stintState));
+    collectorState.stintState = stintState;
+  }
   const generatedStintReports = [];
   const generatedEventSummaries = [];
 
@@ -1019,12 +1153,14 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
       pdfEngine: app.isPackaged ? 'electron' : 'auto',
       gapSamples: gapMemoryState?.samples || [],
       pitEvents: serviceStates.get(carNumber)?.events || [],
+      pitNotes: pitNotesStore[carNumber] || {},
       referenceTimes: settings.referenceTimes || {}, pitRules: settings.pitRules || {}, sessionMode: reportSessionMode,
       stintOptions: { closeFinalAt: stintOptions.closeFinalAt, generatedAt, liveRow } };
     if (sessionFinished && closedStints.length) {
       const result = await reportQueue.enqueue(`${folder}|${carNumber}|final`, { ...input, final: true });
       generatedStintReports.push(...result.results);
-      generatedEventSummaries.push(...result.summaries);
+      generatedEventSummaries.push(...result.summaries.filter((summary) => !summary.error));
+      result.summaries.filter((summary) => summary.error).forEach((summary) => addError(new Error(summary.error), 'debrief-pdf'));
       continue;
     }
     for (const stint of closedStints) {
@@ -1033,7 +1169,7 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
       const end = Date.parse(stint.closedAt);
       const reportInputs = hashObject({ referenceTimes: input.referenceTimes, pitRules: input.pitRules,
         mode: reportSessionMode, startedAt: stint.startedAt, closedAt: stint.closedAt,
-        drivingTimeMs: stint.stintTimeMs,
+        drivingTimeMs: stint.stintTimeMs, notes: pitNotesStore[carNumber] || {},
         events: input.pitEvents.filter((event) => Date.parse(event.entryAt || event.exitAt) <= end
           && (!event.exitAt || Date.parse(event.exitAt) >= Date.parse(stint.startedAt))) });
       const reportKey = `${folder}|${carNumber}|${stint.stintNumber}|${stint.driverName}|${reportCorrectionsRevision}|${reportInputs}`;
@@ -1043,6 +1179,31 @@ async function writeStintStateAndReports(settings, context, rows = [], options =
         .then(() => completedReportKeys.add(reportKey))
         .catch((error) => addError(error, 'stint-report-worker'))
         .finally(() => pendingStintReports.delete(reportKey));
+    }
+
+    // A stint only ends when the driver changes, so a driver can pit several
+    // times inside one stint. Write a preliminary PDF of the running stint when
+    // the car is back on track after a stop and whenever the stop notes change;
+    // the final report replaces it (same file) when the driver leaves.
+    const openStint = stintState.cars[carNumber].stints.at(-1);
+    if (!sessionFinished && openStint && !openStint.closed && openStint.lapCount > 0) {
+      const startedAt = Date.parse(openStint.startedAt);
+      const stops = (serviceStates.get(carNumber)?.events || []).filter((event) => Number.isFinite(startedAt)
+        && Date.parse(event.entryAt || '') >= startedAt - 1000);
+      const notes = pitNotesStore[carNumber] || {};
+      const trigger = stops.filter((event) => event.closed || notes[event.id]);
+      if (trigger.length) {
+        const signature = hashObject({ driver: openStint.driverName, stops: trigger.map((event) => [event.id, event.closed, notes[event.id] || null]),
+          corrections: reportCorrectionsRevision });
+        const reportKey = `${folder}|${carNumber}|preliminary|${openStint.stintNumber}|${signature}`;
+        if (!pendingStintReports.has(reportKey) && !completedReportKeys.has(reportKey)) {
+          pendingStintReports.add(reportKey);
+          reportQueue.enqueue(reportKey, { ...input, stintNumber: openStint.stintNumber, preliminary: true })
+            .then(() => completedReportKeys.add(reportKey))
+            .catch((error) => addError(error, 'preliminary-stint-report-worker'))
+            .finally(() => pendingStintReports.delete(reportKey));
+        }
+      }
     }
   }
   return { ...stintState, generatedStintReports, generatedEventSummaries };
@@ -1063,18 +1224,63 @@ async function showReportGeneratedMessage(result = {}, automatic = false) {
   });
 }
 
-async function finalizeCurrentSession({ automatic = false } = {}) {
+// Excel workbook of the whole session: green-flag laps, all laps, drivers, stints,
+// pit stops with notes, the whole field and charts, from the data in memory.
+function buildExportWorkbook(settings) {
+  const followed = normalizeFollowedCars(settings);
+  return buildSessionWorkbook({
+    sessionName: collectorState.session?.sessionName || '',
+    mode: settings.sessionMode,
+    trackCondition: settings.trackCondition,
+    timingUrl: collectorState.url || '',
+    followedCars: followed,
+    history: collectorState.lapHistory || [],
+    fieldCars: collectorState.analyticsSummary?.cars || [],
+    stintStateCars: collectorState.stintState?.cars || {},
+    pitEventsByCar: Object.fromEntries(followed.map((car) => [car, serviceStates.get(car)?.events || []])),
+    pitNotesByCar: pitNotesStore,
+    raceMessages: raceMessageLog
+  });
+}
+
+// At the end of a session the workbook is saved in the main session folder
+// (RACE_DATA.xlsx, PRACTICE_DATA.xlsx, ...) and replaced if the session ends again.
+function writeFinalWorkbook(settings) {
+  try {
+    const file = path.join(ensureStorage(settings), `${normalizeMode(settings.sessionMode).toUpperCase()}_DATA.xlsx`);
+    atomicWriteFile(fs, file, buildExportWorkbook(settings));
+    return file;
+  } catch (error) {
+    addError(error, 'final-xlsx');
+    return '';
+  }
+}
+
+// While the final reports are written the dashboards show a "please wait"
+// overlay, so nobody closes the app halfway through.
+let finalizingFromPoll = false;
+function setFinalizing(detail) {
+  collectorState.finalizing = detail ? { active: true, detail, startedAt: collectorState.finalizing?.startedAt || new Date().toISOString() } : null;
+  broadcastState();
+}
+
+async function finalizeCurrentSession(options = {}) {
+  try { return await finalizeCurrentSessionSteps(options); }
+  finally { if (collectorState.finalizing) setFinalizing(null); }
+}
+
+async function finalizeCurrentSessionSteps({ automatic = false } = {}) {
+  setFinalizing('Stopping collection and saving the session data…');
   stopCollector(true);
   await activePoll;
   await snapshotWriter.flush();
   await reportQueue.flush();
   const configuredSettings = loadSettings();
-  const folder = ensureStorage(configuredSettings);
   const storedHistory = loadExistingHistory(configuredSettings);
   if (storedHistory.length) collectorState.lapHistory = storedHistory;
   let metadata = {};
   try {
-    metadata = loadStoredJson(fs, path.join(folder, 'session_metadata.json')) || {};
+    metadata = loadStoredJson(fs, path.join(ensureDataFolder(configuredSettings), 'session_metadata.json')) || {};
   } catch (error) {
     addError(error, 'loadFinalReportMetadata');
   }
@@ -1093,14 +1299,18 @@ async function finalizeCurrentSession({ automatic = false } = {}) {
   context.sourceObservedAt = metadata.lastUpdatedAt || finishedAt;
   try { writeSessionMetadata(settings, context, { finishedAt }); }
   catch (error) { addError(error, 'save-session-endpoint'); }
+  setFinalizing('Generating the final reports: stints, overview and debrief…');
   const stintState = await writeStintStateAndReports(settings, context, collectorState.rows || [], { sessionFinished: true, finishedAt });
   collectorState.stintState = stintState;
   stopCollector(true);
+  setFinalizing('Writing the Excel file and the backup…');
+  writeFinalWorkbook(settings);
+  await runBackup('session-ended');
   collectorState.status = 'finished';
   collectorState.message = automatic
     ? 'Session completion detected; final reports generated.'
     : 'Session ended after confirmation.';
-  broadcastState();
+  setFinalizing(null);
   await showReportGeneratedMessage(stintState, automatic);
   return collectorState;
 }
@@ -1109,7 +1319,7 @@ async function finalizeCurrentSession({ automatic = false } = {}) {
 // lap history. The renderer only displays this object; all prediction rules stay
 // in src/shared/lapPrediction.js where they are covered by focused tests.
 function buildAndWriteLapPrediction(settings, context, rows, carNumber) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   const followedCarNumber = String(carNumber || '');
   const liveRow = (rows || []).find((row) => String(row.carNumber) === String(followedCarNumber));
   const prediction = buildLapPrediction({
@@ -1164,8 +1374,10 @@ function loadExistingHistory(settings) {
   sequenceByCar.clear();
   checkedCsvHeaders.clear();
   serviceStates.clear();
+  pitNotesStore = {};
+  raceMessageLog = [];
   fuelStates.clear();
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   try { raceControlEvents = readJsonLines(fs, path.join(folder, 'race_control_events.jsonl')).entries; }
   catch (error) { raceControlEvents = []; addError(error, 'load-race-control-events'); }
   const jsonlPath = path.join(folder, 'lap_history.jsonl');
@@ -1204,6 +1416,10 @@ function loadExistingHistory(settings) {
         serviceStates.set(event.carNumber, state);
       });
     }
+    try { raceMessageLog = restoreMessageLog(readJsonLines(fs, path.join(folder, 'race_messages.jsonl')).entries); }
+    catch (error) { raceMessageLog = []; addError(error, 'loadRaceMessages'); }
+    try { pitNotesStore = loadStoredJson(fs, path.join(folder, 'pit_notes.json'))?.cars || {}; }
+    catch (error) { pitNotesStore = {}; addError(error, 'loadPitNotes'); }
     feedState = loadStoredJson(fs, path.join(folder, 'timing_feed_state.json')) || {};
     return prepareHistory(entries);
   } catch (error) {
@@ -1217,7 +1433,7 @@ function loadExistingHistory(settings) {
 // poll. Without this, restarting shortly after a stop would incorrectly reopen
 // the pit window even though lap history itself resumed correctly.
 function loadExistingPitStates(settings) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   normalizeFollowedCars(settings).forEach((carNumber) => {
     const filePath = path.join(folder, `pitstop_plan_car-${slugPart(carNumber, 'unknown')}.json`);
     try {
@@ -1329,8 +1545,25 @@ function updateLapHistory(settings, storageRows) {
   return newEntries.length;
 }
 
+// Notes view per followed car: the latest detected stop is editable (and flagged
+// until its notes are saved), earlier stops are read-only history.
+function pitNotesViewByCar(settings) {
+  return Object.fromEntries(normalizeFollowedCars(settings).map((car) => [
+    car, buildPitNotesView(serviceStates.get(car)?.events || [], pitNotesStore[car] || {})
+  ]));
+}
+
+// Logs new steward / penalty messages. Runs on every poll, also while the feed
+// is not progressing (red flag), because that is when such messages appear.
+function updateRaceMessages(settings, messages, observedAt) {
+  const result = updateMessageLog(raceMessageLog, messages, observedAt, normalizeFollowedCars(settings));
+  raceMessageLog = result.log;
+  if (result.added.length) appendJsonLines(fs, path.join(ensureDataFolder(settings), 'race_messages.jsonl'), result.added);
+  collectorState.raceMessages = raceMessageLog.slice(-RACE_MESSAGES_IN_STATE);
+}
+
 function updateServiceEvents(settings, rows, context) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   const followed = new Set(normalizeFollowedCars(settings));
   rows.filter((row) => followed.has(String(row.carNumber))).forEach((row) => {
     const key = String(row.carNumber);
@@ -1346,6 +1579,7 @@ function updateServiceEvents(settings, rows, context) {
       events: result.state.events, config: settings.fuelByCar?.[key] }));
   });
   snapshotWriter.write(path.join(folder, 'pit_event_state.json'), JSON.stringify(Object.fromEntries(serviceStates)));
+  collectorState.pitNotesByCar = pitNotesViewByCar(settings);
   snapshotWriter.write(path.join(folder, 'timing_feed_state.json'), JSON.stringify(feedState));
   if (FUEL_ESTIMATION_ENABLED) snapshotWriter.write(path.join(folder, 'fuel_state.json'), JSON.stringify(Object.fromEntries(fuelStates)));
 }
@@ -1411,7 +1645,7 @@ function manualLapTargetMatches(entry, target = {}) {
 }
 
 function rewriteLapHistoryFiles(settings, history) {
-  const folder = ensureStorage(settings);
+  const folder = ensureDataFolder(settings);
   atomicWriteFile(fs,
     path.join(folder, 'lap_history.jsonl'),
     history.map((entry) => JSON.stringify(entry)).join('\n') + (history.length ? '\n' : '')
@@ -1438,7 +1672,7 @@ function rebuildCollectorDerivedState(settings, context = null, rows = collector
       || (!collectorState.sessionTiming && Boolean(collectorState.lapHistory?.length)),
     sessionStartedAt: collectorState.sessionTiming?.startedAt || null
   });
-  snapshotWriter.write(path.join(ensureStorage(settings), 'stint_state.json'), JSON.stringify(collectorState.stintState, null, 2));
+  snapshotWriter.write(path.join(ensureDataFolder(settings), 'stint_state.json'), JSON.stringify(collectorState.stintState, null, 2));
   collectorState.analyticsSummary = writeAnalyticsSummary(settings, context || { collectedAt: generatedAt, session: collectorState.session || {} }, rows);
   collectorState.lapPredictionsByCar = writeLapPredictions(settings, context || { collectedAt: generatedAt }, rows);
   if (normalizeMode(settings.sessionMode) === 'race') {
@@ -1507,6 +1741,12 @@ async function pollLivePage() {
     const snapshot = await liveWindow.webContents.executeJavaScript(pageExtractionScript, true);
     const normalized = normalizeSnapshot(snapshot);
     const observedAt = new Date().toISOString();
+    try { updateRaceMessages(settings, normalized.session?.screenMessages || [], observedAt); }
+    catch (error) { addError(error, 'race-messages'); }
+    const classFilter = normalized.session?.classFilter || [];
+    collectorState.timingPageWarning = classFilter.length
+      ? `The timing page is filtered on class ${classFilter.join(', ')}. Set "Show class" to All, otherwise gaps can be measured against the wrong car.`
+      : '';
     providerFreshness = nextProviderFreshness(providerFreshness, { ...normalized, observedAt,
       pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) });
     if (!providerFreshness.usable) {
@@ -1518,10 +1758,20 @@ async function pollLivePage() {
       return;
     }
     normalized.collectedAt = observedAt;
-    normalized.session.sessionName = preferStableSessionName(
-      normalized.session?.sessionName,
-      collectorState.session?.sessionName
-    );
+    // The session name is fixed once known: a stored (auto or manual) name
+    // always wins, otherwise the first plausible scraped name is locked in.
+    if (settings.sessionName) {
+      normalized.session.sessionName = settings.sessionName;
+    } else {
+      normalized.session.sessionName = preferStableSessionName(
+        normalized.session?.sessionName,
+        collectorState.session?.sessionName
+      );
+      if (normalized.session.sessionNameSource === 'heat-name' || isPlausibleSessionName(normalized.session.sessionName)) {
+        saveSettings({ ...settings, sessionName: normalized.session.sessionName, sessionNameAuto: true });
+        collectorState.sessionNameSetting = normalized.session.sessionName;
+      }
+    }
     const prepared = prepareLatestSnapshot(settings, normalized);
     const { storageRows, analysisRows, context } = prepared;
     context.sourceObservedAt = providerFreshness.lastProgressAt;
@@ -1533,7 +1783,7 @@ async function pollLivePage() {
     updateServiceEvents(settings, analysisRows, context);
     const raceControlEvent = nextRaceControlEvent(raceControlEvents.at(-1), normalized.session, observedAt);
     if (raceControlEvent) {
-      appendJsonLines(fs, path.join(ensureStorage(settings), 'race_control_events.jsonl'), [raceControlEvent]);
+      appendJsonLines(fs, path.join(ensureDataFolder(settings), 'race_control_events.jsonl'), [raceControlEvent]);
       raceControlEvents.push(raceControlEvent);
     }
     const primaryStats = carStats(collectorState.lapHistory || [], primaryCar);
@@ -1562,6 +1812,7 @@ async function pollLivePage() {
         clearPolling: () => {
           if (pollTimer) clearInterval(pollTimer);
           pollTimer = null;
+          stopBackupTimer();
         },
         closeLiveSource: () => {
           if (liveWindow && !liveWindow.isDestroyed()) {
@@ -1580,6 +1831,7 @@ async function pollLivePage() {
         publishState: broadcastState
       });
       haltErrors.forEach(({ name, error }) => addError(error, `automaticCompletion:${name}`));
+      runBackup('session-finished');
     }
     collectorState.sessionTiming = updateSessionTiming(
       collectorState.sessionTiming,
@@ -1592,6 +1844,7 @@ async function pollLivePage() {
     let analyticsSummary = collectorState.analyticsSummary;
     let lapPredictionsByCar = collectorState.lapPredictionsByCar;
     let pitstopPlansByCar = collectorState.pitstopPlansByCar;
+    if (shouldFinalizeAutomatically) { finalizingFromPoll = true; setFinalizing('Session finished: generating the final reports…'); }
     try { stintState = await writeStintStateAndReports(settings, context, analysisRows, { sessionFinished: shouldFinalizeAutomatically }); } catch (error) { addError(error, 'writeStintStateAndReports'); }
     try { analyticsSummary = writeAnalyticsSummary(settings, context, analysisRows); } catch (error) { addError(error, 'writeAnalyticsSummary'); }
     try { lapPredictionsByCar = writeLapPredictions(settings, context, analysisRows); } catch (error) { addError(error, 'writeLapPredictions'); }
@@ -1622,6 +1875,10 @@ async function pollLivePage() {
       snapshots: [{ at: new Date().toISOString(), checksum: hashObject(analysisRows), rowCount: analysisRows.length, newLapCount }, ...collectorState.snapshots].slice(0, 20)
     };
     if (shouldFinalizeAutomatically) {
+      setFinalizing('Writing the Excel file…');
+      writeFinalWorkbook(settings);
+      finalizingFromPoll = false;
+      setFinalizing(null);
       try {
         await showReportGeneratedMessage(stintState || {}, true);
       } catch (error) {
@@ -1633,6 +1890,7 @@ async function pollLivePage() {
   } catch (error) {
     collectorState.status = 'error'; collectorState.message = 'Could not read the live timing page. See Debug for details.'; addError(error, 'pollLivePage');
   } finally {
+    if (finalizingFromPoll) { finalizingFromPoll = false; collectorState.finalizing = null; }
     pollInFlight = false;
     finishPoll?.();
     finishPoll = null;
@@ -1644,22 +1902,24 @@ async function pollLivePage() {
 // here if the renderer should display their locations.
 function storageInfo(settings) {
   const folder = resolveSessionFolder(collectorState.storageSessionFolder || settings.storageFolder, defaultStorageFolder());
+  const data = path.join(folder, DATA_FOLDER);
   return {
     baseFolder: folder,
     folder,
-    latestRowsCsv: path.join(folder, 'latest_live_rows.csv'),
-    latestRowsJson: path.join(folder, 'latest_live_rows.json'),
-    lapHistoryCsv: path.join(folder, 'lap_history.csv'),
-    lapHistoryJsonl: path.join(folder, 'lap_history.jsonl'),
-    parserDebugJson: path.join(folder, 'parser_debug.json'),
-    sessionMetadataJson: path.join(folder, 'session_metadata.json'),
-    analyticsSummaryJson: path.join(folder, 'analytics_summary.json'),
-    lapPredictionJson: path.join(folder, 'lap_prediction.json'),
-    pitstopPlanJson: path.join(folder, 'pitstop_plan.json'),
-    gapStateJson: path.join(folder, 'gap_state.json'),
-    gapHistoryJsonl: path.join(folder, 'gap_history.jsonl'),
-    stintStateJson: path.join(folder, 'stint_state.json'),
-    stintsFolder: path.join(folder, 'stints')
+    latestRowsCsv: path.join(data, 'latest_live_rows.csv'),
+    latestRowsJson: path.join(data, 'latest_live_rows.json'),
+    lapHistoryCsv: path.join(data, 'lap_history.csv'),
+    lapHistoryJsonl: path.join(data, 'lap_history.jsonl'),
+    parserDebugJson: path.join(data, 'parser_debug.json'),
+    sessionMetadataJson: path.join(data, 'session_metadata.json'),
+    analyticsSummaryJson: path.join(data, 'analytics_summary.json'),
+    lapPredictionJson: path.join(data, 'lap_prediction.json'),
+    pitstopPlanJson: path.join(data, 'pitstop_plan.json'),
+    gapStateJson: path.join(data, 'gap_state.json'),
+    gapHistoryJsonl: path.join(data, 'gap_history.jsonl'),
+    stintStateJson: path.join(data, 'stint_state.json'),
+    stintsFolder: path.join(folder, 'stints'),
+    backupsFolder: path.join(folder, 'backups')
   };
 }
 
@@ -1673,6 +1933,12 @@ async function startCollector(url) {
   await snapshotWriter.flush();
   completedReportKeys.clear();
   const settings = loadSettings();
+  // A name filled in by the previous detection belongs to that session; only a
+  // name the user typed in setup survives into the next Start.
+  if (settings.sessionNameAuto) {
+    Object.assign(settings, { sessionName: '', sessionNameAuto: false });
+    saveSettings(settings);
+  }
   const startedAt = new Date().toISOString();
   const storageSessionFolder = resolveSessionFolder(settings.storageFolder, defaultStorageFolder());
   fs.mkdirSync(storageSessionFolder, { recursive: true });
@@ -1680,7 +1946,7 @@ async function startCollector(url) {
   automaticCompletionHandled = false;
   providerFreshness = {};
   gapMemoryState = null;
-  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, lapPrediction: null, lapPredictionsByCar: {}, pitstopPlan: null, pitstopPlansByCar: {}, gapMemory: null, stintState: null, sessionTiming: null, finishCountdown: null, storageSessionFolder, pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
+  collectorState = { ...collectorState, mode: 'live', status: 'loading', message: 'Loading live timing page...', url, startedAt, lastPollAt: null, lastSuccessAt: null, headers: [], rows: [], lapHistory: [], session: {}, diagnostics: {}, errors: [], snapshots: [], storage: {}, analyticsSummary: null, lapPrediction: null, lapPredictionsByCar: {}, pitstopPlan: null, pitstopPlansByCar: {}, gapMemory: null, stintState: null, sessionTiming: null, finishCountdown: null, storageSessionFolder, lastBackupAt: null, sessionNameSetting: settings.sessionName || '', pollIntervalMs: Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS) };
   collectorState = { ...collectorState, lapHistory: loadExistingHistory(settings), storage: storageInfo(settings) };
   collectorState.sessionTiming = updateSessionTiming(null, {}, collectorState.lapHistory, startedAt);
   collectorState.stintState = buildStintState(collectorState.lapHistory, normalizeFollowedCars(settings), startedAt, {
@@ -1689,6 +1955,8 @@ async function startCollector(url) {
   });
   loadExistingPitStates(settings);
   loadExistingGapMemory(settings);
+  collectorState.pitNotesByCar = pitNotesViewByCar(settings);
+  collectorState.raceMessages = raceMessageLog.slice(-RACE_MESSAGES_IN_STATE);
   broadcastState();
   try {
     const win = createLiveWindow();
@@ -1699,6 +1967,7 @@ async function startCollector(url) {
     await pollLivePage();
     if (collectorState.status !== 'finished') {
       pollTimer = setInterval(pollLivePage, Number(settings.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS));
+      startBackupTimer();
     }
   } catch (error) { collectorState.status = 'error'; collectorState.message = 'Failed to start live collector.'; addError(error, 'startCollector'); broadcastState(); }
 }
@@ -1709,6 +1978,7 @@ async function startCollector(url) {
 function stopCollector(closeLiveWindow = true) {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = null;
+  stopBackupTimer();
   if (closeLiveWindow && liveWindow && !liveWindow.isDestroyed()) {
     shouldCloseLiveWindow = true;
     liveWindow.close();
@@ -1719,7 +1989,7 @@ function stopCollector(closeLiveWindow = true) {
 
 function handleTrusted(channel, handler) {
   ipcMain.handle(channel, (event, ...args) => {
-    const windows = [mainWindow, ...additionalDashboardWindows.values(), ...graphWindowsByCar.values()];
+    const windows = [mainWindow, ...additionalDashboardWindows.values(), ...graphWindowsByCar.values(), ...driverWindowsByCar.values()];
     if (!trustedSender(event, windows, path.resolve(__dirname, '../renderer'))) throw new Error('Untrusted IPC sender');
     return handler(event, ...args);
   });
@@ -1738,9 +2008,15 @@ handleTrusted('settings:set', (_event, settings) => {
   const conditionPhaseCounter = conditionChanged
     ? Math.max(1, Number(previous.conditionPhaseCounter) || 1) + 1
     : previous.conditionPhaseCounter;
+  // Any name that differs from the stored one was typed by the user.
+  const requestedSessionName = settings?.sessionName === undefined
+    ? previous.sessionName
+    : String(settings.sessionName ?? '').trim().slice(0, 120);
   const merged = normalizeSettings({
     ...previous,
     ...settings,
+    sessionName: requestedSessionName,
+    sessionNameAuto: requestedSessionName === previous.sessionName ? previous.sessionNameAuto : false,
     trackCondition: requestedCondition,
     conditionPhaseCounter,
     conditionPhaseId: conditionChanged
@@ -1751,6 +2027,12 @@ handleTrusted('settings:set', (_event, settings) => {
   // unusably fast/slow collector.
   merged.pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
   saveSettings(merged);
+  if (requestedSessionName !== previous.sessionName) {
+    collectorState.sessionNameSetting = merged.sessionName;
+    // A manual name applies to the running session straight away.
+    if (merged.sessionName && collectorState.session) collectorState.session = { ...collectorState.session, sessionName: merged.sessionName };
+    broadcastState();
+  }
   try { appendTrackConditionEvent(previous, merged); } catch (error) { addError(error, 'appendTrackConditionEvent'); }
   syncAdditionalDashboardWindows(merged);
   if (previous.theme !== merged.theme) {
@@ -1764,6 +2046,8 @@ handleTrusted('settings:set', (_event, settings) => {
     const lapHistory = loadExistingHistory(merged);
     loadExistingPitStates(merged);
     loadExistingGapMemory(merged);
+    collectorState.pitNotesByCar = pitNotesViewByCar(merged);
+    collectorState.raceMessages = raceMessageLog.slice(-RACE_MESSAGES_IN_STATE);
     const sessionTiming = updateSessionTiming(null, {}, lapHistory);
     collectorState = {
       ...collectorState,
@@ -1812,6 +2096,7 @@ handleTrusted('collector:stop', async (event) => {
 handleTrusted('collector:getState', (event) => stateForRenderer(event.sender, true));
 handleTrusted('collector:openLiveWindow', () => { if (liveWindow && !liveWindow.isDestroyed()) { liveWindow.show(); liveWindow.focus(); return true; } return false; });
 handleTrusted('graphs:open', (_event, carNumber) => openGraphsWindow(carNumber));
+handleTrusted('drivers:open', (_event, carNumber) => openDriversWindow(carNumber));
 async function updateFuelSettingsAndState(payload = {}) {
   if (!FUEL_ESTIMATION_ENABLED) throw new Error('Fuel estimation is temporarily disabled.');
   const settings = loadSettings();
@@ -1832,7 +2117,7 @@ async function updateFuelSettingsAndState(payload = {}) {
   const updated = { ...settings, fuelByCar: { ...settings.fuelByCar, [car]: config } };
   saveSettings(updated);
   fuelStates.set(car, state);
-  snapshotWriter.write(path.join(ensureStorage(updated), 'fuel_state.json'), JSON.stringify(Object.fromEntries(fuelStates)));
+  snapshotWriter.write(path.join(ensureDataFolder(updated), 'fuel_state.json'), JSON.stringify(Object.fromEntries(fuelStates)));
   await snapshotWriter.flush();
   rebuildCollectorDerivedState(updated);
   return updated;
@@ -1841,6 +2126,22 @@ handleTrusted('fuel:update', async (event, payload = {}) => {
   const updated = await updateFuelSettingsAndState(payload);
   broadcastState();
   return { settings: updated, state: stateForRenderer(event.sender) };
+});
+// Saves the engineer notes of the latest detected pit stop of a followed car.
+handleTrusted('pitNotes:save', (event, payload = {}) => {
+  const settings = loadSettings();
+  const car = String(payload.carNumber || '').trim();
+  const reply = (extra) => ({ ...extra, state: stateForRenderer(event.sender) });
+  if (!normalizeFollowedCars(settings).includes(car)) return reply({ ok: false, error: 'Select a followed car.' });
+  const checked = validatePitNotesSave(serviceStates.get(car)?.events || [], String(payload.eventId || ''), payload.notes);
+  if (!checked.ok) return reply({ ok: false, error: checked.error });
+  const stop = serviceStates.get(car).events.at(-1);
+  pitNotesStore[car] = { ...(pitNotesStore[car] || {}),
+    [stop.id]: { ...checked.notes, stopNumber: stop.stopNumber ?? null, savedAt: new Date().toISOString() } };
+  atomicWriteFile(fs, path.join(ensureDataFolder(settings), 'pit_notes.json'), JSON.stringify({ version: 1, cars: pitNotesStore }, null, 2));
+  collectorState.pitNotesByCar = pitNotesViewByCar(settings);
+  broadcastState();
+  return reply({ ok: true });
 });
 handleTrusted('laps:updateStatus', (event, payload) => {
   const result = updateStoredLapManualStatus(payload);
@@ -1851,7 +2152,8 @@ handleTrusted('laps:updateStatus', (event, payload) => {
 // The always-overwritten "latest_*" files are written by saveLatestSnapshot().
 handleTrusted('export:current', async () => {
   const settings = loadSettings();
-  const folder = ensureStorage(settings);
+  const folder = path.join(ensureStorage(settings), EXPORTS_FOLDER);
+  fs.mkdirSync(folder, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const jsonPath = path.join(folder, `live_rows_${timestamp}.json`);
   const csvPath = path.join(folder, `live_rows_${timestamp}.csv`);
@@ -1861,7 +2163,38 @@ handleTrusted('export:current', async () => {
   fs.writeFileSync(jsonPath, JSON.stringify(storageRows, null, 2));
   fs.writeFileSync(csvPath, toCsvRows(storageRows));
   fs.writeFileSync(historyPath, JSON.stringify({ session: collectorState.session, lapHistory: collectorState.lapHistory }, null, 2));
-  return { jsonPath, csvPath, historyPath };
+  // Also render the report PDFs from the data collected so far. They use the
+  // same file names as the end-of-session reports, which replace them on stop.
+  const pdfPaths = [];
+  let pdfError = '';
+  if ((collectorState.lapHistory || []).length) {
+    try {
+      await snapshotWriter.flush();
+      const now = new Date().toISOString();
+      const reportContext = storageContext(settings, { session: collectorState.session || {} }, now);
+      const result = await writeStintStateAndReports(settings, reportContext, collectorState.rows || [], { preview: true, finishedAt: now });
+      const eventPdfs = (result.generatedEventSummaries || []).map((report) => report.pdfPath).filter(Boolean);
+      const stintPdfs = (result.generatedStintReports || []).map((report) => report.pdfPath).filter(Boolean);
+      pdfPaths.push(...(eventPdfs.length ? eventPdfs : stintPdfs));
+    } catch (error) {
+      pdfError = error?.message || String(error);
+      addError(error, 'export-pdf');
+    }
+  }
+  // Excel workbook: green-flag laps, all laps, drivers, stints, pit stops with
+  // notes, the whole field and charts. Built from the data already in memory.
+  let xlsxPath = '';
+  let xlsxError = '';
+  try {
+    const workbook = buildExportWorkbook(settings);
+    xlsxPath = path.join(folder, `session_${timestamp}.xlsx`);
+    await fs.promises.writeFile(xlsxPath, workbook);
+  } catch (error) {
+    xlsxPath = '';
+    xlsxError = error?.message || String(error);
+    addError(error, 'export-xlsx');
+  }
+  return { jsonPath, csvPath, historyPath, xlsxPath, xlsxError, pdfPaths, pdfError };
 });
 
 // Electron app startup. Shutdown behavior is registered through appLifecycle
@@ -1874,7 +2207,8 @@ app.whenReady().then(() => {
     dialog,
     autoUpdater,
     getParentWindow: () => mainWindow,
-    onBeforeQuitAndInstall: () => appLifecycle.beginQuit()
+    onBeforeQuitAndInstall: () => appLifecycle.beginQuit(),
+    openExternal: (url) => shell.openExternal(url)
   });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

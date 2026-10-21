@@ -1,6 +1,6 @@
 {
   "name": "mstc-dashboard",
-  "version": "2.0.2",
+  "version": "2.2.0-beta.3",
   "description": "Electron race-engineering dashboard for live timing, pace analysis and pit strategy.",
   "main": "src/main/main.js",
   "scripts": {
@@ -74,6 +74,10 @@
       ],
       "icon": "docs/mstc_app_icons/electron-builder/build/icon.icns",
       "category": "public.app-category.sports",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "docs/mstc_app_icons/electron-builder/build/entitlements.mac.plist",
+      "entitlementsInherit": "docs/mstc_app_icons/electron-builder/build/entitlements.mac.plist",
       "artifactName": "MSTC-Dashboard-${version}-${arch}.${ext}"
     }
   },

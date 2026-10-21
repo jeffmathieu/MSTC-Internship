@@ -5,6 +5,45 @@ function resolveSessionFolder(configuredFolder, fallbackFolder) {
   return String(configuredFolder || '').trim() || String(fallbackFolder || '').trim();
 }
 
+// Machine-readable session files live in data/ so the session folder itself
+// only shows the stints/ reports and user exports. Older sessions kept these
+// files in the folder root; they are moved on first use so resuming still works.
+const DATA_FOLDER = 'data';
+const EXPORTS_FOLDER = 'exports';
+const LEGACY_DATA_FILE = new RegExp('^(?:'
+  + 'analytics_summary\\.json|fuel_state\\.json|gap_history\\.jsonl|gap_state\\.json'
+  + '|lap_history\\.(?:csv|jsonl)(?:\\.corrupt\\.json)?|lap_prediction(?:_car-[^/\\\\]+)?\\.json'
+  + '|latest_live_rows\\.(?:csv|json)|parser_debug\\.json|pit_event_state\\.json|pit_events\\.jsonl'
+  + '|pitstop_plan(?:_car-[^/\\\\]+)?\\.json|race_control_events\\.jsonl|session_metadata\\.json'
+  + '|stint_state\\.json|timing_feed_state\\.json|track_condition_(?:events\\.jsonl|state\\.json)'
+  + ')$');
+const LEGACY_EXPORT_FILE = /^(?:live_rows_[\dTZ-]+\.(?:csv|json)|lap_history_[\dTZ-]+\.json)$/;
+const preparedFolders = new Set();
+
+function moveLegacyFiles(fs, path, from, to, matches) {
+  let names = [];
+  try { names = fs.readdirSync(from); } catch { return; }
+  const wanted = names.filter((name) => matches(name));
+  if (!wanted.length) return;
+  fs.mkdirSync(to, { recursive: true });
+  for (const name of wanted) {
+    const target = path.join(to, name);
+    try { if (!fs.existsSync(target)) fs.renameSync(path.join(from, name), target); } catch { /* keep the original in place */ }
+  }
+}
+
+// Returns <session>/data, creating it and migrating legacy root files once.
+function prepareDataFolder(fs, path, sessionFolder) {
+  const dataFolder = path.join(sessionFolder, DATA_FOLDER);
+  fs.mkdirSync(dataFolder, { recursive: true });
+  if (!preparedFolders.has(sessionFolder)) {
+    preparedFolders.add(sessionFolder);
+    moveLegacyFiles(fs, path, sessionFolder, dataFolder, (name) => LEGACY_DATA_FILE.test(name));
+    moveLegacyFiles(fs, path, sessionFolder, path.join(sessionFolder, EXPORTS_FOLDER), (name) => LEGACY_EXPORT_FILE.test(name));
+  }
+  return dataFolder;
+}
+
 // Recover fields the old parser missed, without modifying the source archive.
 // A wrapped absolute count is unambiguous evidence for this rotating schema.
 function recoverStoredTiming(entries) {
@@ -126,7 +165,16 @@ function resolveFinalReportSettings(settings = {}, metadata = {}, history = []) 
 // Report generation time is unrelated to when the car stopped driving. Prefer
 // an already saved endpoint, otherwise the last confirmed source observation.
 function resolveSessionEndAt(metadata = {}, history = [], lastObservedAt = null, pitEvents = []) {
-  if (Number.isFinite(Date.parse(metadata.finishedAt))) return new Date(metadata.finishedAt).toISOString();
+  const dataTimes = [...history.map((lap) => lap.recordedAt || lap.collectedAt),
+    ...pitEvents.flatMap((event) => [event.entryAt, event.exitAt])]
+    .map((value) => Date.parse(value)).filter(Number.isFinite);
+  if (Number.isFinite(Date.parse(metadata.finishedAt))) {
+    const stored = Date.parse(metadata.finishedAt);
+    // Laps or pit stops recorded after the stored endpoint mean the folder was
+    // resumed (for example after a red flag): the session end moves with them.
+    const latestData = dataTimes.length ? Math.max(...dataTimes) : null;
+    return new Date(latestData !== null && latestData > stored + 2000 ? latestData : stored).toISOString();
+  }
   const observations = [metadata.lastUpdatedAt, lastObservedAt,
     ...history.map((lap) => lap.recordedAt || lap.collectedAt),
     ...pitEvents.flatMap((event) => [event.entryAt, event.exitAt])]
@@ -134,5 +182,5 @@ function resolveSessionEndAt(metadata = {}, history = [], lastObservedAt = null,
   return observations.length ? new Date(observations.reduce((latest, at) => Math.max(latest, at))).toISOString() : null;
 }
 
-module.exports = { resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalReportSettings,
+module.exports = { DATA_FOLDER, EXPORTS_FOLDER, prepareDataFolder, resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalReportSettings,
   recoverStoredTiming, readJsonLines, appendJsonLines, atomicWriteFile, resolveSessionEndAt };

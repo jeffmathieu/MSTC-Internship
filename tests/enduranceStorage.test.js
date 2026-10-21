@@ -32,7 +32,7 @@ module.exports = (async () => {
     assert.strictEqual(collector.getState().lapHistory[0].manualLapStatus, 'track-limits');
     assert.strictEqual(collector.getState().lapHistory[1].manualLapStatus, '');
     await collector.flush();
-    const data = loadSessionHistory({ fs, jsonlPath: path.join(folder, 'lap_history.jsonl'), identityForLap: lapIdentity });
+    const data = loadSessionHistory({ fs, jsonlPath: path.join(folder, 'data', 'lap_history.jsonl'), identityForLap: lapIdentity });
     assert.strictEqual(data.entries.length, 3);
 
     // Exercise the actual worker, archive reload and PDF engine, not a mocked
@@ -47,7 +47,7 @@ module.exports = (async () => {
     } finally { clearInterval(timer); }
     assert.ok(ticks > 0, 'PDF work does not block the collector event loop');
     assert.ok(report.summaries.length >= 2);
-    const json = JSON.parse(fs.readFileSync(path.join(folder, 'stints/car-33/RACE_SUMMARY.json'), 'utf8'));
+    const json = JSON.parse(fs.readFileSync(path.join(folder, 'stints/car-33/data/RACE_SUMMARY.json'), 'utf8'));
     assert.strictEqual(json.raceSummary.totalLaps, 3);
     assert.strictEqual(fs.readFileSync(report.summaries[0].pdfPath).subarray(0, 5).toString(), '%PDF-');
   } finally {

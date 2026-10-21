@@ -46,7 +46,7 @@ function viewForCar(summary, car, graphs) {
     dashboardAnalysis: undefined, comparisonView: undefined, adjacentClassBattles: undefined,
     gapModel: summary.gapModel ? { ...summary.gapModel, viewsByCar: own(summary.gapModel.viewsByCar) } : null,
     ...Object.fromEntries(['timingHighlightsByCar', 'adjacentClassBattlesByCar', 'comparisonViewsByCar',
-      'modeAdjacentViewsByCar', 'dashboardAnalysisByCar'].map((key) => [key, own(summary[key])])) };
+      'modeAdjacentViewsByCar', 'dashboardAnalysisByCar', 'driverOverviewByCar'].map((key) => [key, own(summary[key])])) };
 }
 
 function createRendererChannel() {
@@ -70,11 +70,12 @@ function createRendererChannel() {
     const nextStrip = graphs ? [] : summary.timingHighlightsByCar?.[car]?.lapStrip || [];
     const payload = {
       ...compactView(Object.fromEntries(Object.entries(state).filter(([key]) => !['lapHistory', 'analyticsSummary',
-        'stintState', 'gapMemory', 'pitstopPlan', 'lapPrediction', 'pitstopPlansByCar', 'lapPredictionsByCar'].includes(key)))),
+        'stintState', 'gapMemory', 'pitstopPlan', 'lapPrediction', 'pitstopPlansByCar', 'lapPredictionsByCar', 'pitNotesByCar'].includes(key)))),
       analyticsSummary: compactView(viewForCar(summary, car, graphs)),
       stintState: graphs ? null : compactView({ cars: { [car]: state.stintState?.cars?.[car] } }),
       pitstopPlansByCar: graphs ? {} : compactView({ [car]: state.pitstopPlansByCar?.[car] }),
       lapPredictionsByCar: graphs ? {} : compactView({ [car]: state.lapPredictionsByCar?.[car] }),
+      pitNotesByCar: graphs ? {} : { [car]: state.pitNotesByCar?.[car] },
       historyCount: state.lapHistory?.length || 0,
       historyPatch: arrayPatch(history, nextHistory, reset),
       stripPatch: arrayPatch(strip, nextStrip, reset),

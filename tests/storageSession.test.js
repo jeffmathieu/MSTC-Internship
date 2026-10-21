@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 const { lapIdentity } = require('../src/shared/storageSchema');
 const { resolveSessionFolder, loadSessionHistory, loadStoredJson, resolveFinalReportSettings,
-  readJsonLines, appendJsonLines, atomicWriteFile, resolveSessionEndAt } = require('../src/shared/storageSession');
+  readJsonLines, appendJsonLines, atomicWriteFile, resolveSessionEndAt, prepareDataFolder } = require('../src/shared/storageSession');
 
 assert.strictEqual(resolveSessionFolder('/race/zolder', '/fallback'), '/race/zolder');
 assert.strictEqual(resolveSessionFolder('', '/fallback'), '/fallback');
@@ -78,12 +78,32 @@ try {
   assert.strictEqual(resolveSessionEndAt({ lastUpdatedAt: end }, [{ collectedAt: '2026-09-08T12:04:00Z' }]), end);
   assert.strictEqual(resolveSessionEndAt({ finishedAt: end }, [], '2026-10-08T12:00:00Z'), end,
     'regenerating a finalized archive keeps the stored endpoint');
-  assert.strictEqual(resolveSessionEndAt({}, [{ collectedAt: end }]), end, 'old archives fall back to the last lap observation');
+  assert.strictEqual(resolveSessionEndAt({ finishedAt: end }, [{ collectedAt: '2026-09-08T12:03:00Z' }], null,
+  [{ entryAt: '2026-09-08T12:05:59Z' }]), end, 'data recorded before the stored endpoint changes nothing');
+assert.strictEqual(resolveSessionEndAt({ finishedAt: end }, [{ collectedAt: '2026-09-08T12:04:00Z' }], null,
+  [{ entryAt: '2026-09-08T12:30:00Z', exitAt: null }]), '2026-09-08T12:30:00.000Z',
+  'a pit stop recorded after the stored endpoint means the session resumed, so the end moves with it');
+assert.strictEqual(resolveSessionEndAt({}, [{ collectedAt: end }]), end, 'old archives fall back to the last lap observation');
   assert.strictEqual(resolveSessionEndAt({}, []), null, 'an empty archive has no invented endpoint');
   fs.writeFileSync(pitPlanPath, '{invalid json}');
   assert.throws(() => loadStoredJson(fs, pitPlanPath), SyntaxError);
 } finally {
   fs.rmSync(folder, { recursive: true, force: true });
+}
+
+// Machine-readable files live in data/; legacy root files migrate once and
+// unrelated user files are never touched.
+const legacy = fs.mkdtempSync(path.join(os.tmpdir(), 'mstc-layout-'));
+try {
+  for (const name of ['lap_history.jsonl', 'lap_history.jsonl.corrupt.json', 'pitstop_plan_car-33.json', 'live_rows_2026-10-16T13-41-00-000Z.csv', 'notes.json'])
+    fs.writeFileSync(path.join(legacy, name), name);
+  const data = prepareDataFolder(fs, path, legacy);
+  assert.strictEqual(data, path.join(legacy, 'data'));
+  assert.deepStrictEqual(fs.readdirSync(data).sort(), ['lap_history.jsonl', 'lap_history.jsonl.corrupt.json', 'pitstop_plan_car-33.json']);
+  assert.deepStrictEqual(fs.readdirSync(path.join(legacy, 'exports')), ['live_rows_2026-10-16T13-41-00-000Z.csv']);
+  assert.ok(fs.existsSync(path.join(legacy, 'notes.json')), 'unknown files stay where the user put them');
+} finally {
+  fs.rmSync(legacy, { recursive: true, force: true });
 }
 
 console.log('Storage session resume tests passed.');

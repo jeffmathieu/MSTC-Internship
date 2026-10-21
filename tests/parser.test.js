@@ -259,6 +259,30 @@ const rejectedHistoryTitle = parseSessionInfo({
 });
 assert.notStrictEqual(rejectedHistoryTitle.sessionName, 'Leader history From lap 1 to lap 12');
 
+// The heading container also holds the connection badge, flag banner and timer.
+const chromeBody = 'LIVE Green flag To go: 10:10 EuroNASCAR V8GP - Free Practice 1 Show class All Highlight nr POS NR';
+for (const sessionName of ['LIVE Green flag To go: 10:10 EuroNASCAR V8GP - Free Practice 1', 'Green To go: 10:10 EuroNASCAR V8GP - Free Practice 1', '']) {
+  const info = parseSessionInfo({ bodyText: chromeBody, location: 'https://livetiming.getraceresults.com/', sessionFields: { sessionName } });
+  assert.strictEqual(info.sessionName, 'EuroNASCAR V8GP - Free Practice 1', 'page chrome is not part of the session name');
+  assert.strictEqual(info.timeToGo, '10:10');
+}
+assert.strictEqual(parseSessionInfo({ bodyText: 'x', sessionFields: { sessionName: 'Green Hell Race - Practice' } }).sessionName, 'Green Hell Race - Practice');
+
+// GetRaceResults has a dedicated heatName element; penalty messages in the page
+// text must never become the session name.
+const heatNamed = parseSessionInfo({
+  bodyText: 'Finish Belcar Endurance Championship - Race Show class All Car 34 - drive through penalty in Race',
+  location: 'https://livetiming.getraceresults.com/demo',
+  sessionFields: { heatName: 'Belcar Endurance Championship - Race', screenMessages: ['Car #34 - drive through penalty', ' '] }
+});
+assert.strictEqual(heatNamed.sessionName, 'Belcar Endurance Championship - Race');
+assert.strictEqual(heatNamed.sessionNameSource, 'heat-name');
+assert.deepStrictEqual(heatNamed.screenMessages, ['Car #34 - drive through penalty'], 'visible screen messages are passed on');
+assert.deepStrictEqual(parseSessionInfo({ bodyText: 'x', sessionFields: { classFilter: [' GT3 ', ''] } }).classFilter, ['GT3'], 'a class filter on the page is reported');
+assert.deepStrictEqual(heatNamed.classFilter, [], 'no filter means All');
+assert.strictEqual(parseSessionInfo({ bodyText: 'x', sessionFields: { heatName: 'Not connected to the LiveTiming server' } }).sessionNameSource, undefined,
+  'connection messages in the title slot are ignored');
+
 const oneClassRows = applySingleClassFallback([
   { position: 1, carNumber: '555', className: '' },
   { position: 2, carNumber: '540', className: '' }
@@ -266,6 +290,10 @@ const oneClassRows = applySingleClassFallback([
 assert.deepStrictEqual(oneClassRows.map((row) => row.className), ['Overall', 'Overall']);
 assert.deepStrictEqual(oneClassRows.map((row) => row.classPosition), [1, 2]);
 const existingClassRows = [{ position: 1, carNumber: '1', className: 'A' }, { position: 2, carNumber: '2', className: '' }];
-assert.strictEqual(applySingleClassFallback(existingClassRows), existingClassRows, 'mixed/real class data is not rewritten');
+const allClassedRows = [{ position: 1, carNumber: '1', className: 'A' }, { position: 2, carNumber: '2', className: 'B' }];
+assert.strictEqual(applySingleClassFallback(allClassedRows), allClassedRows, 'fully classed data is not rewritten');
+const mixedRows = applySingleClassFallback([...existingClassRows, { position: 3, carNumber: '3', className: '' }]);
+assert.deepStrictEqual(mixedRows.map((row) => row.className), ['A', 'No class', 'No class'], 'cars without class form their own class');
+assert.deepStrictEqual(mixedRows.map((row) => row.classPosition), [undefined, 1, 2], 'no-class cars are ranked among themselves');
 
 console.log('Parser tests passed.');

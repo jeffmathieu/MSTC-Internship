@@ -183,14 +183,121 @@ function lapChart(page, x, y, width, height, title, laps, key, average, statusKe
   page.text(x + width - 14, y + 8, `Lap ${points.at(-1).lapNumber || points.length}`, 6.5, C.muted, false, 'end');
 }
 
+// ---- Pit stop notes on the stint page ---------------------------------------
+// A stint ends when the driver changes, so one stint can contain several pit
+// stops. Their notes share one panel next to the lap chart; when they do not fit
+// at a readable size the panel shows excerpts and a continuation page prints
+// every note in full.
+const wrapAll = (text, maxChars) => {
+  const lines = [];
+  let line = '';
+  for (const word of String(text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)) {
+    if ((line + ' ' + word).trim().length > maxChars && line) { lines.push(line); line = ''; }
+    line = (line + ' ' + word).trim();
+    while (line.length > maxChars) { lines.push(line.slice(0, maxChars)); line = line.slice(maxChars); }
+  }
+  if (line) lines.push(line);
+  return lines;
+};
+
+function stopsForNotes(stint) {
+  const list = [...(stint.pitStopsDuring || [])];
+  const end = stint.endPitStop;
+  if (end && !list.some((stop) => (end.id && stop.id === end.id)
+    || (end.stopNumber != null && stop.stopNumber === end.stopNumber && stop.lapNumber === end.lapNumber))) list.push(end);
+  return list;
+}
+
+const hasStopNotes = (stint) => stopsForNotes(stint).some((stop) => stop.notes);
+
+// One stop as drawable lines. maxTextLines caps each note text (null = full text).
+function stopBlock(stop, maxChars, maxTextLines, ordinal) {
+  const yes = (value) => (value ? 'yes' : 'no');
+  const head = `Stop ${stop.stopNumber ?? ordinal}${stop.lapNumber ? ` · lap ${stop.lapNumber}` : ''}${finite(stop.durationMs) ? ` · ${duration(stop.durationMs)}` : ''}${stop.closed === false ? ' · in progress' : ''}`;
+  const notes = stop.notes;
+  if (!notes) return { head, lines: [{ text: 'No notes saved', muted: true }], truncated: false };
+  const lines = [{ text: `Fuel added: ${yes(notes.fuelAdded)}   Tyres changed: ${yes(notes.tyresChanged)}   Tyre set: ${notes.tyreSet || '-'}`, bold: true }];
+  let truncated = false;
+  [['Driver notes', notes.driverNotes], ['Pit stop notes', notes.pitNotes]].forEach(([label, text]) => {
+    if (!text) return;
+    const wrapped = wrapAll(`${label}: ${text}`, maxChars);
+    if (maxTextLines && wrapped.length > maxTextLines) {
+      truncated = true;
+      wrapped.length = maxTextLines;
+      wrapped[maxTextLines - 1] = `${wrapped[maxTextLines - 1].replace(/.{0,2}$/, '')}…`;
+    }
+    wrapped.forEach((line) => lines.push({ text: line }));
+  });
+  return { head, lines, truncated };
+}
+
+// Chooses full text when it fits the panel, otherwise equal excerpts per stop.
+function planStopNotes(stops, maxChars, capacityLines) {
+  const full = stops.map((stop, i) => stopBlock(stop, maxChars, null, i + 1));
+  const used = (blocks) => blocks.reduce((sum, block) => sum + 1 + block.lines.length, 0) + Math.max(0, blocks.length - 1) * 0.6;
+  if (used(full) <= capacityLines) return { blocks: full, truncated: false };
+  const perText = Math.max(1, Math.floor((capacityLines - stops.length * 2.6) / (stops.length * 2)));
+  const cut = stops.map((stop, i) => stopBlock(stop, maxChars, perText, i + 1));
+  return { blocks: cut, truncated: true };
+}
+
+const NOTES_PANEL_WIDTH = 244;
+const NOTE_LINE = 8.1;
+
+function notesPanel(page, x, y, width, height, stint) {
+  const stops = stopsForNotes(stint);
+  const plan = planStopNotes(stops, 60, Math.floor((height - 40) / NOTE_LINE));
+  page.panel(x, y, width, height, `Pit stop notes${stops.length > 1 ? ` (${stops.length} stops)` : ''}`);
+  let cursor = y + height - 32;
+  plan.blocks.forEach((block, index) => {
+    if (index) cursor -= NOTE_LINE * 0.6;
+    page.text(x + 10, cursor, block.head, 6.8, C.blue, true, 'start', width - 20);
+    block.lines.forEach((line) => {
+      cursor -= NOTE_LINE;
+      page.text(x + 10, cursor, line.text, 6.2, line.muted ? C.muted : C.ink, Boolean(line.bold), 'start', width - 20);
+    });
+    cursor -= NOTE_LINE;
+  });
+  if (plan.truncated) page.text(x + width - 10, y + 7, 'Shortened here; full notes on the next page', 5.6, C.muted, false, 'end');
+  return plan.truncated;
+}
+
+// Full-width continuation pages with every note in full.
+function stopNotesPages(payload, stint, index) {
+  const stops = stopsForNotes(stint);
+  if (!hasStopNotes(stint) || !planStopNotes(stops, 60, Math.floor(150 / NOTE_LINE)).truncated) return [];
+  const pages = [];
+  const detail = `${stint.driverName || ''}  |  Car stint ${stint.stintNumber}`;
+  const make = () => new Page(payload, pages.length ? 'PIT STOP NOTES (CONTINUED)' : 'PIT STOP NOTES', detail);
+  let page = make(), cursor = PAGE_H - 90;
+  const lineHeight = 11.5;
+  stops.forEach((stop, i) => {
+    const block = stopBlock(stop, 150, null, i + 1);
+    if (cursor - (1 + Math.min(block.lines.length, 3)) * lineHeight < 40) { pages.push(page); page = make(); cursor = PAGE_H - 90; }
+    page.text(40, cursor, block.head, 9, C.blue, true);
+    block.lines.forEach((line) => {
+      cursor -= lineHeight;
+      if (cursor < 36) { pages.push(page); page = make(); cursor = PAGE_H - 90; }
+      page.text(52, cursor, line.text, 8, line.muted ? C.muted : C.ink, Boolean(line.bold), 'start', PAGE_W - 92);
+    });
+    cursor -= lineHeight * 1.6;
+  });
+  pages.push(page);
+  pages.forEach((item) => item.footer(`Pit stop notes | stint ${index} | page ${pages.indexOf(item) + 1}/${pages.length}`));
+  return pages;
+}
+
 function stintPage(payload, stint, index) {
   const detail = `Driver stint ${stint.driverStintNumber || stint.stintNumber}  |  Car stint ${stint.stintNumber}  |  ${stint.lapNumberSource === 'observed-sequence' ? 'observed laps' : 'laps'} ${stint.startLap || '-'}-${stint.endLap || '-'}`;
-  const page = new Page(payload, stint.driverName, detail), stats = stint.stats || {}, laps = stint.laps || [];
+  const page = new Page(payload, stint.driverName, stint.preliminary ? `PRELIMINARY: stint in progress  |  ${detail}` : detail), stats = stint.stats || {}, laps = stint.laps || [];
   if (stint.endPitStop) {
     const stop = stint.endPitStop;
     page.text(PAGE_W - 28, PAGE_H - 54, `End pit #${stop.stopNumber || '-'}: ${duration(stop.durationMs)} | fuel ${duration(stop.fuelDurationMs)} | pit ${duration(stop.pitDurationMs)} (${deltaDuration(stop.deltaVsTargetMs)} vs target)${rejoin(stop) ? ` | rejoined ${rejoin(stop)}` : ''}`, 6.2, '#FFFFFF', false, 'end', 420);
   }
-  lapChart(page, 28, 328, PAGE_W - 56, 190, 'Lap times', laps, 'lapTimeMs', stats.averageLapMs, 'status');
+  const showNotes = hasStopNotes(stint);
+  const notesWidth = showNotes ? NOTES_PANEL_WIDTH : 0;
+  lapChart(page, 28, 328, PAGE_W - 56 - (showNotes ? notesWidth + 8 : 0), 190, 'Lap times', laps, 'lapTimeMs', stats.averageLapMs, 'status');
+  if (showNotes) notesPanel(page, PAGE_W - 28 - notesWidth, 328, notesWidth, 190, stint);
   const width = (PAGE_W - 72) / 3;
   for (let sector = 1; sector <= 3; sector++) lapChart(page, 28 + (sector - 1) * (width + 8), 184, width, 132, `Sector ${sector}`, laps, `sector${sector}Ms`, stats[`averageSector${sector}Ms`], `sector${sector}Status`);
   page.panel(28, 34, width, 138, 'Stint statistics');
@@ -311,34 +418,10 @@ function graph(page, x, y, width, height, data = {}) {
   });
 }
 
-function notesPages(payload) {
-  const notes = payload.caveats || [];
-  if (!notes.length) return [];
-  const pages = [], makePage = () => new Page(payload, pages.length ? 'TIMING NOTES (CONTINUED)' : 'DATA QUALITY AND TIMING NOTES');
-  let page = makePage(), y = PAGE_H - 95;
-  for (const note of notes) {
-    const words = String(note).split(/\s+/); let line = '';
-    for (const word of words) {
-      if (`${line} ${word}`.trim().length > 125) {
-        page.text(40, y, line, 10); y -= 16; line = '';
-        if (y < 60) { pages.push(page); page = makePage(); y = PAGE_H - 95; }
-      }
-      line = `${line} ${word}`.trim();
-    }
-    page.text(40, y, line, 10); y -= 30;
-    if (y < 60) { pages.push(page); page = makePage(); y = PAGE_H - 95; }
-  }
-  // These inputs remain explicit in portable exports rather than disappearing.
-  page.text(40, y, 'Reference times', 10, C.muted, true);
-  page.text(40, y - 18, Object.entries(payload.referenceTimes || {}).map(([key, value]) => `${key.replace(/Ms$/, '')}: ${value > 0 ? time(value) : '-'}`).join(' | ') || 'Not configured', 8, C.muted);
-  pages.push(page); return pages;
-}
-
 function buildCanonicalReportHtml(payload, includeSummary = false) {
   const pages = [];
   if (includeSummary) pages.push(...overview(payload), ...pitPages(payload));
-  (payload.stints || []).forEach((stint, index) => pages.push(stintPage(payload, stint, index + 1)));
-  if (!(includeSummary && (payload.reportMode || 'race') === 'race')) pages.push(...notesPages(payload));
+  (payload.stints || []).forEach((stint, index) => pages.push(stintPage(payload, stint, index + 1), ...stopNotesPages(payload, stint, index + 1)));
   if (includeSummary) {
     const graphs = payload.raceSummary?.graphs || {};
     if (graphs.driverLaps || graphs.driverPace || graphs.driverSectors) {
@@ -354,11 +437,16 @@ function buildCanonicalReportHtml(payload, includeSummary = false) {
       graph(page, 24, 35, PAGE_W - 48, 490, data); pages.push(page);
     });
   }
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${escape(payload.race?.sessionName)} stint analysis</title>
+  return wrapDocument(payload, pages, 'stint analysis');
+}
+
+// Shared print document: every Page is one A4 landscape sheet.
+function wrapDocument(payload, pages, label) {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escape(payload.race?.sessionName)} ${label}</title>
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
     <style>@page { size: A4 landscape; margin: 0; } * { box-sizing: border-box; } html,body { margin:0; padding:0; }
     .report-page { width:297mm; height:210mm; overflow:hidden; break-after:page; } .report-page:last-child { break-after:auto; }
     .report-page svg { display:block; width:100%; height:100%; } </style></head><body>${pages.map((page) => page.html()).join('')}</body></html>`;
 }
 
-module.exports = { buildCanonicalReportHtml };
+module.exports = { buildCanonicalReportHtml, wrapDocument, Page, graph, C, COLORS, PAGE_W, PAGE_H, time, duration, deltaDuration, finite };

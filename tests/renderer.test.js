@@ -202,6 +202,7 @@ const initialState = {
   }
 };
 
+let lastPitNotesPayload = null;
 const updatedState = {
   ...initialState,
   lapHistory: [
@@ -384,6 +385,7 @@ const liveTiming = {
   openGraphsWindow: async (carNumber) => { graphsOpenCount += 1; lastGraphsCar = carNumber; return true; },
   updateLapStatus: async (payload) => { lastLapStatusPayload = payload; return { ok: true, state: updatedState }; },
   onThemeUpdate: (callback) => { themeUpdate = callback; return () => {}; },
+  savePitNotes: async (payload) => { lastPitNotesPayload = payload; return { ok: true, state: null }; },
   exportCurrent: async () => ({ csvPath: 'rows.csv', jsonPath: 'rows.json', historyPath: 'history.json' }),
   onCollectorUpdate: (callback) => { collectorUpdate = callback; return () => {}; }
 };
@@ -781,6 +783,92 @@ module.exports = (async () => {
   assert.strictEqual(lastSettingsPatch.comparisonCar, '56');
   assert.strictEqual(lastSettingsPatch.pollIntervalMs, 5000);
   assert.strictEqual(lastSettingsPatch.pitRules.pitStopDurationMs, 75000);
+
+  // Pit stop notes: the header button asks for notes after a stop is detected
+  // and settles once they are saved.
+  const notesButton = document.getElementById('open-pit-notes');
+  const stopView = (needsAttention) => ({ latest: { eventId: '13|a', stopNumber: 1, detectedAt: '2026-10-16T14:00:00.000Z', closed: true,
+    driverBefore: 'A', driverAfter: 'B', durationMs: 50000, editable: true, needsAttention, notes: needsAttention ? null : { tyresChanged: true } }, history: [] });
+  collectorUpdate({ ...updatedState, pitNotesByCar: { 13: stopView(true) } });
+  await flushAsync();
+  assert.ok(notesButton.classList.contains('needs-notes'), 'a detected stop without notes colours the notes button');
+  collectorUpdate({ ...updatedState, pitNotesByCar: { 13: stopView(false) } });
+  await flushAsync();
+  assert.ok(!notesButton.classList.contains('needs-notes') && notesButton.classList.contains('has-notes'), 'saved notes clear the colour');
+  await notesButton.trigger('click');
+  assert.strictEqual(document.getElementById('pit-notes-driver-name').textContent, '(A)', 'the stint notes name the driver of the stint that ended');
+  assert.ok(!document.getElementById('pit-notes-modal').classList.contains('hidden'), 'the notes popup is open');
+  document.getElementById('pit-notes-tyreset').value = 'Set 7';
+  await document.getElementById('pit-notes-save').trigger('click');
+  await flushAsync();
+  assert.strictEqual(lastPitNotesPayload.notes.tyreSet, 'Set 7');
+  assert.ok(document.getElementById('pit-notes-modal').classList.contains('hidden'), 'saving closes the notes popup');
+
+  // Class gaps page: every class car with its gap to us (laps + exact time for a
+  // lapped car) and the interval to the car ahead in class.
+  const gapRows = [
+    { position: 1, carNumber: 2, className: 'LMP3', classPosition: 1, lastLap: '2:00.100', eta: '01:10' },
+    { position: 2, carNumber: 13, className: 'LMP3', classPosition: 2, lastLap: '2:00.500', eta: '01:20' },
+    { position: 3, carNumber: 56, className: 'LMP3', classPosition: 3, lastLap: '2:01.000', eta: 'In Pit' },
+    { position: 4, carNumber: 77, className: 'LMP3', classPosition: 4, lastLap: '2:03.000', eta: '01:00' },
+    { position: 5, carNumber: 70, className: 'LMP3', classPosition: 5, lastLap: '2:04.000', eta: '?' },
+    { position: 6, carNumber: 23, className: 'LMP3', classPosition: 6, lastLap: '2:05.000', state: 'RET' },
+    { position: 7, carNumber: 31, className: 'LMP3', classPosition: 7, lastLap: '2:02.000', eta: '01:30' }
+  ];
+  const gapView = { available: true, classCoordinates: [
+    { carNumber: '2', gapToUsMs: -4250, lapGap: 0, estimated: false, source: 'line-crossing-timeline' },
+    { carNumber: '13', gapToUsMs: 0, estimated: false },
+    { carNumber: '56', gapToUsMs: 10000, lapGap: 0, estimated: false, source: 'line-crossing-timeline' },
+    { carNumber: '77', gapToUsMs: 132500, lapGap: 1, estimated: false, source: 'line-crossing-timeline' },
+    { carNumber: '70', gapToUsMs: 251000, lapGap: 2, estimated: true, atLeast: true, source: 'line-crossing-timeline' },
+    { carNumber: '23', gapToUsMs: null, estimated: true, source: 'calibrating' },
+    { carNumber: '31', gapToUsMs: 140000, lapGap: 1, estimated: false, source: 'line-crossing-timeline' }] };
+  collectorUpdate({ ...updatedState, rows: gapRows, timingPageWarning: 'The timing page is filtered on class LMP3.',
+    analyticsSummary: { ...updatedState.analyticsSummary, gapModel: { viewsByCar: { 13: gapView } } } });
+  await flushAsync();
+  const gapTexts = document.getElementById('comparison-tab-gaps').children.map((row) => row.children.map((cell) => cell.textContent));
+  assert.deepStrictEqual(gapTexts[1].slice(0, 3), ['1', '#2', '-4.250'], 'the car ahead in class has a negative gap');
+  assert.strictEqual(gapTexts[2][2], 'OUR CAR');
+  assert.deepStrictEqual(gapTexts[3].slice(2, 4), ['+10.000', '+10.000'], 'the car behind, with its interval to us');
+  assert.strictEqual(gapTexts[3][5], 'In pit');
+  assert.deepStrictEqual(gapTexts[4].slice(2, 4), ['1L · +2:12.500', '+2:02.500'], 'a lapped car keeps its exact time');
+  assert.deepStrictEqual([gapTexts[5][2], gapTexts[5][3], gapTexts[5][5]], ['Out', '—', 'Not moving'],
+    'a car more than a lap overdue at the line (not in the pits) is out');
+  assert.deepStrictEqual([gapTexts[6][2], gapTexts[6][5]], ['Out', 'Retired'], 'retired on the timing page: out, not calibrating');
+  assert.strictEqual(gapTexts[7][3], '+7.500', 'the interval skips the out cars');
+  assert.strictEqual(document.getElementById('collector-message').textContent, 'The timing page is filtered on class LMP3.',
+    'a class filter on the timing page is shown as a warning');
+
+  // Ending a session: a "please wait" overlay shows the current step until the
+  // final reports are written.
+  await document.getElementById('messages-close').trigger('click');
+  collectorUpdate({ ...updatedState, finalizing: { active: true, detail: 'Generating the final reports: stints, overview and debrief…', startedAt: new Date(Date.now() - 65000).toISOString() } });
+  await flushAsync();
+  assert.ok(!document.getElementById('finalizing-overlay').classList.contains('hidden'), 'the overlay is shown while the session ends');
+  assert.strictEqual(document.getElementById('finalizing-detail').textContent, 'Generating the final reports: stints, overview and debrief…');
+  assert.strictEqual(document.getElementById('finalizing-elapsed').textContent, 'Busy for 1:05');
+  collectorUpdate({ ...updatedState, finalizing: null });
+  await flushAsync();
+  assert.ok(document.getElementById('finalizing-overlay').classList.contains('hidden'), 'and hidden when the reports are done');
+
+  // Race control messages: a general message makes the button flash, a message
+  // about this dashboard's car opens the popup by itself.
+  const messagesButton = document.getElementById('open-messages');
+  await document.getElementById('messages-close').trigger('click'); // start from a closed popup
+  const now = new Date().toISOString();
+  const general = { id: 'm1', text: 'Pit lane closed', firstSeenAt: now, lastSeenAt: now, cars: [] };
+  collectorUpdate({ ...updatedState, raceMessages: [general] });
+  await flushAsync();
+  assert.ok(messagesButton.classList.contains('has-unread'), 'a new message makes the messages button flash');
+  assert.ok(document.getElementById('messages-modal').classList.contains('hidden'), 'a general message does not open the popup');
+  const ours = { id: 'm2', text: 'Car #13 - drive through penalty', firstSeenAt: now, lastSeenAt: now, cars: ['13'] };
+  collectorUpdate({ ...updatedState, raceMessages: [general, ours] });
+  await flushAsync();
+  assert.ok(!document.getElementById('messages-modal').classList.contains('hidden'), 'a message about our car opens the popup');
+  assert.strictEqual(document.getElementById('messages-title').textContent, 'Message about car #13');
+  assert.ok(document.getElementById('messages-list').innerHTML !== '' || document.getElementById('messages-list').children.length > 0);
+  await document.getElementById('messages-close').trigger('click');
+  assert.ok(!messagesButton.classList.contains('has-unread') && !messagesButton.classList.contains('car-alert'), 'opened messages count as read');
 
   console.log('Renderer UI tests passed.');
 })().catch((error) => {

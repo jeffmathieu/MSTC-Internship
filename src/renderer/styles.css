@@ -1231,3 +1231,88 @@ body.mode-qualifying .pit-window { display: none; }
   line-height: 1.2;
 }
 #collector-message[hidden] { display: none; }
+
+.setup-hint { margin: 4px 0 12px; font-size: 12px; color: var(--muted, #626a66); }
+
+/* Pit stop notes: the header button changes colour while the latest detected
+   stop has no saved notes yet. */
+.pit-notes-button { position: relative; }
+.pit-notes-button.needs-notes {
+  background: var(--yellow-status);
+  color: #1b201e;
+  border-color: #1b201e;
+  animation: pit-notes-pulse 1.6s ease-in-out infinite;
+}
+.pit-notes-button.has-notes::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1e9f67;
+}
+@keyframes pit-notes-pulse { 50% { box-shadow: 0 0 0 4px rgba(252, 238, 89, .45); } }
+.pit-notes-card { max-height: calc(100vh - 48px); overflow-y: auto; }
+.pit-notes-form { border: 0; margin: 0; padding: 0; min-width: 0; }
+.pit-notes-form:disabled { opacity: .5; }
+.pit-notes-checks { display: flex; gap: 22px; margin-top: 6px; }
+.setup-card label.check { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; font-size: 14px; text-transform: none; cursor: pointer; }
+.pit-notes-card textarea, .pit-notes-card input[type="text"] { width: 100%; font: inherit; padding: 8px 10px; border: 2px solid var(--line); background: var(--control, var(--box)); color: inherit; resize: vertical; }
+.pit-notes-history { margin-top: 10px; }
+.pit-notes-history summary { cursor: pointer; font-weight: 900; font-size: 13px; }
+.pit-notes-old { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--soft-line, var(--line)); font-size: 12.5px; white-space: pre-wrap; }
+.pit-notes-old strong { display: block; margin-bottom: 3px; }
+
+.pit-notes-driver-name { text-transform: none; color: var(--muted, #626a66); font-weight: 800; }
+
+/* Race control messages: yellow flash for unread messages, red for messages
+   that mention the car of this dashboard. */
+.messages-button { position: relative; }
+/* The whole button flashes in the timing site's blue (#3399FF); red when a
+   message mentions the car of this dashboard. */
+.messages-button.has-unread { animation: messages-flash-blue 1s steps(1, end) infinite; }
+.messages-button.car-alert { animation: messages-flash-red 0.8s steps(1, end) infinite; }
+@keyframes messages-flash-blue { 0% { background: #3399ff; border-color: #3399ff; color: #fff; } 50% { background: var(--control, #f7f8f6); border-color: var(--line); color: var(--ink); } }
+@keyframes messages-flash-red { 0% { background: #d94c5f; border-color: #d94c5f; color: #fff; } 50% { background: var(--control, #f7f8f6); border-color: var(--line); color: var(--ink); } }
+.messages-card { max-height: calc(100vh - 48px); overflow-y: auto; }
+/* A message about our car: the popup border flashes red. */
+.messages-card.alert { animation: messages-card-alert 0.8s steps(1, end) infinite; }
+@keyframes messages-card-alert { 0% { border-color: #d94c5f; box-shadow: 0 0 0 6px rgba(217, 76, 95, .55); } 50% { border-color: var(--line); box-shadow: none; } }
+.messages-list { display: grid; gap: 8px; margin-top: 6px; }
+.message-item { padding: 9px 11px; border: 2px solid var(--soft-line, var(--line)); background: var(--box); }
+.message-item.ours { border-color: #d94c5f; background: rgba(217, 76, 95, .1); }
+.message-item.highlight { box-shadow: 0 0 0 3px rgba(217, 76, 95, .35); }
+.message-meta { display: flex; gap: 8px; align-items: center; color: var(--muted, #626a66); font-size: 12px; font-weight: 800; margin-bottom: 3px; }
+.message-tag { padding: 1px 6px; font-size: 11px; font-weight: 900; color: #fff; background: #d94c5f; }
+.message-tag.live { background: #1e9f67; }
+.message-text { font-size: 15px; font-weight: 800; white-space: pre-wrap; }
+.messages-empty { color: var(--muted, #626a66); font-weight: 750; padding: 10px 0; }
+
+/* Class gaps page in the comparison block. */
+#comparison-tab-gaps { grid-auto-rows: 24px; row-gap: 2px; overflow-y: auto; overscroll-behavior: contain; }
+.gaps-row { display: grid; grid-template-columns: 34px 56px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .9fr); align-items: center; column-gap: 10px; font-variant-numeric: tabular-nums; }
+.gaps-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 800; }
+.gaps-row.gaps-head > span { color: var(--muted); font-size: 10.5px; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; }
+.gaps-row.is-our-car { background: var(--current-row-bg, rgba(49, 95, 199, .12)); }
+.gaps-row.is-out > span { color: var(--muted, #626a66); }
+.gaps-row .gap-ahead { color: #d94c5f; }
+.gaps-row .gap-behind { color: #1e9f67; }
+.gaps-row .gap-muted { color: var(--muted); font-weight: 700; }
+.gaps-note { color: var(--muted); font-size: 11px; font-weight: 700; padding-top: 4px; }
+
+.car-status-tag { font-size: 11px; font-weight: 900; letter-spacing: .03em; color: var(--muted, #626a66); }
+.car-status-tag.pit { color: #3399ff; }
+
+/* "Ending the session" overlay while the final reports are written. */
+.finalizing-overlay { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--modal-overlay, rgba(10, 14, 20, .55)); }
+.finalizing-overlay.hidden { display: none; }
+.finalizing-card { width: min(520px, 92vw); padding: 30px 32px 24px; background: var(--box); border: 3px solid var(--line); text-align: center; }
+.finalizing-card h1 { margin: 16px 0 6px; font-size: 24px; }
+.finalizing-detail { margin: 0 0 14px; font-size: 15px; font-weight: 800; min-height: 1.4em; }
+.finalizing-warning { margin: 0; padding: 8px 10px; background: rgba(230, 173, 47, .18); border: 2px solid #e6ad2f; font-weight: 900; }
+.finalizing-elapsed { margin: 10px 0 0; color: var(--muted, #626a66); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.finalizing-spinner { width: 54px; height: 54px; margin: 0 auto; border-radius: 50%; border: 6px solid var(--soft-line, #d3d8d4); border-top-color: #3399ff; animation: finalizing-spin .9s linear infinite; }
+@keyframes finalizing-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .finalizing-spinner { animation-duration: 3s; } }

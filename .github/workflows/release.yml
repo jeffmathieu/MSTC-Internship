@@ -65,19 +65,100 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Build release files
-        run: ${{ matrix.build-command }}
+      # Code signing is used when the secrets exist (see docs/CODE_SIGNING.md) and
+      # skipped otherwise, so releases keep building before certificates are bought.
+      - name: Configure code signing
+        id: signing
+        shell: bash
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          # Future macOS signing/notarization secrets:
-          # CSC_LINK: ${{ secrets.MAC_CERTIFICATE }}
-          # CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
-          # APPLE_ID: ${{ secrets.APPLE_ID }}
-          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # Future Windows signing secrets:
-          # WIN_CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
-          # WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          MAC_CERTIFICATE: ${{ secrets.MAC_CERTIFICATE }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_CERTIFICATE_PROFILE: ${{ secrets.AZURE_CERTIFICATE_PROFILE }}
+          AZURE_PUBLISHER_NAME: ${{ secrets.AZURE_PUBLISHER_NAME }}
+        run: |
+          args=""
+          if [ "${{ matrix.platform }}" = "macOS" ]; then
+            if [ -n "$MAC_CERTIFICATE" ]; then
+              echo "macOS: signing with the Developer ID certificate."
+              if [ -n "$APPLE_API_KEY_BASE64" ]; then
+                key_file="$RUNNER_TEMP/apple-api-key.p8"
+                echo "$APPLE_API_KEY_BASE64" | base64 --decode > "$key_file"
+                echo "APPLE_API_KEY=$key_file" >> "$GITHUB_ENV"
+                echo "macOS: notarizing with the App Store Connect API key."
+              elif [ -n "$APPLE_ID" ]; then
+                echo "macOS: notarizing with the Apple ID."
+              else
+                echo "::warning::macOS app is signed but not notarized: add the APPLE_* secrets."
+              fi
+            else
+              echo "::warning::No MAC_CERTIFICATE secret: building an unsigned macOS app (auto-updates will not install on macOS)."
+              echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+            fi
+          else
+            if [ -n "$AZURE_CLIENT_ID" ]; then
+              echo "Windows: signing with Azure Trusted Signing."
+              args="-c.win.azureSignOptions.endpoint=$AZURE_SIGNING_ENDPOINT -c.win.azureSignOptions.codeSigningAccountName=$AZURE_SIGNING_ACCOUNT -c.win.azureSignOptions.certificateProfileName=$AZURE_CERTIFICATE_PROFILE"
+              echo "AZURE_PUBLISHER_NAME=$AZURE_PUBLISHER_NAME" >> "$GITHUB_ENV"
+            elif [ -n "$WINDOWS_CERTIFICATE" ]; then
+              echo "Windows: signing with the .pfx certificate."
+            else
+              echo "::warning::No Windows signing secrets: building an unsigned installer (SmartScreen will warn)."
+              echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+            fi
+          fi
+          echo "args=$args" >> "$GITHUB_OUTPUT"
+
+      - name: Build release files
+        shell: bash
+        run: |
+          # Missing secrets arrive as empty strings; electron-builder would read an
+          # empty CSC_LINK as a path (the project folder) and stop.
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID APPLE_API_KEY_ID \
+            APPLE_API_ISSUER WIN_CSC_LINK WIN_CSC_KEY_PASSWORD AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET; do
+            if [ -z "${!name}" ]; then unset "$name"; fi
+          done
+          if [ -n "$AZURE_PUBLISHER_NAME" ]; then
+            ${{ matrix.build-command }} ${{ steps.signing.outputs.args }} "-c.win.azureSignOptions.publisherName=$AZURE_PUBLISHER_NAME"
+          else
+            ${{ matrix.build-command }} ${{ steps.signing.outputs.args }}
+          fi
+        env:
+          # macOS: Developer ID Application certificate (.p12, base64) and notarization.
+          # (only on the Mac runner: electron-builder would otherwise try it on Windows too)
+          CSC_LINK: ${{ matrix.platform == 'macOS' && secrets.MAC_CERTIFICATE || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'macOS' && secrets.MAC_CERTIFICATE_PASSWORD || '' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          # Windows: either a code signing certificate (.pfx, base64)...
+          WIN_CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          # ...or Azure Trusted Signing.
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Check the signatures
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "macOS" ]; then
+            app=$(find dist -maxdepth 3 -name "*.app" -type d | head -1)
+            if [ -n "$app" ] && codesign --verify --deep --strict "$app" 2>/dev/null; then
+              codesign -dv "$app" 2>&1 | grep -E "Authority|TeamIdentifier" | head -3 || true
+              spctl --assess --type execute -vv "$app" 2>&1 || echo "::warning::Gatekeeper does not accept the app yet (not notarized?)."
+            else
+              echo "macOS app is not signed."
+            fi
+          else
+            pwsh -NoProfile -Command 'Get-ChildItem dist/*.exe | ForEach-Object { $s = Get-AuthenticodeSignature $_.FullName; "{0}: {1} {2}" -f $_.Name, $s.Status, $s.SignerCertificate.Subject }'
+          fi
 
       - name: Verify updater manifest assets
         run: node tests/verify-release-assets.js "${{ matrix.update-manifest }}"
@@ -117,6 +198,9 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
+          # Tags with a dash (v2.2.0-beta.1) are pre-releases, so the in-app updater
+          # keeps offering the latest stable release to everyone else.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           files: |
             release-assets/*
