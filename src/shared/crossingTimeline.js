@@ -27,6 +27,9 @@
   // Deciding what a lone GAP column means: GAP to the leader never goes down
   // along the order of cars on the same lap; a time to the car ahead often does.
   const MIN_GAP_VOTES = 12;
+  // A car is overdue at the line when it has not crossed this long after it
+  // would have at the last known gap (allows for a poll and a late update).
+  const OVERDUE_MS = 10000;
 
   const key = (value) => String(value ?? '').trim();
 
@@ -283,7 +286,7 @@
       });
     });
     assignLapNumbers(resolved, cars);
-    return { crossings: resolved, conflicts };
+    return { crossings: resolved, conflicts, pollAt: timeline?.pollAt ?? null };
   }
 
   // Lap numbers: shown counts anchor a run; runs without a count borrow the lap
@@ -346,12 +349,35 @@
     if (!a || !b) return null;
     const gapMs = b.at - a.at;
     const exact = a.group === b.group;
+    const stale = overdueGap(resolvedTimeline.pollAt, ours, theirs, ourLatest, theirLatest, lap, gapMs);
+    if (stale) return stale;
     // Laps down: crossings the leading car made before the other reached this lap.
     const leader = gapMs >= 0 ? ours : theirs;
     const trailingAt = gapMs >= 0 ? b.at : a.at;
     const lapsDown = leader.filter((item) => item.lap > lap && item.at <= trailingAt).length;
     return { gapMs: Math.round(gapMs), lapsDown, lap, exact,
       uncertaintyMs: exact ? 0 : Math.round(a.uncertaintyMs + b.uncertaintyMs) };
+  }
+
+  // One car crossed the line again after the last common lap and the other is
+  // long overdue (stopped, in the pits): the gap at that lap is out of date.
+  // The other car's next crossing is still to come, so the gap is at least the
+  // time since the first car crossed that next lap.
+  function overdueGap(now, ours, theirs, ourLatest, theirLatest, lap, gapMs) {
+    if (!Number.isFinite(now) || ourLatest.lap === theirLatest.lap) return null;
+    const oursMoved = ourLatest.lap > theirLatest.lap;
+    const moved = oursMoved ? ours : theirs;
+    const next = moved.find((item) => item.lap === lap + 1);
+    if (!next) return null;
+    const atLeastMs = now - next.at;
+    // Gap of the overdue car behind the car that moved on, at the common lap.
+    const known = oursMoved ? gapMs : -gapMs;
+    if (atLeastMs <= known + OVERDUE_MS) return null;
+    // A car a few seconds late (a spin) is not laps down yet; one more than a
+    // full lap behind shows the lap counts, as the timing page does.
+    const lapMs = Number.isFinite(next.lapMs) ? next.lapMs : Infinity;
+    return { gapMs: Math.round(oursMoved ? atLeastMs : -atLeastMs), atLeast: true,
+      lapsDown: atLeastMs >= lapMs ? Math.abs(ourLatest.lap - theirLatest.lap) : 0, lap, exact: false, uncertaintyMs: 0 };
   }
 
   return { createTimeline, observePoll, resolve, gapBetween, readGapCell, parseClockMs };

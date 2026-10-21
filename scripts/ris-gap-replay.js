@@ -62,7 +62,7 @@ function evaluate(file, followedCars) {
   const results = {};
   for (const [label, disable] of [['old', true], ['new', false]]) {
     const views = run(polls, followedCars, disable);
-    let asked = 0, known = 0, compared = 0;
+    let asked = 0, known = 0, compared = 0, atLeast = 0;
     const errors = [];
     views.forEach(({ at, viewsByCar }) => followedCars.forEach((car) => ['ahead', 'behind'].forEach((relation) => {
       const item = viewsByCar[car]?.[relation];
@@ -70,12 +70,15 @@ function evaluate(file, followedCars) {
       asked += 1;
       if (!Number.isFinite(item.gapMs)) return;
       known += 1;
+      // "At least": the rival is overdue at the line, so the last common lap
+      // (the truth used here) is out of date by design.
+      if (item.atLeast) { atLeast += 1; return; }
       const truth = truthAt(car, item.rivalCarNumber, at);
       if (Number.isFinite(truth)) { compared += 1; errors.push(Math.abs(item.gapMs - truth)); }
     })));
     errors.sort((a, b) => a - b);
     const pct = (p) => errors.length ? errors[Math.min(errors.length - 1, Math.floor(errors.length * p))] : null;
-    results[label] = { gapKnownShare: asked ? +(known / asked).toFixed(3) : 0, compared,
+    results[label] = { gapKnownShare: asked ? +(known / asked).toFixed(3) : 0, atLeastShare: asked ? +(atLeast / asked).toFixed(3) : 0, compared,
       medianErrorMs: pct(0.5), p90ErrorMs: pct(0.9), p99ErrorMs: pct(0.99), maxErrorMs: errors.at(-1) ?? null };
   }
   return results;

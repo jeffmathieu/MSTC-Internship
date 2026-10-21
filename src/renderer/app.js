@@ -1267,8 +1267,12 @@ function describeClassGap(item) {
   if (item.source === 'calibrating') return { text: 'calibrating…', className: 'gap-muted' };
   if (!Number.isFinite(item.gapToUsMs)) return { text: '—', className: 'gap-muted' };
   const sign = item.gapToUsMs < 0 ? '-' : '+';
-  const approx = item.estimated ? '~' : '';
+  // ">" = the car has not crossed the line since: the gap is at least this.
+  const approx = item.atLeast ? '>' : item.estimated ? '~' : '';
   const laps = Number(item.lapGap) > 0 ? `${item.lapGap}L · ` : '';
+  // Laps down and not crossing the line: the lap count says it, a time would
+  // only tick up with every poll.
+  if (item.atLeast && laps) return { text: `${item.lapGap}L`, className: item.gapToUsMs < 0 ? 'gap-ahead' : 'gap-behind' };
   return { text: `${laps}${approx}${sign}${formatGapClock(item.gapToUsMs)}`, className: item.gapToUsMs < 0 ? 'gap-ahead' : 'gap-behind' };
 }
 
@@ -1307,7 +1311,7 @@ function renderClassGaps(state = currentState) {
     const item = byCar.get(String(row.carNumber));
     const isOurs = String(row.carNumber) === String(car);
     const gap = isOurs ? { text: 'OUR CAR', className: '' } : describeClassGap(item);
-    const interval = previous && Number.isFinite(item?.gapToUsMs) && Number.isFinite(previous.gapToUsMs)
+    const interval = previous && !item?.atLeast && !previous.atLeast && Number.isFinite(item?.gapToUsMs) && Number.isFinite(previous.gapToUsMs)
       ? `+${formatGapClock(item.gapToUsMs - previous.gapToUsMs)}` : '—';
     // GetRaceResults shows "In Pit" in E.T.A.; RIS uses STATE "IN" (or "PIT").
     const inPit = /^(in|p|pit|in pit|f|fuel)$/i.test(String(row.state || '').trim()) || /in\s*pit/i.test(String(row.eta || ''));

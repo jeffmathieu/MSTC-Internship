@@ -168,6 +168,35 @@ assert.ok(coordinate.lapGap >= 1);
   assert.ok(late.every((line) => line === late[0]), 'constant gaps never move between crossings');
 }
 
+// A car that stops after crossing the line just behind us (#70 on lap 4):
+// once it is overdue the old lap-4 gap is out of date. The gap is then "at
+// least" the time since we crossed the next lap, and laps down follow the lap
+// counts once it is more than a lap behind.
+{
+  const at = (ms) => new Date(Date.parse('2026-10-21T13:00:00.000Z') + ms).toISOString();
+  const offsets = { L: 0, US: 2963, R: 4785 };
+  const stopsAfter = { R: 4 };
+  const crossAt = (car, lap) => 7000 + lap * 93000 + offsets[car];
+  const lapsAt = (car, t) => [...Array(12).keys()].filter((lap) => lap > 0 && lap <= (stopsAfter[car] ?? 99) && crossAt(car, lap) <= t).length;
+  let state = timeline.createTimeline();
+  const snapshots = {};
+  for (let t = 5000; t <= 7 * 93000; t += 5000) {
+    const rows = ['L', 'US', 'R'].map((car) => ({ carNumber: car, lapNumber: lapsAt(car, t), lastLap: '1:33.000', diff: '', interval: '' }))
+      .sort((a, b) => b.lapNumber - a.lapNumber || offsets[a.carNumber] - offsets[b.carNumber])
+      .map((row, index, list) => ({ ...row, position: index + 1,
+        gap: index === 0 ? `-- ${row.lapNumber} laps --` : row.lapNumber === list[0].lapNumber ? (offsets[row.carNumber] / 1000).toFixed(3) : `-- ${row.lapNumber} laps --` }));
+    state = timeline.observePoll(state, rows, at(t));
+    snapshots[t] = timeline.gapBetween(timeline.resolve(state), 'US', 'R');
+  }
+  const first = Object.entries(snapshots).find(([t]) => Number(t) > crossAt('R', 4) + 5000)[1];
+  assert.strictEqual(first.gapMs, offsets.R - offsets.US, 'right after lap 4: the exact gap');
+  assert.ok(!first.atLeast);
+  const final = snapshots[7 * 93000 - (7 * 93000) % 5000];
+  assert.strictEqual(final.atLeast, true, 'overdue: the lap-4 gap is no longer used');
+  assert.ok(final.gapMs > 93000, 'at least the time since we crossed lap 5');
+  assert.strictEqual(final.lapsDown, 2, 'more than a lap behind: lap counts 6 against 4');
+}
+
 // Parsing the gap cell
 assert.deepStrictEqual(timeline.readGapCell('-- 113 laps --'), { kind: 'laps', laps: 113 });
 assert.deepStrictEqual(timeline.readGapCell('1:22.126'), { kind: 'time', ms: 82126 });

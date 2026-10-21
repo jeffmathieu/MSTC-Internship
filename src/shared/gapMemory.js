@@ -156,6 +156,8 @@ function timelineGap(resolvedTimeline, followed, rival, relation) {
     gapMs: Math.abs(gap.gapMs),
     lapGap: gap.lapsDown,
     estimated: !gap.exact,
+    // The other car is overdue at the line: the gap is at least this much.
+    atLeast: Boolean(gap.atLeast),
     uncertaintyMs: gap.uncertaintyMs,
     source: 'line-crossing-timeline',
     confirmedAt: null
@@ -200,6 +202,7 @@ function buildView(rows, confirmedCars, followedCarNumber, pitByPair, options) {
       gapMs: gap?.gapMs ?? null,
       lapGap: gap?.lapGap ?? null,
       estimated: gap?.estimated ?? true,
+      atLeast: Boolean(gap?.atLeast),
       uncertaintyMs: gap?.uncertaintyMs ?? null,
       source: gap?.source || 'unavailable',
       confirmedAt: gap?.confirmedAt || null,
@@ -222,6 +225,7 @@ function buildView(rows, confirmedCars, followedCarNumber, pitByPair, options) {
       uncertaintyMs: gap?.uncertaintyMs ?? null,
       lapGap: gap?.lapGap ?? null,
       estimated: gap?.estimated ?? true,
+      atLeast: Boolean(gap?.atLeast),
       source: gap?.source || 'unavailable'
     };
   });
